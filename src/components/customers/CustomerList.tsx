@@ -337,11 +337,22 @@ export const CustomerList: React.FC<CustomerListProps> = ({
                       {/* Actions */}
                       <td className="py-3 px-4 text-right">
                         <div className="flex items-center justify-end gap-1">
+                          {customer.status === 'pending_approval' && (
+                            <button
+                              onClick={() => toggleCustomerStatus(customer.id, 'active')}
+                              className="flex items-center gap-1 px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold shadow-md shadow-emerald-600/30 transition-all cursor-pointer"
+                              title="Quick Approve & Grant Portal Access"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>Approve</span>
+                            </button>
+                          )}
+
                           {(customer.status === 'pending_install' || customer.status === 'pending_approval') && (
                             <button
                               onClick={() => setSelectedCustomerForProvision(customer)}
-                              className="p-1.5 bg-gradient-to-r from-cyan-600 to-emerald-600 hover:from-cyan-500 hover:to-emerald-500 text-white rounded-lg shadow-md transition-all animate-pulse"
-                              title="Review, Provision & Convert to Active Subscriber"
+                              className="p-1.5 bg-gradient-to-r from-cyan-600 to-emerald-600 hover:from-cyan-500 hover:to-emerald-500 text-white rounded-lg shadow-md transition-all cursor-pointer"
+                              title="Review, Provision Fiber Line & Convert to Active Subscriber"
                             >
                               <Zap className="w-3.5 h-3.5" />
                             </button>

@@ -9,7 +9,7 @@ import {
   onAuthStateChanged,
   User,
 } from 'firebase/auth';
-import { doc, setDoc, getDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc, query, where, getDocs, collection } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
 
 export type UserRole = 'admin' | 'tech' | 'subscriber';
@@ -25,6 +25,7 @@ export interface AppUserProfile {
   status?: 'active' | 'pending_approval' | 'suspended';
   planId?: string;
   planName?: string;
+  monthlyFee?: number;
   mobile?: string;
   address?: {
     street: string;
@@ -283,6 +284,61 @@ export const resetUserPassword = async (email: string): Promise<void> => {
 };
 
 /**
+ * Syncs a customer's approval/activation directly to their system_users profile
+ */
+export const syncCustomerApprovalToUser = async (
+  emailOrUid: string,
+  customerData?: { accountNo?: string; fullName?: string; planName?: string; planId?: string; mobile?: string }
+): Promise<void> => {
+  try {
+    // 1. Direct UID lookup in system_users
+    const userDocRef = doc(db, 'system_users', emailOrUid);
+    const userSnap = await getDoc(userDocRef);
+    if (userSnap.exists()) {
+      await setDoc(
+        userDocRef,
+        {
+          isApproved: true,
+          status: 'active',
+          accountNo: customerData?.accountNo || userSnap.data()?.accountNo,
+          displayName: customerData?.fullName || userSnap.data()?.displayName,
+          planId: customerData?.planId || userSnap.data()?.planId,
+          planName: customerData?.planName || userSnap.data()?.planName,
+          mobile: customerData?.mobile || userSnap.data()?.mobile,
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      );
+      return;
+    }
+
+    // 2. Lookup by email if emailOrUid is an email address
+    if (emailOrUid && emailOrUid.includes('@')) {
+      const q = query(collection(db, 'system_users'), where('email', '==', emailOrUid.toLowerCase().trim()));
+      const qSnap = await getDocs(q);
+      for (const docSnap of qSnap.docs) {
+        await setDoc(
+          doc(db, 'system_users', docSnap.id),
+          {
+            isApproved: true,
+            status: 'active',
+            accountNo: customerData?.accountNo || docSnap.data()?.accountNo,
+            displayName: customerData?.fullName || docSnap.data()?.displayName,
+            planId: customerData?.planId || docSnap.data()?.planId,
+            planName: customerData?.planName || docSnap.data()?.planName,
+            mobile: customerData?.mobile || docSnap.data()?.mobile,
+            updatedAt: new Date().toISOString(),
+          },
+          { merge: true }
+        );
+      }
+    }
+  } catch (err) {
+    console.warn('Could not sync customer approval to system_users:', err);
+  }
+};
+
+/**
  * Fetches user profile from Firestore or creates a default one
  */
 export const fetchOrCreateUserProfile = async (user: User): Promise<AppUserProfile> => {
@@ -291,7 +347,67 @@ export const fetchOrCreateUserProfile = async (user: User): Promise<AppUserProfi
     const snap = await getDoc(userDocRef);
 
     if (snap.exists()) {
-      const data = snap.data() as AppUserProfile;
+      let data = snap.data() as AppUserProfile;
+
+      // If user is a subscriber, verify whether Admin has already approved or activated their customer record
+      if (data.role === 'subscriber') {
+        let matchedCustomer: any = null;
+
+        // 1. Check customers collection by UID
+        try {
+          const custSnap = await getDoc(doc(db, 'customers', user.uid));
+          if (custSnap.exists()) {
+            matchedCustomer = custSnap.data();
+          }
+        } catch {
+          // ignore
+        }
+
+        // 2. If not found by UID, check customers collection by email
+        if (!matchedCustomer && user.email) {
+          try {
+            const custQuery = query(collection(db, 'customers'), where('email', '==', user.email.trim()));
+            const qSnap = await getDocs(custQuery);
+            if (!qSnap.empty) {
+              matchedCustomer = qSnap.docs[0].data();
+            }
+          } catch {
+            // ignore
+          }
+        }
+
+        // 3. Fallback: check local storage customers
+        if (!matchedCustomer && user.email) {
+          try {
+            const localCusts = JSON.parse(localStorage.getItem('swiftstream_customers') || '[]');
+            matchedCustomer = localCusts.find(
+              (c: any) =>
+                c.id === user.uid ||
+                (c.email && c.email.toLowerCase() === user.email?.toLowerCase()) ||
+                (data.accountNo && c.accountNo === data.accountNo)
+            );
+          } catch {
+            // ignore
+          }
+        }
+
+        // If customer record is found and NOT in pending_approval (e.g. active, pending_install, overdue, suspended)
+        if (matchedCustomer && matchedCustomer.status !== 'pending_approval') {
+          data = {
+            ...data,
+            isApproved: true,
+            status: 'active',
+            accountNo: matchedCustomer.accountNo || data.accountNo,
+            planId: matchedCustomer.planId || data.planId,
+            planName: matchedCustomer.planName || data.planName,
+            monthlyFee: matchedCustomer.monthlyFee || data.monthlyFee,
+            mobile: matchedCustomer.mobile || data.mobile,
+            displayName: user.displayName || matchedCustomer.fullName || data.displayName,
+          };
+          await setDoc(userDocRef, data, { merge: true });
+        }
+      }
+
       await setDoc(userDocRef, { lastLoginAt: new Date().toISOString() }, { merge: true });
       return data;
     }

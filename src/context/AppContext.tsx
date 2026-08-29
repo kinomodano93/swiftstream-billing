@@ -45,7 +45,7 @@ import {
   deleteFirestoreDoc,
   purgeFirestoreCollections,
 } from '../services/firestoreService';
-import { AppUserProfile, subscribeToAuth, signOutUser } from '../services/authService';
+import { AppUserProfile, subscribeToAuth, signOutUser, syncCustomerApprovalToUser } from '../services/authService';
 import {
   executePaymentWebhookPipeline,
   PaymentWebhookEvent,
@@ -545,12 +545,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       prev.map((c) => {
         if (c.id === id) {
           const isSynced = newStatus === 'active';
-          return {
+          const updated = {
             ...c,
             status: newStatus,
             network: { ...c.network, isMikrotikSynced: isSynced },
             updatedAt: new Date().toISOString(),
           };
+          saveFirestoreDoc(COLLECTIONS.CUSTOMERS, updated);
+          if (newStatus !== 'pending_approval') {
+            syncCustomerApprovalToUser(c.email || c.id, c);
+          }
+          return updated;
         }
         return c;
       })
@@ -616,6 +621,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             },
           };
           saveFirestoreDoc(COLLECTIONS.CUSTOMERS, updated);
+          syncCustomerApprovalToUser(customer.email || customer.id, updated);
           return updated;
         }
         return c;
