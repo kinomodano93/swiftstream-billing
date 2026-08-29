@@ -25,6 +25,7 @@ import { formatCurrency, formatDate, getInvoiceStatusBadge } from '../../utils/f
 import { generateInvoicePDF } from '../../utils/pdfGenerator';
 import { DailyRemittanceAudit } from './DailyRemittanceAudit';
 import { ThermalReceiptModal } from './ThermalReceiptModal';
+import { ConfirmDeleteModal } from '../common/ConfirmDeleteModal';
 
 interface InvoiceListProps {
   onOpenBatchBillingModal: () => void;
@@ -59,6 +60,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
     payment: Payment;
     invoice?: Invoice;
   } | null>(null);
+  const [invoiceToDelete, setInvoiceToDelete] = useState<Invoice | null>(null);
 
   const filteredInvoices = invoices.filter((inv) => {
     const matchesSearch =
@@ -421,12 +423,8 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
                           )}
 
                           <button
-                            onClick={() => {
-                              if (window.confirm(`Delete invoice ${inv.invoiceNumber}?`)) {
-                                deleteInvoice(inv.id);
-                              }
-                            }}
-                            className="p-1.5 bg-slate-800 text-rose-400 hover:bg-rose-600 hover:text-white rounded-lg transition-colors"
+                            onClick={() => setInvoiceToDelete(inv)}
+                            className="p-1.5 bg-slate-800 text-rose-400 hover:bg-rose-600 hover:text-white rounded-lg transition-colors cursor-pointer"
                             title="Delete Invoice"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -452,6 +450,22 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
           onClose={() => setSelectedPaymentForThermal(null)}
         />
       )}
+
+      {/* Confirmation Dialog for Invoice Deletion */}
+      <ConfirmDeleteModal
+        isOpen={!!invoiceToDelete}
+        title="Delete Billing Invoice"
+        itemName={invoiceToDelete ? `Invoice #${invoiceToDelete.invoiceNumber} — ₱${invoiceToDelete.totalAmount.toLocaleString()} (${invoiceToDelete.customerName})` : undefined}
+        description="Are you sure you want to permanently delete this invoice? The billing record and outstanding balance will be removed from your accounts ledger and Cloud Firestore."
+        confirmLabel="Yes, Delete Invoice"
+        onConfirm={() => {
+          if (invoiceToDelete) {
+            deleteInvoice(invoiceToDelete.id);
+            setInvoiceToDelete(null);
+          }
+        }}
+        onClose={() => setInvoiceToDelete(null)}
+      />
     </div>
   );
 };

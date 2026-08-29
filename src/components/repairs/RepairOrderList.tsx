@@ -16,6 +16,7 @@ import {
 import { useApp } from '../../context/AppContext';
 import { RepairOrder, RepairStatus } from '../../types';
 import { formatCurrency, formatDateTime, getRepairStatusBadge } from '../../utils/formatters';
+import { ConfirmDeleteModal } from '../common/ConfirmDeleteModal';
 
 interface RepairOrderListProps {
   onOpenRepairModal: (repair?: RepairOrder) => void;
@@ -31,6 +32,7 @@ export const RepairOrderList: React.FC<RepairOrderListProps> = ({
   const { repairOrders, updateRepairOrder, deleteRepairOrder, convertRepairToInvoice, searchTerm, setSearchTerm } = useApp();
 
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [orderToDelete, setOrderToDelete] = useState<RepairOrder | null>(null);
 
   const filteredRepairs = repairOrders.filter((rep) => {
     const matchesSearch =
@@ -216,12 +218,8 @@ export const RepairOrderList: React.FC<RepairOrderListProps> = ({
                       </button>
 
                       <button
-                        onClick={() => {
-                          if (window.confirm(`Delete repair ticket ${order.orderNumber}?`)) {
-                            deleteRepairOrder(order.id);
-                          }
-                        }}
-                        className="p-1.5 bg-slate-800 text-rose-400 hover:text-white hover:bg-rose-600 rounded-lg transition-colors"
+                        onClick={() => setOrderToDelete(order)}
+                        className="p-1.5 bg-slate-800 text-rose-400 hover:text-white hover:bg-rose-600 rounded-lg transition-colors cursor-pointer"
                         title="Delete Ticket"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -252,6 +250,22 @@ export const RepairOrderList: React.FC<RepairOrderListProps> = ({
           })
         )}
       </div>
+
+      {/* Confirmation Dialog for Repair Ticket Deletion */}
+      <ConfirmDeleteModal
+        isOpen={!!orderToDelete}
+        title="Delete Repair & Maintenance Ticket"
+        itemName={orderToDelete ? `Job Order #${orderToDelete.orderNumber} — ${orderToDelete.customerName} (${orderToDelete.issueDescription.slice(0, 40)}...)` : undefined}
+        description="Are you sure you want to permanently delete this repair ticket? The service log and technician dispatch history will be removed from your system."
+        confirmLabel="Yes, Delete Ticket"
+        onConfirm={() => {
+          if (orderToDelete) {
+            deleteRepairOrder(orderToDelete.id);
+            setOrderToDelete(null);
+          }
+        }}
+        onClose={() => setOrderToDelete(null)}
+      />
     </div>
   );
 };

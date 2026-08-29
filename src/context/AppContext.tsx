@@ -346,7 +346,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // --- Real-time Cloud Firestore Subscriptions ---
   useEffect(() => {
     const unsubCustomers = subscribeToCollection<Customer>(COLLECTIONS.CUSTOMERS, (data) => {
-      setCustomers(data || []);
+      if (!data || data.length === 0) {
+        setCustomers([]);
+        return;
+      }
+      const seen = new Set<string>();
+      const uniqueList: Customer[] = [];
+      for (const item of data) {
+        const key = item.email && item.email.includes('@') ? item.email.toLowerCase().trim() : (item.id || item.accountNo);
+        if (!seen.has(key)) {
+          seen.add(key);
+          uniqueList.push(item);
+        }
+      }
+      setCustomers(uniqueList);
     });
     const unsubInvoices = subscribeToCollection<Invoice>(COLLECTIONS.INVOICES, (data) => {
       setInvoices(data || []);
@@ -693,6 +706,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const target = invoices.find((inv) => inv.id === id);
     if (!target) return;
 
+    deleteFirestoreDoc(COLLECTIONS.INVOICES, id);
     setInvoices((prev) => prev.filter((inv) => inv.id !== id));
 
     // Deduct from customer balance if unpaid
@@ -700,7 +714,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setCustomers((prev) =>
         prev.map((c) => {
           if (c.id === target.customerId) {
-            return { ...c, balance: Math.max(0, c.balance - target.balanceDue) };
+            const updated = { ...c, balance: Math.max(0, c.balance - target.balanceDue) };
+            saveFirestoreDoc(COLLECTIONS.CUSTOMERS, updated);
+            return updated;
           }
           return c;
         })
@@ -1380,6 +1396,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deletePlan = (id: string) => {
+    deleteFirestoreDoc(COLLECTIONS.PLANS, id);
     setPlans((prev) => prev.filter((p) => p.id !== id));
     showToast('warning', 'Plan Deleted', 'Plan removed from catalog.');
   };
@@ -1388,15 +1405,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const addNapBox = (boxData: Omit<NapBox, 'id'>) => {
     const newBox: NapBox = { ...boxData, id: generateId('NAP') };
     setNapBoxes((prev) => [...prev, newBox]);
+    saveFirestoreDoc(COLLECTIONS.NAP_BOXES, newBox);
     showToast('success', 'NAP Box Deployed', `NAP Box "${newBox.code}" registered.`);
   };
 
   const updateNapBox = (id: string, updates: Partial<NapBox>) => {
-    setNapBoxes((prev) => prev.map((box) => (box.id === id ? { ...box, ...updates } : box)));
+    setNapBoxes((prev) =>
+      prev.map((box) => {
+        if (box.id === id) {
+          const updated = { ...box, ...updates };
+          saveFirestoreDoc(COLLECTIONS.NAP_BOXES, updated);
+          return updated;
+        }
+        return box;
+      })
+    );
     showToast('info', 'NAP Box Updated', 'NAP box configuration updated.');
   };
 
   const deleteNapBox = (id: string) => {
+    deleteFirestoreDoc(COLLECTIONS.NAP_BOXES, id);
     setNapBoxes((prev) => prev.filter((box) => box.id !== id));
     showToast('warning', 'NAP Box Removed', 'Fiber distribution point removed.');
   };
@@ -1405,6 +1433,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const addFiberCable = (cableData: Omit<FiberCable, 'id'>): FiberCable => {
     const newCable: FiberCable = { ...cableData, id: generateId('CBL') };
     setFiberCables((prev) => [...prev, newCable]);
+    saveFirestoreDoc(COLLECTIONS.FIBER_CABLES, newCable);
     logAuditEvent({
       userName: 'Admin Leonardo Flojo',
       action: 'FIBER_CABLE_DEPLOYED',
@@ -1418,11 +1447,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateFiberCable = (id: string, updates: Partial<FiberCable>) => {
-    setFiberCables((prev) => prev.map((c) => (c.id === id ? { ...c, ...updates } : c)));
+    setFiberCables((prev) =>
+      prev.map((c) => {
+        if (c.id === id) {
+          const updated = { ...c, ...updates };
+          saveFirestoreDoc(COLLECTIONS.FIBER_CABLES, updated);
+          return updated;
+        }
+        return c;
+      })
+    );
     showToast('info', 'Cable Route Updated', 'Fiber cable attributes saved.');
   };
 
   const deleteFiberCable = (id: string) => {
+    deleteFirestoreDoc(COLLECTIONS.FIBER_CABLES, id);
     setFiberCables((prev) => prev.filter((c) => c.id !== id));
     showToast('warning', 'Cable Removed', 'Fiber route deleted from GIS map.');
   };
@@ -1430,6 +1469,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const addFiberClosure = (closureData: Omit<FiberClosure, 'id'>): FiberClosure => {
     const newClosure: FiberClosure = { ...closureData, id: generateId('FJC') };
     setFiberClosures((prev) => [...prev, newClosure]);
+    saveFirestoreDoc(COLLECTIONS.FIBER_CLOSURES, newClosure);
     logAuditEvent({
       userName: 'Admin Leonardo Flojo',
       action: 'SPLICE_CLOSURE_DEPLOYED',
@@ -1443,17 +1483,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateFiberClosure = (id: string, updates: Partial<FiberClosure>) => {
-    setFiberClosures((prev) => prev.map((f) => (f.id === id ? { ...f, ...updates } : f)));
+    setFiberClosures((prev) =>
+      prev.map((f) => {
+        if (f.id === id) {
+          const updated = { ...f, ...updates };
+          saveFirestoreDoc(COLLECTIONS.FIBER_CLOSURES, updated);
+          return updated;
+        }
+        return f;
+      })
+    );
     showToast('info', 'Closure Updated', 'Splice enclosure specifications saved.');
   };
 
   const deleteFiberClosure = (id: string) => {
+    deleteFirestoreDoc(COLLECTIONS.FIBER_CLOSURES, id);
     setFiberClosures((prev) => prev.filter((f) => f.id !== id));
     showToast('warning', 'Closure Removed', 'Splice enclosure deleted from GIS map.');
   };
 
   const updateOltNode = (updates: Partial<OltPopNode>) => {
-    setOltNode((prev) => ({ ...prev, ...updates }));
+    setOltNode((prev) => {
+      const updated = { ...prev, ...updates };
+      saveFirestoreDoc(COLLECTIONS.OLT_NODES, updated);
+      return updated;
+    });
     showToast('info', 'OLT POP Updated', 'Central Office node parameters saved.');
   };
 
@@ -1465,16 +1519,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: new Date().toISOString(),
     };
     setRepairOrders((prev) => [newOrder, ...prev]);
+    saveFirestoreDoc(COLLECTIONS.REPAIR_ORDERS, newOrder);
     showToast('success', 'Job Order Created', `Repair Ticket #${newOrder.orderNumber} filed.`);
     return newOrder;
   };
 
   const updateRepairOrder = (id: string, updates: Partial<RepairOrder>) => {
-    setRepairOrders((prev) => prev.map((o) => (o.id === id ? { ...o, ...updates } : o)));
+    setRepairOrders((prev) =>
+      prev.map((o) => {
+        if (o.id === id) {
+          const updated = { ...o, ...updates };
+          saveFirestoreDoc(COLLECTIONS.REPAIR_ORDERS, updated);
+          return updated;
+        }
+        return o;
+      })
+    );
     showToast('info', 'Job Order Updated', 'Repair status saved.');
   };
 
   const deleteRepairOrder = (id: string) => {
+    deleteFirestoreDoc(COLLECTIONS.REPAIR_ORDERS, id);
     setRepairOrders((prev) => prev.filter((o) => o.id !== id));
     showToast('warning', 'Job Order Deleted', 'Repair record removed.');
   };
@@ -1643,16 +1708,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       id: generateId('MTK'),
     };
     setMikrotikDevices((prev) => [newDevice, ...prev]);
+    saveFirestoreDoc(COLLECTIONS.MIKROTIK_DEVICES, newDevice);
     showToast('success', 'MikroTik Device Added', `${newDevice.name} added to router fleet.`);
     return newDevice;
   };
 
   const updateMikrotikDevice = (id: string, updates: Partial<MikrotikDevice>) => {
-    setMikrotikDevices((prev) => prev.map((d) => (d.id === id ? { ...d, ...updates } : d)));
+    setMikrotikDevices((prev) =>
+      prev.map((d) => {
+        if (d.id === id) {
+          const updated = { ...d, ...updates };
+          saveFirestoreDoc(COLLECTIONS.MIKROTIK_DEVICES, updated);
+          return updated;
+        }
+        return d;
+      })
+    );
     showToast('info', 'Router Updated', 'MikroTik configuration saved.');
   };
 
   const deleteMikrotikDevice = (id: string) => {
+    deleteFirestoreDoc(COLLECTIONS.MIKROTIK_DEVICES, id);
     setMikrotikDevices((prev) => prev.filter((d) => d.id !== id));
     showToast('warning', 'Device Removed', 'MikroTik router removed from management fleet.');
   };
@@ -1698,6 +1774,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       id: generateId('EXP'),
     };
     setExpenses((prev) => [newExpense, ...prev]);
+    saveFirestoreDoc(COLLECTIONS.EXPENSES, newExpense);
     logAuditEvent({
       userName: expenseData.recordedBy || 'Admin Leonardo Flojo',
       action: 'EXPENSE_RECORDED',
@@ -1711,11 +1788,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateExpense = (id: string, updates: Partial<Expense>) => {
-    setExpenses((prev) => prev.map((exp) => (exp.id === id ? { ...exp, ...updates } : exp)));
+    setExpenses((prev) =>
+      prev.map((exp) => {
+        if (exp.id === id) {
+          const updated = { ...exp, ...updates };
+          saveFirestoreDoc(COLLECTIONS.EXPENSES, updated);
+          return updated;
+        }
+        return exp;
+      })
+    );
     showToast('info', 'Expense Updated', 'Expense voucher details have been updated.');
   };
 
   const deleteExpense = (id: string) => {
+    deleteFirestoreDoc(COLLECTIONS.EXPENSES, id);
     setExpenses((prev) => prev.filter((exp) => exp.id !== id));
     logAuditEvent({
       userName: 'Admin Leonardo Flojo',

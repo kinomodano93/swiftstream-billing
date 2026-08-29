@@ -3,12 +3,14 @@ import { Layers, Plus, Edit2, Trash2, Check, Zap, Wifi, ShieldCheck, X } from 'l
 import { useApp } from '../../context/AppContext';
 import { Plan } from '../../types';
 import { formatCurrency } from '../../utils/formatters';
+import { ConfirmDeleteModal } from '../common/ConfirmDeleteModal';
 
 export const PlanManager: React.FC = () => {
   const { plans, customers, addPlan, updatePlan, deletePlan } = useApp();
 
   const [showModal, setShowModal] = useState<boolean>(false);
   const [editingPlan, setEditingPlan] = useState<Plan | null>(null);
+  const [planToDelete, setPlanToDelete] = useState<Plan | null>(null);
 
   const [name, setName] = useState('');
   const [speedMbps, setSpeedMbps] = useState<number>(50);
@@ -169,12 +171,8 @@ export const PlanManager: React.FC = () => {
                   </button>
 
                   <button
-                    onClick={() => {
-                      if (window.confirm(`Delete plan ${plan.name}?`)) {
-                        deletePlan(plan.id);
-                      }
-                    }}
-                    className="p-1.5 bg-slate-800 text-rose-400 hover:text-white hover:bg-rose-600 rounded-lg transition-colors"
+                    onClick={() => setPlanToDelete(plan)}
+                    className="p-1.5 bg-slate-800 text-rose-400 hover:text-white hover:bg-rose-600 rounded-lg transition-colors cursor-pointer"
                     title="Delete Plan"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
@@ -308,6 +306,22 @@ export const PlanManager: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Confirmation Dialog for Plan Deletion */}
+      <ConfirmDeleteModal
+        isOpen={!!planToDelete}
+        title="Delete Fiber Subscription Plan"
+        itemName={planToDelete ? `${planToDelete.name} (${planToDelete.speedMbps} Mbps — ₱${planToDelete.monthlyFee}/mo)` : undefined}
+        description="Are you sure you want to permanently delete this plan? Subscribers currently on this plan will not be disconnected, but this package will no longer be available for new applications or rate upgrades."
+        confirmLabel="Yes, Delete Plan"
+        onConfirm={() => {
+          if (planToDelete) {
+            deletePlan(planToDelete.id);
+            setPlanToDelete(null);
+          }
+        }}
+        onClose={() => setPlanToDelete(null)}
+      />
     </div>
   );
 };

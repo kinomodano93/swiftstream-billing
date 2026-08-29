@@ -30,8 +30,9 @@ import {
   Check,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { Expense, ExpenseCategory } from '../../types';
+import { Expense, ExpenseCategory, Payment } from '../../types';
 import { formatCurrency } from '../../utils/formatters';
+import { ConfirmDeleteModal } from '../common/ConfirmDeleteModal';
 
 export const EXPENSE_CATEGORY_CONFIG: Record<
   ExpenseCategory,
@@ -115,6 +116,7 @@ export const FinancialReports: React.FC = () => {
   // Modal State
   const [showExpenseModal, setShowExpenseModal] = useState<boolean>(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
+  const [expenseToDelete, setExpenseToDelete] = useState<Expense | null>(null);
 
   // Expense Form State
   const [formCategory, setFormCategory] = useState<ExpenseCategory>('fiber_supplies');
@@ -154,6 +156,15 @@ export const FinancialReports: React.FC = () => {
   const netProfit = totalCollections - totalExpenses;
   const profitMarginPct = totalCollections > 0 ? ((netProfit / totalCollections) * 100).toFixed(1) : '0.0';
 
+  // Breakdown by Category
+  const expenseByCategory = expenses.reduce(
+    (acc, e) => {
+      acc[e.category] = (acc[e.category] || 0) + e.amount;
+      return acc;
+    },
+    {} as Record<ExpenseCategory, number>
+  );
+
   // AR Aging Calculation
   const now = new Date().getTime();
   let currentDue = 0;
@@ -179,6 +190,15 @@ export const FinancialReports: React.FC = () => {
     });
 
   const totalOutstandingAR = currentDue + aging1to30 + aging31to60 + aging60Plus;
+
+  // Collections by Payment Channel
+  const collectionsByChannel = payments.reduce(
+    (acc, p) => {
+      acc[p.paymentMethod] = (acc[p.paymentMethod] || 0) + p.amount;
+      return acc;
+    },
+    {} as Record<Payment['paymentMethod'], number>
+  );
 
   // Filtered Expenses
   const filteredExpenses = expenses.filter((e) => {
@@ -210,7 +230,7 @@ export const FinancialReports: React.FC = () => {
     setEditingExpense(exp);
     setFormCategory(exp.category);
     setFormDescription(exp.description);
-    setFormAmount(exp.amount.toString());
+    setFormAmount(String(exp.amount));
     setFormDate(exp.date);
     setFormPaymentMethod(exp.paymentMethod);
     setFormReceiptNumber(exp.receiptNumber || '');
@@ -223,12 +243,8 @@ export const FinancialReports: React.FC = () => {
   const handleSaveExpense = (e: React.FormEvent) => {
     e.preventDefault();
     const amountNum = parseFloat(formAmount);
-    if (isNaN(amountNum) || amountNum <= 0) {
-      alert('Please enter a valid expense amount.');
-      return;
-    }
-    if (!formDescription.trim()) {
-      alert('Please provide an expense description.');
+    if (!formDescription.trim() || isNaN(amountNum) || amountNum <= 0) {
+      alert('Please enter a valid expense description and positive amount.');
       return;
     }
 
@@ -261,10 +277,8 @@ export const FinancialReports: React.FC = () => {
     setShowExpenseModal(false);
   };
 
-  const handleDeleteExpense = (id: string, desc: string) => {
-    if (window.confirm(`Are you sure you want to delete expense "${desc}"?`)) {
-      deleteExpense(id);
-    }
+  const handleDeleteExpense = (exp: Expense) => {
+    setExpenseToDelete(exp);
   };
 
   // Comprehensive Financial & Expense CSV Export
@@ -807,8 +821,8 @@ export const FinancialReports: React.FC = () => {
                                 <Edit2 className="w-3.5 h-3.5" />
                               </button>
                               <button
-                                onClick={() => handleDeleteExpense(exp.id, exp.description)}
-                                className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-colors"
+                                onClick={() => handleDeleteExpense(exp)}
+                                className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
                                 title="Delete Expense Voucher"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
@@ -1078,6 +1092,22 @@ export const FinancialReports: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Confirmation Dialog for Expense Deletion */}
+      <ConfirmDeleteModal
+        isOpen={!!expenseToDelete}
+        title="Delete Expense Record"
+        itemName={expenseToDelete ? `${expenseToDelete.description} — ₱${expenseToDelete.amount.toLocaleString()} (${expenseToDelete.category.replace('_', ' ').toUpperCase()})` : undefined}
+        description="Are you sure you want to permanently delete this expense entry? It will be removed from your OPEX ledger, P&L statements, and Cloud Firestore."
+        confirmLabel="Yes, Delete Expense"
+        onConfirm={() => {
+          if (expenseToDelete) {
+            deleteExpense(expenseToDelete.id);
+            setExpenseToDelete(null);
+          }
+        }}
+        onClose={() => setExpenseToDelete(null)}
+      />
     </div>
   );
 };

@@ -156,44 +156,6 @@ export const signUpWithEmail = async (
   try {
     const userDocRef = doc(db, 'system_users', cred.user.uid);
     await setDoc(userDocRef, profile, { merge: true });
-
-    // If subscriber, also create customer record in customers collection with status 'pending_approval'
-    if (isSubscriber) {
-      const generatedAccountNo = options?.accountNo || `SWIFT-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`;
-      const customerDocRef = doc(db, 'customers', cred.user.uid);
-      await setDoc(customerDocRef, {
-        id: cred.user.uid,
-        accountNo: generatedAccountNo,
-        fullName,
-        email,
-        mobile: options?.mobile || '',
-        address: {
-          street: options?.address?.street || '',
-          barangay: options?.address?.barangay || 'Binauahan',
-          city: 'Lagonoy',
-          province: 'Camarines Sur',
-          landmark: options?.address?.landmark || '',
-        },
-        planId: options?.planId || 'plan-fib-35',
-        planName: options?.planName || 'Fiber Power 35 Mbps',
-        monthlyFee: options?.monthlyFee || 1299,
-        billingDay: 15,
-        status: 'pending_approval',
-        installationDate: options?.installationDate || new Date().toISOString().slice(0, 10),
-        balance: 0,
-        walletBalance: 0,
-        advanceDeposit: 0,
-        network: {
-          pppoeUsername: email.split('@')[0],
-          ipAddress: '192.168.10.1',
-          napBoxId: '',
-          napPortNumber: 0,
-          isMikrotikSynced: false,
-        },
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      }, { merge: true });
-    }
   } catch (error) {
     console.warn('Firestore user profile write warning:', error);
   }

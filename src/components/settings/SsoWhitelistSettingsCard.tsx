@@ -18,6 +18,7 @@ import {
   getAuthorizedAdminEmails,
   saveAuthorizedAdminEmails,
 } from '../../services/authService';
+import { ConfirmDeleteModal } from '../common/ConfirmDeleteModal';
 
 export const SsoWhitelistSettingsCard: React.FC = () => {
   const { businessProfile, updateBusinessProfile, showToast, logAuditEvent } = useApp();
@@ -31,6 +32,7 @@ export const SsoWhitelistSettingsCard: React.FC = () => {
   );
   const [loading, setLoading] = useState<boolean>(false);
   const [saveSuccess, setSaveSuccess] = useState<boolean>(false);
+  const [emailToDelete, setEmailToDelete] = useState<string | null>(null);
 
   useEffect(() => {
     const loadRemote = async () => {
@@ -212,8 +214,8 @@ export const SsoWhitelistSettingsCard: React.FC = () => {
 
               <button
                 type="button"
-                onClick={() => handleRemoveEmail(email)}
-                className="p-2 text-slate-500 hover:text-rose-400 hover:bg-rose-950/40 rounded-xl transition-colors"
+                onClick={() => setEmailToDelete(email)}
+                className="p-2 text-slate-500 hover:text-rose-400 hover:bg-rose-950/40 rounded-xl transition-colors cursor-pointer"
                 title="Revoke Administrator Authorization"
               >
                 <Trash2 className="w-4 h-4" />
@@ -233,6 +235,22 @@ export const SsoWhitelistSettingsCard: React.FC = () => {
           If any unauthorized Google account attempts to sign in via Google SSO, the session will be terminated immediately and denied access with an <em>Access Restricted</em> notification. Only the Gmail addresses listed above are permitted to manage billing, network hardware, and subscriber records.
         </p>
       </div>
+
+      {/* Confirmation Dialog for Email Revocation */}
+      <ConfirmDeleteModal
+        isOpen={!!emailToDelete}
+        title="Revoke Admin SSO Access"
+        itemName={emailToDelete || undefined}
+        description="Are you sure you want to remove this email from the authorized admin whitelist? This user will no longer be allowed to log into the NOC Administrator portal using Google Sign-In."
+        confirmLabel="Yes, Revoke Authorization"
+        onConfirm={() => {
+          if (emailToDelete) {
+            handleRemoveEmail(emailToDelete);
+            setEmailToDelete(null);
+          }
+        }}
+        onClose={() => setEmailToDelete(null)}
+      />
     </div>
   );
 };

@@ -20,6 +20,7 @@ import { useApp } from '../../context/AppContext';
 import { Customer, CustomerStatus } from '../../types';
 import { formatCurrency, formatPhoneNumber, getCustomerStatusBadge } from '../../utils/formatters';
 import { ProvisionModal } from './ProvisionModal';
+import { ConfirmDeleteModal } from '../common/ConfirmDeleteModal';
 
 interface CustomerListProps {
   onOpenCustomerModal: (customer?: Customer) => void;
@@ -47,6 +48,7 @@ export const CustomerList: React.FC<CustomerListProps> = ({
   const [barangayFilter, setBarangayFilter] = useState<string>('all');
   const [planFilter, setPlanFilter] = useState<string>('all');
   const [selectedCustomerForProvision, setSelectedCustomerForProvision] = useState<Customer | null>(null);
+  const [customerToDelete, setCustomerToDelete] = useState<Customer | null>(null);
 
   // Extract unique barangays
   const barangays = Array.from(new Set(customers.map((c) => c.address.barangay)));
@@ -378,12 +380,8 @@ export const CustomerList: React.FC<CustomerListProps> = ({
                           </button>
 
                           <button
-                            onClick={() => {
-                              if (window.confirm(`Delete subscriber ${customer.fullName} (${customer.accountNo})?`)) {
-                                deleteCustomer(customer.id);
-                              }
-                            }}
-                            className="p-1.5 bg-slate-800 text-rose-400 hover:bg-rose-600 hover:text-white rounded-lg transition-colors"
+                            onClick={() => setCustomerToDelete(customer)}
+                            className="p-1.5 bg-slate-800 text-rose-400 hover:bg-rose-600 hover:text-white rounded-lg transition-colors cursor-pointer"
                             title="Delete Subscriber"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -406,6 +404,22 @@ export const CustomerList: React.FC<CustomerListProps> = ({
           onClose={() => setSelectedCustomerForProvision(null)}
         />
       )}
+
+      {/* Confirmation Dialog for Customer Deletion */}
+      <ConfirmDeleteModal
+        isOpen={!!customerToDelete}
+        title="Delete Subscriber Account"
+        itemName={customerToDelete ? `${customerToDelete.fullName} (${customerToDelete.accountNo}) - Plan: ${customerToDelete.planName}` : undefined}
+        description="Are you sure you want to permanently delete this subscriber? This will remove all associated billing records, network allocations, and customer credentials from your active database and Cloud Firestore."
+        confirmLabel="Yes, Delete Subscriber"
+        onConfirm={() => {
+          if (customerToDelete) {
+            deleteCustomer(customerToDelete.id);
+            setCustomerToDelete(null);
+          }
+        }}
+        onClose={() => setCustomerToDelete(null)}
+      />
     </div>
   );
 };

@@ -31,6 +31,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { MikrotikDevice } from '../../types';
+import { ConfirmDeleteModal } from '../common/ConfirmDeleteModal';
 import {
   generatePppoeBatchScript,
   generateIsolationScript,
@@ -63,6 +64,7 @@ export const MikrotikDeviceManager: React.FC = () => {
   // Modals
   const [showAddEditModal, setShowAddEditModal] = useState<boolean>(false);
   const [editingDevice, setEditingDevice] = useState<MikrotikDevice | null>(null);
+  const [deviceToDelete, setDeviceToDelete] = useState<MikrotikDevice | null>(null);
 
   const [showScriptModal, setShowScriptModal] = useState<boolean>(false);
   const [scriptModalTab, setScriptModalTab] = useState<'pppoe' | 'isolation' | 'bootstrap'>('pppoe');
@@ -492,12 +494,8 @@ export const MikrotikDeviceManager: React.FC = () => {
                     </button>
                     {mikrotikDevices.length > 1 && (
                       <button
-                        onClick={() => {
-                          if (confirm(`Remove ${dev.name} from management fleet?`)) {
-                            deleteMikrotikDevice(dev.id);
-                          }
-                        }}
-                        className="p-1.5 hover:bg-rose-950 text-slate-400 hover:text-rose-300 rounded-lg transition-colors"
+                        onClick={() => setDeviceToDelete(dev)}
+                        className="p-1.5 hover:bg-rose-950 text-slate-400 hover:text-rose-300 rounded-lg transition-colors cursor-pointer"
                         title="Delete Device"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -1067,6 +1065,22 @@ export const MikrotikDeviceManager: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Confirmation Dialog for MikroTik Device Deletion */}
+      <ConfirmDeleteModal
+        isOpen={!!deviceToDelete}
+        title="Remove MikroTik Router from Fleet"
+        itemName={deviceToDelete ? `${deviceToDelete.name} (${deviceToDelete.ipAddress}:${deviceToDelete.port}) — Model: ${deviceToDelete.model}` : undefined}
+        description="Are you sure you want to remove this MikroTik router from your management fleet? Active customer sessions and telemetry polling for this hardware node will be stopped."
+        confirmLabel="Yes, Remove Device"
+        onConfirm={() => {
+          if (deviceToDelete) {
+            deleteMikrotikDevice(deviceToDelete.id);
+            setDeviceToDelete(null);
+          }
+        }}
+        onClose={() => setDeviceToDelete(null)}
+      />
     </div>
   );
 };
