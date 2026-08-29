@@ -12,7 +12,7 @@ import {
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
 
-export type UserRole = 'admin' | 'cashier' | 'tech' | 'subscriber';
+export type UserRole = 'admin' | 'tech' | 'subscriber';
 
 export interface AppUserProfile {
   uid: string;
@@ -37,6 +37,58 @@ export interface AppUserProfile {
 
 const googleProvider = new GoogleAuthProvider();
 
+// Default Pre-Authorized Administrator Emails (Can be updated in Settings)
+export const DEFAULT_AUTHORIZED_ADMIN_EMAILS = [
+  'swiftstream.telecom@gmail.com',
+  'admin@swiftstream.ph',
+];
+
+/**
+ * Fetches pre-authorized admin emails from Firestore / LocalStorage
+ */
+export const getAuthorizedAdminEmails = async (): Promise<string[]> => {
+  try {
+    const configDoc = doc(db, 'system_config', 'auth_whitelist');
+    const snap = await getDoc(configDoc);
+    if (snap.exists() && Array.isArray(snap.data()?.emails)) {
+      return snap.data().emails;
+    }
+  } catch (err) {
+    console.warn('Could not load remote admin whitelist, using local defaults:', err);
+  }
+
+  const stored = localStorage.getItem('swiftstream_authorized_admin_emails');
+  if (stored) {
+    try {
+      return JSON.parse(stored);
+    } catch {
+      // ignore
+    }
+  }
+
+  return DEFAULT_AUTHORIZED_ADMIN_EMAILS;
+};
+
+/**
+ * Saves authorized admin emails to Firestore and LocalStorage
+ */
+export const saveAuthorizedAdminEmails = async (emails: string[]): Promise<void> => {
+  localStorage.setItem('swiftstream_authorized_admin_emails', JSON.stringify(emails));
+  try {
+    const configDoc = doc(db, 'system_config', 'auth_whitelist');
+    await setDoc(
+      configDoc,
+      {
+        emails,
+        updatedAt: new Date().toISOString(),
+      },
+      { merge: true }
+    );
+  } catch (err) {
+    console.warn('Could not write remote admin whitelist:', err);
+  }
+};
+
 /**
  * Sign In with Email and Password
  */
@@ -60,7 +112,7 @@ export const signUpWithEmail = async (
   email: string,
   password: string,
   fullName: string,
-  role: UserRole = 'admin',
+  role: UserRole = 'subscriber',
   options?: {
     accountNo?: string;
     planId?: string;
@@ -158,18 +210,99 @@ export const signUpWithEmail = async (
 };
 
 /**
- * Sign In with Google Popup
+ * Sign In with Google Popup (Protected with Pre-Authorized Admin Whitelist)
  */
 export const signInWithGoogle = async (): Promise<AppUserProfile> => {
   const cred = await signInWithPopup(auth, googleProvider);
-  const profile = await fetchOrCreateUserProfile(cred.user);
+  const user = cred.user;
+  const userEmail = (user.email || '').toLowerCase().trim();
 
-  if (profile.role === 'subscriber' && (profile.status === 'pending_approval' || profile.isApproved === false)) {
-    await signOut(auth);
-    throw new Error('Your subscriber registration is currently under review by our Admin team. Please wait for approval.');
+  const authorizedAdmins = (await getAuthorizedAdminEmails()).map((e) => e.toLowerCase().trim());
+  const isAuthorizedAdmin = authorizedAdmins.includes(userEmail);
+
+  // Check if profile exists in Firestore system_users
+  const userDocRef = doc(db, 'system_users', user.uid);
+  const snap = await getDoc(userDocRef);
+
+  if (snap.exists()) {
+    const data = snap.data() as AppUserProfile;
+
+    // If Admin/Staff: verify whitelist authorization
+    if (data.role === 'admin' || data.role === 'tech') {
+      if (!isAuthorizedAdmin && data.isApproved === false) {
+        await signOut(auth);
+        throw new Error(`Access Restricted: The Google account "${userEmail}" is not pre-authorized for SwiftStream Admin access.`);
+      }
+      await setDoc(userDocRef, { lastLoginAt: new Date().toISOString() }, { merge: true });
+      return data;
+    }
+
+    // If Subscriber: check approval status
+    if (data.role === 'subscriber') {
+      if (data.status === 'pending_approval' || data.isApproved === false) {
+        await signOut(auth);
+        throw new Error('Your subscriber registration is currently under review by our Admin team. Please wait for approval.');
+      }
+      await setDoc(userDocRef, { lastLoginAt: new Date().toISOString() }, { merge: true });
+      return data;
+    }
   }
 
-  return profile;
+  // If newly signing in via Google and email is in the Authorized Admin Whitelist:
+  if (isAuthorizedAdmin) {
+    const adminProfile: AppUserProfile = {
+      uid: user.uid,
+      email: user.email,
+      displayName: user.displayName || userEmail.split('@')[0],
+      role: 'admin',
+      isApproved: true,
+      status: 'active',
+      photoURL: user.photoURL,
+      createdAt: new Date().toISOString(),
+      lastLoginAt: new Date().toISOString(),
+    };
+
+    try {
+      await setDoc(userDocRef, adminProfile, { merge: true });
+    } catch (err) {
+      console.warn('Could not save admin profile to Firestore:', err);
+    }
+
+    return adminProfile;
+  }
+
+  // Check if user is an existing customer in customers collection
+  try {
+    const customerDocRef = doc(db, 'customers', user.uid);
+    const custSnap = await getDoc(customerDocRef);
+    if (custSnap.exists()) {
+      const custData = custSnap.data();
+      if (custData.status === 'pending_approval') {
+        await signOut(auth);
+        throw new Error('Your connection application is currently under review by our Admin team.');
+      }
+      const subscriberProfile: AppUserProfile = {
+        uid: user.uid,
+        email: user.email,
+        displayName: user.displayName || custData.fullName,
+        role: 'subscriber',
+        accountNo: custData.accountNo,
+        isApproved: true,
+        status: 'active',
+        photoURL: user.photoURL,
+        createdAt: new Date().toISOString(),
+        lastLoginAt: new Date().toISOString(),
+      };
+      await setDoc(userDocRef, subscriberProfile, { merge: true });
+      return subscriberProfile;
+    }
+  } catch {
+    // ignore
+  }
+
+  // Not an authorized admin & not an approved subscriber -> BLOCK SSO ACCESS
+  await signOut(auth);
+  throw new Error(`Access Denied: The Google account "${userEmail}" is not pre-authorized for SwiftStream SSO access. Only pre-authorized Administrator Gmail accounts are permitted.`);
 };
 
 /**
@@ -200,14 +333,17 @@ export const fetchOrCreateUserProfile = async (user: User): Promise<AppUserProfi
       return data;
     }
 
-    const isOwner = user.email?.includes('admin') || user.email?.includes('swiftstream') || false;
+    const userEmail = (user.email || '').toLowerCase().trim();
+    const authorizedAdmins = (await getAuthorizedAdminEmails()).map((e) => e.toLowerCase().trim());
+    const isOwner = authorizedAdmins.includes(userEmail) || userEmail.includes('admin');
+
     const defaultProfile: AppUserProfile = {
       uid: user.uid,
       email: user.email,
       displayName: user.displayName || user.email?.split('@')[0] || 'SwiftStream Staff',
-      role: isOwner ? 'admin' : 'cashier',
-      isApproved: true,
-      status: 'active',
+      role: 'admin',
+      isApproved: isOwner,
+      status: isOwner ? 'active' : 'pending_approval',
       photoURL: user.photoURL,
       createdAt: new Date().toISOString(),
       lastLoginAt: new Date().toISOString(),
@@ -239,11 +375,15 @@ export const subscribeToAuth = (
 ) => {
   return onAuthStateChanged(auth, async (user) => {
     if (user) {
-      const profile = await fetchOrCreateUserProfile(user);
-      if (profile.role === 'subscriber' && (profile.status === 'pending_approval' || profile.isApproved === false)) {
+      try {
+        const profile = await fetchOrCreateUserProfile(user);
+        if (profile.role === 'subscriber' && (profile.status === 'pending_approval' || profile.isApproved === false)) {
+          onUserChanged(null);
+        } else {
+          onUserChanged(profile);
+        }
+      } catch {
         onUserChanged(null);
-      } else {
-        onUserChanged(profile);
       }
     } else {
       onUserChanged(null);

@@ -100,7 +100,7 @@ export const PaymentList: React.FC<PaymentListProps> = ({
         <div>
           <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2">
             <CreditCard className="w-5 h-5 text-emerald-400" />
-            <span>Cashier Collections & Payment Register</span>
+            <span>Admin Collections & Payment Register</span>
           </h2>
           <p className="text-xs text-slate-400 mt-1">
             Track GCash, Maya, Cash, and Bank deposits with instant Official Receipts (OR).
@@ -111,7 +111,7 @@ export const PaymentList: React.FC<PaymentListProps> = ({
           <button
             onClick={() => setShowEODModal(true)}
             className="flex items-center gap-1.5 px-3 py-2 bg-emerald-950/70 hover:bg-emerald-900 text-emerald-300 border border-emerald-500/40 rounded-xl text-xs font-semibold transition-all hover:scale-105"
-            title="Generate Cashier Shift End-of-Day (EOD) Z-Reading"
+            title="Generate Admin End-of-Day (EOD) Z-Reading"
           >
             <Receipt className="w-3.5 h-3.5 text-emerald-400" />
             <span>EOD Z-Reading</span>
@@ -255,7 +255,7 @@ export const PaymentList: React.FC<PaymentListProps> = ({
                     <th className="py-3.5 px-4">Reference No.</th>
                     <th className="py-3.5 px-4">Invoice Applied</th>
                     <th className="py-3.5 px-4">Amount Paid</th>
-                    <th className="py-3.5 px-4">Cashier</th>
+                    <th className="py-3.5 px-4">Admin / Collector</th>
                     <th className="py-3.5 px-4 text-right">Actions</th>
                   </tr>
                 </thead>

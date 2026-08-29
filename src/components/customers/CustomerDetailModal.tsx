@@ -457,7 +457,7 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
                         <th className="py-3 px-4">Channel / Method</th>
                         <th className="py-3 px-4">Reference No</th>
                         <th className="py-3 px-4">Amount Paid</th>
-                        <th className="py-3 px-4">Cashier</th>
+                        <th className="py-3 px-4">Admin / Collector</th>
                         <th className="py-3 px-4 text-right">Receipt</th>
                       </tr>
                     </thead>

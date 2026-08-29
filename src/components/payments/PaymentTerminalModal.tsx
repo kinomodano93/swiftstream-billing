@@ -343,10 +343,10 @@ export const PaymentTerminalModal: React.FC<PaymentTerminalModalProps> = ({
             </div>
           )}
 
-          {/* Cashier / Staff Name */}
+          {/* Administrator / Collector Name */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-slate-400 mb-1 font-medium">Cashier / Collector Name</label>
+              <label className="block text-slate-400 mb-1 font-medium">Administrator / Collector Name</label>
               <input
                 type="text"
                 value={cashierName}

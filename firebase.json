@@ -2,25 +2,32 @@
   "firestore": {
     "rules": "firestore.rules"
   },
-  "auth": {
-    "providers": {
-      "emailPassword": true,
-      "googleSignIn": {
-        "oAuthBrandDisplayName": "SwiftStream Fiber Internet",
-        "supportEmail": "admin@swiftstream.ph",
-        "authorizedRedirectUris": [
-          "https://swiftstream-portal.firebaseapp.com/__/auth/handler",
-          "http://localhost"
-        ]
-      }
-    }
-  },
   "hosting": {
     "public": "dist",
     "ignore": [
       "firebase.json",
       "**/.*",
       "**/node_modules/**"
+    ],
+    "headers": [
+      {
+        "source": "/**",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache, no-store, must-revalidate"
+          }
+        ]
+      },
+      {
+        "source": "/assets/**",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "max-age=31536000, immutable"
+          }
+        ]
+      }
     ],
     "rewrites": [
       {

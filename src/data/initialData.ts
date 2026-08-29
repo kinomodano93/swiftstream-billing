@@ -141,6 +141,11 @@ export const initialBusinessProfile: BusinessProfile = {
     lastTestStatus: 'success',
     lastTestedAt: '2026-08-28 09:15:00',
   },
+  authorizedAdminEmails: [
+    'swiftstream.telecom@gmail.com',
+    'admin@swiftstream.ph',
+  ],
+  enforceSsoRestriction: true,
   currencySymbol: '₱',
   currencyCode: 'PHP',
   invoiceGracePeriodDays: 5,

@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "deploy": "npm run build && npx firebase-tools deploy",
+    "deploy:hosting": "npm run build && npx firebase-tools deploy --only hosting",
+    "deploy:firestore": "npx firebase-tools deploy --only firestore:rules"
   },
   "dependencies": {
     "canvas-confetti": "^1.9.4",

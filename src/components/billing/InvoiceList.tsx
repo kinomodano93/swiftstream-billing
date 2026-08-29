@@ -123,10 +123,10 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
         <div>
           <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2">
             <FileText className="w-5 h-5 text-cyan-400" />
-            <span>Billing, Invoices & Cashier Hub</span>
+            <span>Billing, Invoices & Admin POS Hub</span>
           </h2>
           <p className="text-xs text-slate-400 mt-1">
-            Statement of accounts, advance credit wallet proration, POS thermal receipts, and daily cashier remittance audits.
+            Statement of accounts, advance credit wallet proration, POS thermal receipts, and daily collection remittance audits.
           </p>
         </div>
 
@@ -181,7 +181,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
           }`}
         >
           <DollarSign className="w-4 h-4" />
-          <span>💰 Daily Cashier Remittance & Drawer</span>
+          <span>💰 Daily Admin Remittance & Drawer</span>
         </button>
       </div>
 

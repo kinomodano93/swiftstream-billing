@@ -82,6 +82,8 @@ export interface BusinessProfile {
   smsGateway?: SmsGatewayConfig;
   staffWebhooks?: StaffWebhooksConfig;
   smtp?: SmtpConfig;
+  authorizedAdminEmails?: string[];
+  enforceSsoRestriction?: boolean;
   currencySymbol: string;
   currencyCode: string;
   invoiceGracePeriodDays: number;

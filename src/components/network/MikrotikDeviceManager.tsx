@@ -38,6 +38,7 @@ import {
 } from '../../utils/sstpService';
 import { MikrotikTelemetryViewer } from './MikrotikTelemetryViewer';
 import { PppoeManager } from './PppoeManager';
+import { MikrotikLiveBridge } from './MikrotikLiveBridge';
 
 export const MikrotikDeviceManager: React.FC = () => {
   const {
@@ -53,7 +54,7 @@ export const MikrotikDeviceManager: React.FC = () => {
   } = useApp();
 
   // Navigation Sub-tab
-  const [activeSubTab, setActiveSubTab] = useState<'telemetry' | 'pppoe' | 'fleet' | 'diagnostics'>('telemetry');
+  const [activeSubTab, setActiveSubTab] = useState<'bridge' | 'telemetry' | 'pppoe' | 'fleet' | 'diagnostics'>('bridge');
 
   // Search & Filter
   const [searchTerm, setSearchTerm] = useState<string>('');
@@ -270,6 +271,18 @@ export const MikrotikDeviceManager: React.FC = () => {
       {/* SUB-NAVIGATION TABS */}
       <div className="flex flex-wrap items-center gap-3 border-b border-slate-800 pb-4">
         <button
+          onClick={() => setActiveSubTab('bridge')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-bold transition-all ${
+            activeSubTab === 'bridge'
+              ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/50 shadow-glow-cyan'
+              : 'bg-slate-900/60 text-slate-400 border border-slate-800 hover:text-slate-200 hover:bg-slate-800/60'
+          }`}
+        >
+          <Zap className="w-4 h-4 text-cyan-400 animate-pulse" />
+          <span>⚡ Live API Bridge & Automated Control</span>
+        </button>
+
+        <button
           onClick={() => setActiveSubTab('telemetry')}
           className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-bold transition-all ${
             activeSubTab === 'telemetry'
@@ -317,6 +330,11 @@ export const MikrotikDeviceManager: React.FC = () => {
           <span>💻 ICMP Ping & Script Center</span>
         </button>
       </div>
+
+      {/* VIEW 0: LIVE API BRIDGE & AUTOMATED CONTROL */}
+      {activeSubTab === 'bridge' && (
+        <MikrotikLiveBridge />
+      )}
 
       {/* VIEW 1: SYSTEM TELEMETRY & HEALTH HUB */}
       {activeSubTab === 'telemetry' && (

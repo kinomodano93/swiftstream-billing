@@ -49,6 +49,7 @@ import { testSmsGatewayConnection } from '../../utils/smsSender';
 import { sendTelegramStaffAlert, sendDiscordStaffAlert, testWebhookIntegration } from '../../utils/webhookService';
 import { XenditGatewaySettings } from './XenditGatewaySettings';
 import { FirebaseSettingsCard } from './FirebaseSettingsCard';
+import { SsoWhitelistSettingsCard } from './SsoWhitelistSettingsCard';
 
 export const SettingsModal: React.FC = () => {
   const {
@@ -61,7 +62,7 @@ export const SettingsModal: React.FC = () => {
     resetToDefault,
   } = useApp();
 
-  const [activeTab, setActiveTab] = useState<'profile' | 'payments' | 'api' | 'firebase' | 'audit' | 'backup'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'payments' | 'firebase' | 'sso' | 'api' | 'audit' | 'backup'>('profile');
 
   // Business state
   const [businessName, setBusinessName] = useState(businessProfile.name);
@@ -440,6 +441,7 @@ export const SettingsModal: React.FC = () => {
           { id: 'profile', label: 'Company & Representative', icon: Building2 },
           { id: 'payments', label: 'Payment Gateways & QR', icon: CreditCard },
           { id: 'firebase', label: 'Cloud Firestore Sync', icon: Cloud },
+          { id: 'sso', label: 'SSO & Admin Whitelist', icon: ShieldCheck },
           { id: 'api', label: 'API, AI & SMTP Server', icon: Key },
           { id: 'audit', label: `Security Audit Trail (${auditLogs.length})`, icon: Shield },
           { id: 'backup', label: 'Database Backup & Restore', icon: Database },
@@ -1496,6 +1498,9 @@ export const SettingsModal: React.FC = () => {
 
       {/* Tab: Google Firebase & Cloud Firestore Sync */}
       {activeTab === 'firebase' && <FirebaseSettingsCard />}
+
+      {/* Tab: Google SSO & Pre-Authorized Admin Whitelist */}
+      {activeTab === 'sso' && <SsoWhitelistSettingsCard />}
 
       {/* Tab 4: Security Audit Trail & Compliance */}
       {activeTab === 'audit' && (

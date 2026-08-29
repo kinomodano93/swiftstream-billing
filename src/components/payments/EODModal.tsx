@@ -59,7 +59,7 @@ export const EODModal: React.FC<EODModalProps> = ({ onClose }) => {
             </div>
             <div>
               <h3 className="font-bold text-base text-slate-100">
-                Cashier End-of-Day (EOD) Z-Reading
+                Administrator End-of-Day (EOD) Z-Reading
               </h3>
               <p className="text-xs text-slate-400">
                 Daily cash drawer reconciliation & settlement report
@@ -75,7 +75,7 @@ export const EODModal: React.FC<EODModalProps> = ({ onClose }) => {
           </button>
         </div>
 
-        {/* Date & Cashier Selection */}
+        {/* Date & Admin Selection */}
         <div className="p-4 bg-slate-950/50 border-b border-slate-800 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
           <div>
             <label className="block text-slate-400 mb-1 font-medium">Settlement Date</label>
@@ -88,7 +88,7 @@ export const EODModal: React.FC<EODModalProps> = ({ onClose }) => {
           </div>
 
           <div>
-            <label className="block text-slate-400 mb-1 font-medium">Shift Cashier / Lead</label>
+            <label className="block text-slate-400 mb-1 font-medium">Administrator / Lead</label>
             <input
               type="text"
               value={cashierName}

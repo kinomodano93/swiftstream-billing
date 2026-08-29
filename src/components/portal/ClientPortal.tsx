@@ -241,7 +241,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
       });
       setJustPaidPaymentId(newPayment.id);
     } else {
-      // Submit for Cashier Verification Queue
+      // Submit for Admin Verification Queue
       submitPaymentProof({
         customerId: customer.id,
         invoiceId: payInvoiceId || latestUnpaidInvoice?.id || undefined,
@@ -249,7 +249,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
         paymentMethod: payMethod,
         referenceNumber: ref,
         receiptImageUrl: receiptImageBase64 || undefined,
-        notes: `Submitted via Client Portal (${payMethod.toUpperCase()}). Pending cashier audit.`,
+        notes: `Submitted via Client Portal (${payMethod.toUpperCase()}). Pending admin audit.`,
       });
       setSubmittedProofSuccess(true);
       setTimeout(() => setSubmittedProofSuccess(false), 8000);
@@ -1384,7 +1384,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                   <span className="font-bold text-slate-200 uppercase tracking-wider block">
                     2. Submit Proof of Payment & Reference No.
                   </span>
-                  <span className="text-[11px] text-cyan-400 font-medium">Cashier Verification Required</span>
+                  <span className="text-[11px] text-cyan-400 font-medium">Admin Verification Required</span>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1436,7 +1436,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                         />
                         <div className="flex-1">
                           <span className="font-bold text-slate-200 block text-xs">Payment Screenshot Attached</span>
-                          <span className="text-[10px] text-emerald-400">Ready for cashier review</span>
+                          <span className="text-[10px] text-emerald-400">Ready for admin review</span>
                         </div>
                         <button
                           type="button"
@@ -1483,7 +1483,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                     <span>
                       {payMethod === 'xendit'
                         ? 'Confirm & Pay via Xendit'
-                        : 'Submit Payment Proof for Cashier Verification'}
+                        : 'Submit Payment Proof for Admin Verification'}
                     </span>
                   </button>
                 </div>
@@ -1494,7 +1494,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                     <div>
                       <h4 className="font-bold text-xs">Payment Proof Submitted Successfully!</h4>
                       <p className="text-[11px] text-slate-300 mt-0.5">
-                        Our cashier has received your transaction reference. Once verified against our bank terminal, your invoice will be marked as paid and you will receive an SMS confirmation.
+                        Our admin team has received your transaction reference. Once verified against our bank terminal, your invoice will be marked as paid and you will receive an SMS confirmation.
                       </p>
                     </div>
                   </div>
