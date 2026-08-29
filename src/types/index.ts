@@ -107,6 +107,8 @@ export interface Plan {
 export interface CustomerNetwork {
   pppoeUsername: string;
   pppoePassword?: string;
+  pppoeProfile?: string;
+  mikrotikDeviceId?: string;
   ipAddress: string;
   macAddress?: string;
   vlanId?: string;

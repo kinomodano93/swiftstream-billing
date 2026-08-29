@@ -28,6 +28,11 @@ import {
   Compass,
   Gauge,
   TrendingUp,
+  CheckCircle2,
+  AlertCircle,
+  Wifi,
+  Sparkles,
+  ShieldAlert,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { MikrotikDevice } from '../../types';
@@ -37,6 +42,7 @@ import {
   generateIsolationScript,
   generateFullRouterConfigScript,
 } from '../../utils/sstpService';
+import { testRouterConnection, RouterHealthInfo } from '../../services/mikrotikApiService';
 import { MikrotikTelemetryViewer } from './MikrotikTelemetryViewer';
 import { PppoeManager } from './PppoeManager';
 import { MikrotikLiveBridge } from './MikrotikLiveBridge';
@@ -75,6 +81,10 @@ export const MikrotikDeviceManager: React.FC = () => {
   const [pinging, setPinging] = useState<boolean>(false);
   const [pingResults, setPingResults] = useState<Array<{ seq: number; ip: string; timeMs: number; status: 'ok' | 'timeout' }> | null>(null);
 
+  // Test connection state in Add/Edit Router modal
+  const [isTestingConnection, setIsTestingConnection] = useState<boolean>(false);
+  const [testResult, setTestResult] = useState<RouterHealthInfo | null>(null);
+
   // Form State
   const [formData, setFormData] = useState<Omit<MikrotikDevice, 'id'>>({
     name: '',
@@ -98,6 +108,58 @@ export const MikrotikDeviceManager: React.FC = () => {
     notes: '',
   });
 
+  const handleTestConnection = async () => {
+    if (!formData.ipAddress.trim()) {
+      showToast('warning', 'Missing IP', 'Please enter a Router IP or hostname to test.');
+      return;
+    }
+    setIsTestingConnection(true);
+    setTestResult(null);
+    try {
+      const res = await testRouterConnection({
+        ipAddress: formData.ipAddress,
+        username: formData.username || 'admin',
+        password: formData.password || '',
+        port: formData.port || 80,
+        useHttps: formData.useSsl,
+      });
+      setTestResult(res);
+      if (res.status === 'connected') {
+        showToast('success', 'Connection Verified', `Successfully connected to ${res.boardName} (${res.latencyMs}ms latency).`);
+        // Auto-update model and RouterOS version if blank or generic
+        setFormData((prev) => ({
+          ...prev,
+          model: prev.model && !prev.model.includes('CCR2004') ? prev.model : (res.boardName || prev.model),
+          rosVersion: res.version || prev.rosVersion,
+          cpuLoad: res.cpuLoad || prev.cpuLoad,
+          status: 'online',
+        }));
+      } else if (res.status === 'auth_failed') {
+        showToast('error', 'Authentication Failed', 'Invalid username or password for RouterOS REST API.');
+      } else {
+        showToast('error', 'Router Unreachable', res.errorMessage || 'Failed to establish REST API handshake.');
+      }
+    } catch (err: any) {
+      setTestResult({
+        status: 'unreachable',
+        boardName: 'Unknown',
+        model: 'MikroTik',
+        version: 'v7.x',
+        cpuLoad: 0,
+        uptime: '0s',
+        totalMemoryMb: 0,
+        freeMemoryMb: 0,
+        activePppoeCount: 0,
+        latencyMs: 0,
+        timestamp: new Date().toISOString(),
+        errorMessage: err?.message || 'Connection timeout or network error',
+      });
+      showToast('error', 'Connection Error', err?.message || 'Failed to connect to router.');
+    } finally {
+      setIsTestingConnection(false);
+    }
+  };
+
   const filteredDevices = mikrotikDevices.filter((dev) => {
     const matchesSearch =
       dev.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -110,6 +172,8 @@ export const MikrotikDeviceManager: React.FC = () => {
 
   const handleOpenAddModal = () => {
     setEditingDevice(null);
+    setTestResult(null);
+    setIsTestingConnection(false);
     setFormData({
       name: '',
       model: 'MikroTik CCR2004-16G-2S+',
@@ -136,6 +200,8 @@ export const MikrotikDeviceManager: React.FC = () => {
 
   const handleOpenEditModal = (dev: MikrotikDevice) => {
     setEditingDevice(dev);
+    setTestResult(null);
+    setIsTestingConnection(false);
     setFormData({
       name: dev.name,
       model: dev.model,
@@ -155,7 +221,7 @@ export const MikrotikDeviceManager: React.FC = () => {
       totalQueues: dev.totalQueues,
       temperatureC: dev.temperatureC,
       location: dev.location,
-      notes: dev.notes,
+      notes: dev.notes || '',
     });
     setShowAddEditModal(true);
   };
@@ -870,6 +936,127 @@ export const MikrotikDeviceManager: React.FC = () => {
                     <span className="text-[11px] font-medium">Use HTTPS / SSL</span>
                   </label>
                 </div>
+              </div>
+
+              {/* Test Connection Action & Real-Time Diagnostics Output */}
+              <div className="space-y-3 p-4 rounded-2xl bg-slate-950/80 border border-slate-800">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <span className="font-semibold text-xs text-slate-200 flex items-center gap-1.5">
+                      <Wifi className="w-3.5 h-3.5 text-cyan-400" />
+                      Live Handshake Verification
+                    </span>
+                    <p className="text-[11px] text-slate-500">
+                      Query RouterOS REST API endpoint (<code>/system/resource</code>) before saving
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={isTestingConnection}
+                    onClick={handleTestConnection}
+                    className="flex items-center justify-center gap-2 px-4 py-2 bg-slate-900 hover:bg-cyan-950 text-cyan-300 hover:text-cyan-200 border border-cyan-700/50 hover:border-cyan-500 rounded-xl text-xs font-bold transition-all shadow-sm hover:scale-[1.02] active:scale-[0.98] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                  >
+                    {isTestingConnection ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin text-cyan-400" />
+                        <span>Connecting to Router...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Zap className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>Test Connection</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {/* Test Result Display */}
+                {testResult && (
+                  <div
+                    className={`p-3.5 rounded-xl border text-xs space-y-2.5 animate-in fade-in duration-200 ${
+                      testResult.status === 'connected'
+                        ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-200'
+                        : testResult.status === 'auth_failed'
+                        ? 'bg-rose-950/40 border-rose-500/40 text-rose-200'
+                        : 'bg-amber-950/40 border-amber-500/40 text-amber-200'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 font-bold">
+                        {testResult.status === 'connected' && (
+                          <>
+                            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                            <span>Connection Verified (Online)</span>
+                          </>
+                        )}
+                        {testResult.status === 'auth_failed' && (
+                          <>
+                            <ShieldAlert className="w-4 h-4 text-rose-400" />
+                            <span>Authentication Failed (401)</span>
+                          </>
+                        )}
+                        {testResult.status === 'unreachable' && (
+                          <>
+                            <AlertCircle className="w-4 h-4 text-amber-400" />
+                            <span>Router Unreachable</span>
+                          </>
+                        )}
+                      </div>
+                      <span className="font-mono text-[10px] px-2 py-0.5 rounded-full bg-slate-900/80 border border-slate-700">
+                        {testResult.latencyMs}ms Latency
+                      </span>
+                    </div>
+
+                    {testResult.status === 'connected' ? (
+                      <div className="space-y-2">
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] font-mono bg-slate-950/60 p-2.5 rounded-lg border border-emerald-900/50">
+                          <div>
+                            <span className="text-slate-400 block text-[10px]">Board / Model:</span>
+                            <span className="text-emerald-300 font-bold truncate block">{testResult.boardName}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block text-[10px]">RouterOS:</span>
+                            <span className="text-emerald-300 font-bold block">{testResult.version}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block text-[10px]">CPU Load:</span>
+                            <span className="text-emerald-300 font-bold block">{testResult.cpuLoad}%</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400 block text-[10px]">Uptime:</span>
+                            <span className="text-emerald-300 font-bold truncate block">{testResult.uptime}</span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between text-[11px]">
+                          <span className="text-slate-400">
+                            Memory: <strong className="text-emerald-300">{testResult.freeMemoryMb} MB free</strong> / {testResult.totalMemoryMb} MB
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setFormData((prev) => ({
+                                ...prev,
+                                model: testResult.boardName || prev.model,
+                                rosVersion: testResult.version || prev.rosVersion,
+                                cpuLoad: testResult.cpuLoad || prev.cpuLoad,
+                              }));
+                              showToast('success', 'Specs Applied', 'Detected router specifications filled into form.');
+                            }}
+                            className="text-cyan-300 hover:text-cyan-200 underline font-semibold cursor-pointer"
+                          >
+                            Apply Detected Specs to Form
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-[11px] opacity-90">
+                        {testResult.errorMessage || (testResult.status === 'auth_failed' ? 'Please verify API username, password, and REST API permissions.' : 'Check IP address, port forwarding, and local subnet routing.')}
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
