@@ -1719,19 +1719,19 @@ export const SettingsModal: React.FC = () => {
             </div>
 
             <div className="p-5 rounded-2xl bg-rose-950/20 border border-rose-900/40 space-y-2 pt-4">
-              <h5 className="font-bold text-rose-400">Reset Demo Database</h5>
+              <h5 className="font-bold text-rose-400">🧹 Clear All Records & Start Clean Slate</h5>
               <p className="text-slate-400">
-                Clear custom entries and reload sample SwiftStream Telecommunication & Repair Shop data.
+                Wipes all mock/test customers, invoices, payments, NAP boxes, fiber cables, and repair orders so you can begin entering 100% clean production data.
               </p>
               <button
                 onClick={() => {
-                  if (window.confirm('Reset all records to initial SwiftStream defaults?')) {
+                  if (window.confirm('Are you sure you want to wipe all records and start with a fresh, clean database?')) {
                     resetToDefault();
                   }
                 }}
                 className="px-4 py-2 bg-rose-600/20 text-rose-400 hover:bg-rose-600 hover:text-white rounded-xl font-semibold transition-colors"
               >
-                Reset Database to Sample Data
+                Wipe All Data & Start Clean
               </button>
             </div>
           </div>

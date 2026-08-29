@@ -50,6 +50,7 @@ import {
 import { generateInvoicePDF, generateOfficialReceiptPDF } from '../../utils/pdfGenerator';
 import { XENDIT_CHANNELS, createXenditCheckoutSession } from '../../utils/xenditService';
 import { generateDynamicQrPhPayload } from '../../utils/qrPhGenerator';
+import { createMockPaymentWebhookEvent } from '../../services/paymentWebhookService';
 import { GeminiAiAssistant } from '../ai/GeminiAiAssistant';
 
 interface ClientPortalProps {
@@ -72,6 +73,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
     plans,
     businessProfile,
     recordPayment,
+    processIncomingPaymentWebhook,
     submitPaymentProof,
     addRepairOrder,
     logout,
@@ -210,7 +212,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
   };
 
   // Handle Online Payment Submission
-  const handleConfirmOnlinePayment = (e: React.FormEvent) => {
+  const handleConfirmOnlinePayment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!customer) return;
 
@@ -229,17 +231,19 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
     setIsSubmittingPayment(true);
 
     if (payMethod === 'xendit') {
-      const newPayment = recordPayment({
-        customerId: customer.id,
-        invoiceId: payInvoiceId || latestUnpaidInvoice?.id || undefined,
-        amount: amountNum,
-        paymentMethod: payMethod,
-        referenceNumber: ref,
-        cashierName: `Xendit Gateway (${xenditSubChannel})`,
-        notes: `Direct Xendit payment via Client Portal (${xenditSubChannel}). Ref: ${ref}`,
-        isAdvancePayment: customer.balance <= 0,
-      });
-      setJustPaidPaymentId(newPayment.id);
+      const targetInv = payInvoiceId ? invoices.find((i) => i.id === payInvoiceId) : latestUnpaidInvoice;
+      const webhookEv = createMockPaymentWebhookEvent(
+        customer,
+        targetInv,
+        'xendit',
+        xenditSubChannel
+      );
+      webhookEv.amount = amountNum;
+      webhookEv.transactionRef = ref;
+      const res = await processIncomingPaymentWebhook(webhookEv);
+      if (res.receiptNumber) {
+        setJustPaidPaymentId(res.receiptNumber);
+      }
     } else {
       // Submit for Admin Verification Queue
       submitPaymentProof({

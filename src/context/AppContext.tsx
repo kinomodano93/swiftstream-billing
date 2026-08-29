@@ -33,6 +33,7 @@ import {
   saveToStorage,
   STORAGE_KEYS,
 } from '../data/storage';
+import { initialPlans, initialBusinessProfile } from '../data/initialData';
 import { generateId } from '../utils/formatters';
 import { generateReminderMessage, sendMockNotification } from '../utils/smsSender';
 import { generateHtmlInvoiceEmail, sendSmtpEmail } from '../utils/smtpService';
@@ -42,8 +43,14 @@ import {
   subscribeToCollection,
   saveFirestoreDoc,
   deleteFirestoreDoc,
+  purgeFirestoreCollections,
 } from '../services/firestoreService';
 import { AppUserProfile, subscribeToAuth, signOutUser } from '../services/authService';
+import {
+  executePaymentWebhookPipeline,
+  PaymentWebhookEvent,
+  PaymentWebhookResult,
+} from '../services/paymentWebhookService';
 
 export interface ToastNotification {
   id: string;
@@ -140,6 +147,7 @@ interface AppContextType {
     isAdvancePayment?: boolean;
   }) => Payment;
   deletePayment: (id: string) => void;
+  processIncomingPaymentWebhook: (event: PaymentWebhookEvent) => Promise<PaymentWebhookResult>;
 
   // Proof-of-Payment Submissions
   paymentSubmissions: PaymentSubmission[];
@@ -338,37 +346,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // --- Real-time Cloud Firestore Subscriptions ---
   useEffect(() => {
     const unsubCustomers = subscribeToCollection<Customer>(COLLECTIONS.CUSTOMERS, (data) => {
-      if (data && data.length > 0) setCustomers(data);
+      setCustomers(data || []);
     });
     const unsubInvoices = subscribeToCollection<Invoice>(COLLECTIONS.INVOICES, (data) => {
-      if (data && data.length > 0) setInvoices(data);
+      setInvoices(data || []);
     });
     const unsubPayments = subscribeToCollection<Payment>(COLLECTIONS.PAYMENTS, (data) => {
-      if (data && data.length > 0) setPayments(data);
+      setPayments(data || []);
     });
     const unsubSubmissions = subscribeToCollection<PaymentSubmission>(COLLECTIONS.PAYMENT_SUBMISSIONS, (data) => {
-      if (data && data.length > 0) setPaymentSubmissions(data);
+      setPaymentSubmissions(data || []);
     });
     const unsubPlans = subscribeToCollection<Plan>(COLLECTIONS.PLANS, (data) => {
       if (data && data.length > 0) setPlans(data);
     });
     const unsubRepairOrders = subscribeToCollection<RepairOrder>(COLLECTIONS.REPAIR_ORDERS, (data) => {
-      if (data && data.length > 0) setRepairOrders(data);
+      setRepairOrders(data || []);
     });
     const unsubNapBoxes = subscribeToCollection<NapBox>(COLLECTIONS.NAP_BOXES, (data) => {
-      if (data && data.length > 0) setNapBoxes(data);
+      setNapBoxes(data || []);
     });
     const unsubFiberCables = subscribeToCollection<FiberCable>(COLLECTIONS.FIBER_CABLES, (data) => {
-      if (data && data.length > 0) setFiberCables(data);
+      setFiberCables(data || []);
     });
     const unsubFiberClosures = subscribeToCollection<FiberClosure>(COLLECTIONS.FIBER_CLOSURES, (data) => {
-      if (data && data.length > 0) setFiberClosures(data);
+      setFiberClosures(data || []);
     });
     const unsubMikrotik = subscribeToCollection<MikrotikDevice>(COLLECTIONS.MIKROTIK_DEVICES, (data) => {
-      if (data && data.length > 0) setMikrotikDevices(data);
+      setMikrotikDevices(data || []);
     });
     const unsubExpenses = subscribeToCollection<Expense>(COLLECTIONS.EXPENSES, (data) => {
-      if (data && data.length > 0) setExpenses(data);
+      setExpenses(data || []);
     });
 
     return () => {
@@ -1120,6 +1128,45 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return newPayment;
   };
 
+  const processIncomingPaymentWebhook = async (
+    event: PaymentWebhookEvent
+  ): Promise<PaymentWebhookResult> => {
+    const result = await executePaymentWebhookPipeline(
+      event,
+      {
+        customers,
+        invoices,
+        plans,
+        businessProfile,
+      },
+      {
+        onRecordPayment: (payment: Payment) => {
+          setPayments((prev) => [payment, ...prev]);
+          saveFirestoreDoc(COLLECTIONS.PAYMENTS, payment);
+        },
+        onUpdateInvoice: (invoiceId: string, updates: Partial<Invoice>) => {
+          updateInvoice(invoiceId, updates);
+        },
+        onUpdateCustomer: (customerId: string, updates: Partial<Customer>) => {
+          updateCustomer(customerId, updates);
+        },
+        onLogAudit: (auditEv: any) => {
+          logAuditEvent(auditEv);
+        },
+      }
+    );
+
+    if (result.success) {
+      showToast(
+        'success',
+        '⚡ Instant Webhook Auto-Reconnect',
+        `Settled ₱${result.amountPaid.toLocaleString()} via ${result.paymentChannel} for ${result.customerName || 'Subscriber'}. Line restored on MikroTik CCR!`
+      );
+    }
+
+    return result;
+  };
+
   // --- Daily Remittances Operations ---
   const addDailyRemittance = (remittanceData: Omit<DailyRemittanceRecord, 'id'>): DailyRemittanceRecord => {
     const newRemittance: DailyRemittanceRecord = {
@@ -1741,24 +1788,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const resetToDefault = () => {
+  const resetToDefault = async () => {
     resetAllDataToDefault();
-    const freshData = loadStoredData();
-    setBusinessProfile(freshData.businessProfile);
-    setCustomers(freshData.customers);
-    setInvoices(freshData.invoices);
-    setPayments(freshData.payments);
-    setPlans(freshData.plans);
-    setNapBoxes(freshData.napBoxes);
-    setFiberCables(freshData.fiberCables);
-    setFiberClosures(freshData.fiberClosures);
-    setOltNode(freshData.oltNode);
-    setRepairOrders(freshData.repairOrders);
-    setReminders(freshData.reminders);
-    setMikrotikDevices(freshData.mikrotikDevices);
-    setExpenses(freshData.expenses);
-    setAuditLogs(freshData.auditLogs);
-    showToast('info', 'Data Reset', 'All records restored to sample SwiftStream dataset.');
+    setCustomers([]);
+    setInvoices([]);
+    setPayments([]);
+    setNapBoxes([]);
+    setFiberCables([]);
+    setFiberClosures([]);
+    setRepairOrders([]);
+    setReminders([]);
+    setMikrotikDevices([]);
+    setExpenses([]);
+    setAuditLogs([]);
+    setDailyRemittances([]);
+    setPaymentSubmissions([]);
+    setPlans(initialPlans);
+    setBusinessProfile(initialBusinessProfile);
+
+    // Also purge remote Cloud Firestore collections
+    try {
+      await purgeFirestoreCollections();
+    } catch (err) {
+      console.warn('Firestore purge error:', err);
+    }
+
+    showToast('success', 'Database Clean Slate', 'All mock records in local memory and Cloud Firestore have been wiped clean.');
   };
 
   return (
@@ -1812,6 +1867,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         closeDailyRemittance,
         recordPayment,
         deletePayment,
+        processIncomingPaymentWebhook,
         paymentSubmissions,
         submitPaymentProof,
         approvePaymentSubmission,

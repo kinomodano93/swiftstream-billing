@@ -119,6 +119,7 @@ export const signUpWithEmail = async (
     planName?: string;
     monthlyFee?: number;
     mobile?: string;
+    installationDate?: string;
     address?: {
       street: string;
       barangay: string;
@@ -178,7 +179,7 @@ export const signUpWithEmail = async (
         monthlyFee: options?.monthlyFee || 1299,
         billingDay: 15,
         status: 'pending_approval',
-        installationDate: '',
+        installationDate: options?.installationDate || new Date().toISOString().slice(0, 10),
         balance: 0,
         walletBalance: 0,
         advanceDeposit: 0,

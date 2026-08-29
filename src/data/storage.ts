@@ -38,26 +38,52 @@ import {
 } from './initialData';
 
 const STORAGE_KEYS = {
-  BUSINESS_PROFILE: 'swiftstream_business_profile_v1',
-  CUSTOMERS: 'swiftstream_customers_v1',
-  INVOICES: 'swiftstream_invoices_v1',
-  PAYMENTS: 'swiftstream_payments_v1',
-  PLANS: 'swiftstream_plans_v1',
-  NAP_BOXES: 'swiftstream_nap_boxes_v1',
-  REPAIR_ORDERS: 'swiftstream_repair_orders_v1',
-  REMINDERS: 'swiftstream_reminders_v1',
-  MIKROTIK_DEVICES: 'swiftstream_mikrotik_devices_v1',
-  EXPENSES: 'swiftstream_expenses_v1',
-  AUDIT_LOGS: 'swiftstream_audit_logs_v1',
-  FIBER_CABLES: 'swiftstream_fiber_cables_v1',
-  FIBER_CLOSURES: 'swiftstream_fiber_closures_v1',
-  OLT_NODE: 'swiftstream_olt_node_v1',
-  DAILY_REMITTANCES: 'swiftstream_daily_remittances_v1',
-  ADDON_CATALOG: 'swiftstream_addon_catalog_v1',
-  PAYMENT_SUBMISSIONS: 'swiftstream_payment_submissions_v1',
+  BUSINESS_PROFILE: 'swiftstream_business_profile_v2',
+  CUSTOMERS: 'swiftstream_customers_v2',
+  INVOICES: 'swiftstream_invoices_v2',
+  PAYMENTS: 'swiftstream_payments_v2',
+  PLANS: 'swiftstream_plans_v2',
+  NAP_BOXES: 'swiftstream_nap_boxes_v2',
+  REPAIR_ORDERS: 'swiftstream_repair_orders_v2',
+  REMINDERS: 'swiftstream_reminders_v2',
+  MIKROTIK_DEVICES: 'swiftstream_mikrotik_devices_v2',
+  EXPENSES: 'swiftstream_expenses_v2',
+  AUDIT_LOGS: 'swiftstream_audit_logs_v2',
+  FIBER_CABLES: 'swiftstream_fiber_cables_v2',
+  FIBER_CLOSURES: 'swiftstream_fiber_closures_v2',
+  OLT_NODE: 'swiftstream_olt_node_v2',
+  DAILY_REMITTANCES: 'swiftstream_daily_remittances_v2',
+  ADDON_CATALOG: 'swiftstream_addon_catalog_v2',
+  PAYMENT_SUBMISSIONS: 'swiftstream_payment_submissions_v2',
+};
+
+// Automatic one-time cleanup of legacy v1 mock keys
+const cleanupLegacyMockData = () => {
+  if (typeof window !== 'undefined' && !localStorage.getItem('swiftstream_v2_clean_slate_init')) {
+    const legacyKeys = [
+      'swiftstream_customers_v1',
+      'swiftstream_invoices_v1',
+      'swiftstream_payments_v1',
+      'swiftstream_nap_boxes_v1',
+      'swiftstream_repair_orders_v1',
+      'swiftstream_reminders_v1',
+      'swiftstream_mikrotik_devices_v1',
+      'swiftstream_expenses_v1',
+      'swiftstream_audit_logs_v1',
+      'swiftstream_fiber_cables_v1',
+      'swiftstream_fiber_closures_v1',
+      'swiftstream_daily_remittances_v1',
+      'swiftstream_addon_catalog_v1',
+      'swiftstream_payment_submissions_v1',
+    ];
+    legacyKeys.forEach((k) => localStorage.removeItem(k));
+    localStorage.setItem('swiftstream_v2_clean_slate_init', 'true');
+  }
 };
 
 export const loadStoredData = () => {
+  cleanupLegacyMockData();
+
   try {
     const businessProfile = JSON.parse(
       localStorage.getItem(STORAGE_KEYS.BUSINESS_PROFILE) || JSON.stringify(initialBusinessProfile)
@@ -184,7 +210,7 @@ export const exportAllDataAsJson = () => {
   const currentData = loadStoredData();
   const exportPayload = {
     app: 'SwiftStream ISP & Repair Billing System',
-    version: '1.0.0',
+    version: '2.0.0',
     exportDate: new Date().toISOString(),
     ...currentData,
   };
@@ -192,20 +218,13 @@ export const exportAllDataAsJson = () => {
   const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(exportPayload, null, 2));
   const downloadAnchor = document.createElement('a');
   downloadAnchor.setAttribute('href', dataStr);
-  downloadAnchor.setAttribute('download', `swiftstream_backup_${new Date().toISOString().slice(0, 10)}.json`);
+  downloadAnchor.setAttribute('download', `swiftstream_clean_backup_${new Date().toISOString().slice(0, 10)}.json`);
   document.body.appendChild(downloadAnchor);
   downloadAnchor.click();
   downloadAnchor.remove();
 };
 
 export const resetAllDataToDefault = () => {
-  localStorage.removeItem(STORAGE_KEYS.BUSINESS_PROFILE);
-  localStorage.removeItem(STORAGE_KEYS.CUSTOMERS);
-  localStorage.removeItem(STORAGE_KEYS.INVOICES);
-  localStorage.removeItem(STORAGE_KEYS.PAYMENTS);
-  localStorage.removeItem(STORAGE_KEYS.PLANS);
-  localStorage.removeItem(STORAGE_KEYS.NAP_BOXES);
-  localStorage.removeItem(STORAGE_KEYS.REPAIR_ORDERS);
-  localStorage.removeItem(STORAGE_KEYS.REMINDERS);
+  Object.values(STORAGE_KEYS).forEach((k) => localStorage.removeItem(k));
+  localStorage.removeItem('swiftstream_v2_clean_slate_init');
 };
-

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X,
   Lock,
@@ -19,6 +19,7 @@ import {
   MapPin,
   Clock,
   Wifi,
+  Calendar,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import {
@@ -40,7 +41,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   onClose,
   initialMode = 'signin',
 }) => {
-  const { showToast, setCurrentAuthUser, setActiveTab, plans, customers } = useApp();
+  const { showToast, setCurrentAuthUser, setActiveTab, plans, customers, addCustomer } = useApp();
 
   const [mode, setMode] = useState<'signin' | 'signup' | 'forgot'>(initialMode);
   const [email, setEmail] = useState('');
@@ -50,6 +51,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [accountNo, setAccountNo] = useState('');
   const [mobile, setMobile] = useState('09');
   const [selectedPlanId, setSelectedPlanId] = useState<string>(plans[0]?.id || 'plan-fib-35');
+  const [installationDate, setInstallationDate] = useState<string>(
+    new Date().toISOString().slice(0, 10)
+  );
   const [street, setStreet] = useState('');
   const [barangay, setBarangay] = useState('Binauahan');
   const [landmark, setLandmark] = useState('');
@@ -65,6 +69,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     planName: string;
     monthlyFee: number;
   } | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      setMode(initialMode);
+      setErrorMessage(null);
+      setSuccessMessage(null);
+      setPendingApplicationNotice(null);
+    }
+  }, [isOpen, initialMode]);
 
   if (!isOpen) return null;
 
@@ -141,23 +154,64 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setLoading(true);
     try {
       const selectedPlan = plans.find((p) => p.id === selectedPlanId) || plans[0];
-      await signUpWithEmail(
-        email.trim(),
-        password,
-        fullName.trim(),
-        'subscriber',
-        {
-          planId: selectedPlan?.id,
-          planName: selectedPlan?.name,
-          monthlyFee: selectedPlan?.monthlyFee,
-          mobile: mobile.trim(),
-          address: {
-            street: street.trim(),
-            barangay: barangay.trim(),
-            landmark: landmark.trim(),
-          },
-        }
-      );
+      const generatedAccountNo = `SWIFT-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`;
+
+      // 1. Immediately add to AppContext state, localStorage, and Firestore customers collection
+      addCustomer({
+        accountNo: generatedAccountNo,
+        fullName: fullName.trim(),
+        email: email.trim(),
+        mobile: mobile.trim(),
+        address: {
+          street: street.trim(),
+          barangay: barangay.trim(),
+          city: 'Lagonoy',
+          province: 'Camarines Sur',
+          landmark: landmark.trim(),
+        },
+        planId: selectedPlan?.id || 'plan-fib-35',
+        planName: selectedPlan?.name || 'Fiber Power 35 Mbps',
+        monthlyFee: selectedPlan?.monthlyFee || 1299,
+        billingDay: 15,
+        status: 'pending_approval',
+        installationDate: installationDate || new Date().toISOString().slice(0, 10),
+        balance: 0,
+        walletBalance: 0,
+        advanceDeposit: 0,
+        network: {
+          pppoeUsername: email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '_'),
+          ipAddress: `192.168.10.${Math.floor(20 + Math.random() * 200)}`,
+          napBoxId: 'nap-01-binauahan',
+          napPortNumber: 1,
+          isMikrotikSynced: false,
+        },
+        notes: `Online Registration via Portal Sign Up. Landmark: ${landmark || 'N/A'}. Preferred Install Date: ${installationDate || 'ASAP'}`,
+      });
+
+      // 2. Register user in Firebase Auth directory
+      try {
+        await signUpWithEmail(
+          email.trim(),
+          password,
+          fullName.trim(),
+          'subscriber',
+          {
+            accountNo: generatedAccountNo,
+            planId: selectedPlan?.id,
+            planName: selectedPlan?.name,
+            monthlyFee: selectedPlan?.monthlyFee,
+            mobile: mobile.trim(),
+            installationDate,
+            address: {
+              street: street.trim(),
+              barangay: barangay.trim(),
+              landmark: landmark.trim(),
+            },
+          }
+        );
+      } catch (authErr: any) {
+        console.warn('Firebase Auth user registration note:', authErr);
+      }
 
       // Customer Sign Up: DO NOT auto-login, wait for admin review
       setPendingApplicationNotice({
@@ -166,7 +220,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         planName: selectedPlan?.name || 'Fiber Internet',
         monthlyFee: selectedPlan?.monthlyFee || 1299,
       });
-      showToast('info', 'Application Submitted', 'Your Fiber application is queued for Admin review.');
+      showToast('success', 'Application Submitted', 'Your Fiber application is queued for Admin review.');
     } catch (err: any) {
       setErrorMessage(getCleanErrorMessage(err));
     } finally {
@@ -228,20 +282,29 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         <div className="p-6 pb-4 bg-gradient-to-b from-slate-950/90 to-transparent border-b border-slate-800/80 shrink-0">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-cyan-600 to-blue-500 p-0.5 shadow-lg shadow-cyan-500/20 flex items-center justify-center">
-                <Zap className="w-5 h-5 text-white" />
+              <div className={`w-10 h-10 rounded-2xl p-0.5 shadow-lg flex items-center justify-center ${
+                mode === 'signin'
+                  ? 'bg-gradient-to-tr from-cyan-600 to-blue-500 shadow-cyan-500/20'
+                  : mode === 'signup'
+                  ? 'bg-gradient-to-tr from-emerald-600 to-teal-500 shadow-emerald-500/20'
+                  : 'bg-gradient-to-tr from-amber-600 to-orange-500 shadow-amber-500/20'
+              }`}>
+                {mode === 'signin' && <Lock className="w-5 h-5 text-white" />}
+                {mode === 'signup' && <Zap className="w-5 h-5 text-white" />}
+                {mode === 'forgot' && <KeyRound className="w-5 h-5 text-white" />}
               </div>
               <div>
                 <h3 className="text-sm font-bold text-slate-100 flex items-center gap-1.5">
-                  <span>SwiftStream Fiber Authentication</span>
-                  <span className="px-2 py-0.5 text-[9px] font-mono font-bold rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40">
-                    Firebase
+                  <span>
+                    {mode === 'signin' && 'Sign In to SwiftStream'}
+                    {mode === 'signup' && 'Apply for Fiber Connection (Sign Up)'}
+                    {mode === 'forgot' && 'Password Recovery'}
                   </span>
                 </h3>
                 <p className="text-[11px] text-slate-400">
-                  {mode === 'signin' && 'Sign in to access your Admin Dashboard or Subscriber Portal'}
-                  {mode === 'signup' && 'Apply for a new Pure Fiber Internet connection in Lagonoy'}
-                  {mode === 'forgot' && 'Reset your forgotten account password'}
+                  {mode === 'signin' && 'Sign in to access your Subscriber Portal or Staff Console'}
+                  {mode === 'signup' && 'Register your new residential or commercial fiber line in Lagonoy'}
+                  {mode === 'forgot' && 'Enter your registered email to reset your password'}
                 </p>
               </div>
             </div>
@@ -253,42 +316,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <X className="w-4 h-4" />
             </button>
           </div>
-
-          {/* Switch Tabs */}
-          {mode !== 'forgot' && !pendingApplicationNotice && (
-            <div className="flex mt-4 p-1 bg-slate-950/80 border border-slate-800 rounded-2xl">
-              <button
-                type="button"
-                onClick={() => {
-                  setMode('signin');
-                  setErrorMessage(null);
-                  setPendingApplicationNotice(null);
-                }}
-                className={`flex-1 py-1.5 text-xs font-bold rounded-xl transition-all ${
-                  mode === 'signin'
-                    ? 'bg-cyan-600 text-white shadow-md shadow-cyan-600/30'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                Sign In
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setMode('signup');
-                  setErrorMessage(null);
-                  setPendingApplicationNotice(null);
-                }}
-                className={`flex-1 py-1.5 text-xs font-bold rounded-xl transition-all ${
-                  mode === 'signup'
-                    ? 'bg-cyan-600 text-white shadow-md shadow-cyan-600/30'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                Apply (Fiber Plan)
-              </button>
-            </div>
-          )}
         </div>
 
         {/* Scrollable Body */}
@@ -347,8 +374,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </div>
               )}
 
-              {/* Google 1-Click Sign-In */}
-              {mode !== 'forgot' && (
+              {/* Google 1-Click Sign-In (Only for Sign In) */}
+              {mode === 'signin' && (
                 <>
                   <button
                     type="button"
@@ -447,6 +474,23 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     <span>{loading ? 'Authenticating...' : 'Sign In'}</span>
                     <ArrowRight className="w-4 h-4" />
                   </button>
+
+                  <div className="pt-3 text-center border-t border-slate-800/80">
+                    <p className="text-slate-400 text-xs">
+                      Don't have an account or fiber line?{' '}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMode('signup');
+                          setErrorMessage(null);
+                          setPendingApplicationNotice(null);
+                        }}
+                        className="text-cyan-400 hover:text-cyan-300 font-bold hover:underline ml-1"
+                      >
+                        Apply for Connection (Sign Up)
+                      </button>
+                    </p>
+                  </div>
                 </form>
               )}
 
@@ -463,29 +507,36 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       <span className="text-[10px] text-slate-400 font-normal">Pure Fiber Line</span>
                     </label>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {plans.map((p) => (
-                        <button
-                          type="button"
-                          key={p.id}
-                          onClick={() => setSelectedPlanId(p.id)}
-                          className={`p-2.5 rounded-xl border text-left transition-all ${
-                            selectedPlanId === p.id
-                              ? 'bg-cyan-950/70 border-cyan-500 text-cyan-200 shadow-sm'
-                              : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
-                          }`}
-                        >
-                          <span className="font-bold text-[11px] block text-slate-200">{p.name}</span>
-                          <div className="flex items-center justify-between text-[10px] text-cyan-300 font-mono mt-0.5">
-                            <span>{p.speedMbps} Mbps</span>
-                            <span className="font-bold text-emerald-400">₱{p.monthlyFee.toLocaleString()}/mo</span>
-                          </div>
-                        </button>
-                      ))}
+                    <div className="grid grid-cols-2 gap-2">
+                      {plans.map((p) => {
+                        const isSelected = selectedPlanId === p.id;
+                        return (
+                          <button
+                            key={p.id}
+                            type="button"
+                            onClick={() => setSelectedPlanId(p.id)}
+                            className={`p-2.5 rounded-xl border text-left transition-all ${
+                              isSelected
+                                ? 'bg-cyan-950/60 border-cyan-500 text-cyan-200 shadow-sm'
+                                : 'bg-slate-900/90 border-slate-800 text-slate-400 hover:border-slate-700'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="font-bold text-xs text-slate-100">{p.name}</span>
+                              {isSelected && <Check className="w-3.5 h-3.5 text-cyan-400" />}
+                            </div>
+                            <div className="flex items-baseline justify-between mt-1 text-[11px]">
+                              <span className="font-mono text-cyan-400 font-bold">{p.speedMbps} Mbps</span>
+                              <span className="font-mono text-emerald-400 font-bold">₱{p.monthlyFee.toLocaleString()}/mo</span>
+                            </div>
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {/* Personal & Account Info */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block text-slate-300 mb-1 font-medium">Full Name (Applicant) *</label>
                       <div className="relative">
@@ -502,7 +553,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     </div>
 
                     <div>
-                      <label className="block text-slate-300 mb-1 font-medium">Mobile Number *</label>
+                      <label className="block text-slate-300 mb-1 font-medium">Mobile Number (SMS Alerts) *</label>
                       <div className="relative">
                         <Phone className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                         <input
@@ -517,9 +568,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
-                      <label className="block text-slate-300 mb-1 font-medium">Email Address (Login Username) *</label>
+                      <label className="block text-slate-300 mb-1 font-medium">Email Address (Portal) *</label>
                       <div className="relative">
                         <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                         <input
@@ -527,7 +578,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                           required
                           value={email}
                           onChange={(e) => setEmail(e.target.value)}
-                          placeholder="juan@email.ph"
+                          placeholder="juan@gmail.com"
                           className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-xs focus:outline-none focus:border-cyan-500"
                         />
                       </div>
@@ -542,7 +593,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                           required
                           value={password}
                           onChange={(e) => setPassword(e.target.value)}
-                          placeholder="Min 6 characters"
+                          placeholder="••••••••"
                           className="w-full pl-9 pr-10 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-xs focus:outline-none focus:border-cyan-500 font-mono"
                         />
                         <button
@@ -554,16 +605,67 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                         </button>
                       </div>
                     </div>
+
+                    <div>
+                      <label className="block text-slate-300 mb-1 font-medium">Preferred Install Date *</label>
+                      <div
+                        className="relative cursor-pointer"
+                        onClick={(e) => {
+                          const el = e.currentTarget.querySelector('input');
+                          if (el && 'showPicker' in el) {
+                            try { el.showPicker(); } catch {}
+                          }
+                        }}
+                      >
+                        <Calendar className="w-4 h-4 text-cyan-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        <input
+                          type="date"
+                          required
+                          value={installationDate}
+                          onClick={(e) => {
+                            if ('showPicker' in e.currentTarget) {
+                              try { e.currentTarget.showPicker(); } catch {}
+                            }
+                          }}
+                          onChange={(e) => setInstallationDate(e.target.value)}
+                          className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-xs focus:outline-none focus:border-cyan-500 cursor-pointer [color-scheme:dark]"
+                        />
+                      </div>
+                    </div>
                   </div>
 
-                  {/* Installation Address Details */}
-                  <div className="space-y-2 p-3.5 rounded-2xl bg-slate-950 border border-slate-800 text-[11px]">
-                    <span className="font-semibold text-slate-300 flex items-center gap-1.5">
-                      <MapPin className="w-3.5 h-3.5 text-rose-400" />
-                      <span>Installation Address (Lagonoy, Camarines Sur):</span>
-                    </span>
+                  {/* Installation Address (Lagonoy, Camarines Sur) */}
+                  <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 space-y-2.5">
+                    <label className="block text-slate-300 font-semibold text-[11px] flex items-center justify-between">
+                      <span className="flex items-center gap-1.5">
+                        <MapPin className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>Installation Address (Lagonoy):</span>
+                      </span>
+                      <span className="text-[10px] text-cyan-400 font-medium">Binauahan POP Node</span>
+                    </label>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-slate-400 mb-1 font-medium">Barangay *</label>
+                        <select
+                          value={barangay}
+                          onChange={(e) => setBarangay(e.target.value)}
+                          className="w-full px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 text-xs focus:outline-none focus:border-cyan-500"
+                        >
+                          <option value="Binauahan">Binauahan (Main POP Area)</option>
+                          <option value="San Francisco (Poblacion)">San Francisco (Poblacion)</option>
+                          <option value="Santa Maria">Santa Maria</option>
+                          <option value="San Rafael">San Rafael</option>
+                          <option value="San Isidro Sur">San Isidro Sur</option>
+                          <option value="San Isidro Norte">San Isidro Norte</option>
+                          <option value="Loho">Loho</option>
+                          <option value="Cabotonan">Cabotonan</option>
+                          <option value="Burabod">Burabod</option>
+                          <option value="Gimagpang">Gimagpang</option>
+                          <option value="Sipaco">Sipaco</option>
+                        </select>
+                      </div>
+
                       <div>
                         <label className="block text-slate-400 mb-1 font-medium">Street / Zone / Purok *</label>
                         <input
@@ -571,26 +673,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                           required
                           value={street}
                           onChange={(e) => setStreet(e.target.value)}
-                          placeholder="Zone 2, Riverside"
-                          className="w-full px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 text-xs"
+                          placeholder="Purok 3, Riverside Street"
+                          className="w-full px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 text-xs focus:outline-none focus:border-cyan-500"
                         />
-                      </div>
-
-                      <div>
-                        <label className="block text-slate-400 mb-1 font-medium">Barangay *</label>
-                        <select
-                          value={barangay}
-                          onChange={(e) => setBarangay(e.target.value)}
-                          className="w-full px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 text-xs"
-                        >
-                          <option value="Binauahan">Binauahan</option>
-                          <option value="Poblacion">Poblacion</option>
-                          <option value="San Isidro">San Isidro</option>
-                          <option value="Santa Maria">Santa Maria</option>
-                          <option value="Dahican">Dahican</option>
-                          <option value="San Rafael">San Rafael</option>
-                          <option value="Burabod">Burabod</option>
-                        </select>
                       </div>
                     </div>
 
@@ -601,7 +686,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                         value={landmark}
                         onChange={(e) => setLandmark(e.target.value)}
                         placeholder="Beside St. Isidore Chapel"
-                        className="w-full px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 text-xs"
+                        className="w-full px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 text-xs focus:outline-none focus:border-cyan-500"
                       />
                     </div>
                   </div>
@@ -614,6 +699,23 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     <Zap className="w-4 h-4" />
                     <span>{loading ? 'Submitting Application...' : 'Submit Connection Application'}</span>
                   </button>
+
+                  <div className="pt-3 text-center border-t border-slate-800/80">
+                    <p className="text-slate-400 text-xs">
+                      Already registered or a staff member?{' '}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMode('signin');
+                          setErrorMessage(null);
+                          setPendingApplicationNotice(null);
+                        }}
+                        className="text-cyan-400 hover:text-cyan-300 font-bold hover:underline ml-1"
+                      >
+                        Sign In Here
+                      </button>
+                    </p>
+                  </div>
                 </form>
               )}
 

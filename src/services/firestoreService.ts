@@ -236,3 +236,48 @@ export const seedFirestoreFromLocalData = async (
   }
 };
 
+/**
+ * Deletes all documents in selected Firestore collections to allow a clean start
+ */
+export const purgeFirestoreCollections = async (
+  collectionsToPurge: string[] = [
+    COLLECTIONS.CUSTOMERS,
+    COLLECTIONS.INVOICES,
+    COLLECTIONS.PAYMENTS,
+    COLLECTIONS.PAYMENT_SUBMISSIONS,
+    COLLECTIONS.REPAIR_ORDERS,
+    COLLECTIONS.NAP_BOXES,
+    COLLECTIONS.FIBER_CABLES,
+    COLLECTIONS.FIBER_CLOSURES,
+    COLLECTIONS.MIKROTIK_DEVICES,
+    COLLECTIONS.EXPENSES,
+    COLLECTIONS.DAILY_REMITTANCES,
+    COLLECTIONS.AUDIT_LOGS,
+  ],
+  onProgress?: (msg: string) => void
+): Promise<{ success: boolean; deletedCount: number; error?: string }> => {
+  let deletedCount = 0;
+  try {
+    for (const colName of collectionsToPurge) {
+      if (onProgress) onProgress(`Cleaning ${colName}...`);
+      const colRef = collection(db, colName);
+      const snap = await getDocs(colRef);
+      if (!snap.empty) {
+        const docs = snap.docs;
+        const chunkSize = 400;
+        for (let i = 0; i < docs.length; i += chunkSize) {
+          const chunk = docs.slice(i, i + chunkSize);
+          const batch = writeBatch(db);
+          chunk.forEach((d) => batch.delete(d.ref));
+          await batch.commit();
+          deletedCount += chunk.length;
+        }
+      }
+    }
+    return { success: true, deletedCount };
+  } catch (err: any) {
+    console.error('Firestore purge error:', err);
+    return { success: false, deletedCount, error: err?.message || 'Purge failed' };
+  }
+};
+

@@ -10,6 +10,7 @@ import {
   Calendar,
   DollarSign,
   TrendingUp,
+  Zap,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { Payment, PaymentMethod } from '../../types';
@@ -17,6 +18,7 @@ import { formatCurrency, formatDateTime, getPaymentMethodLabel } from '../../uti
 import { generateOfficialReceiptPDF } from '../../utils/pdfGenerator';
 import { EODModal } from './EODModal';
 import { PaymentVerificationQueue } from './PaymentVerificationQueue';
+import { PaymentWebhookManager } from './PaymentWebhookManager';
 
 interface PaymentListProps {
   onOpenPaymentModal: () => void;
@@ -30,7 +32,7 @@ export const PaymentList: React.FC<PaymentListProps> = ({
   onSelectCustomer,
 }) => {
   const { payments, paymentSubmissions, businessProfile, deletePayment, searchTerm, setSearchTerm } = useApp();
-  const [activeSubTab, setActiveSubTab] = useState<'payments' | 'verification_queue'>('payments');
+  const [activeSubTab, setActiveSubTab] = useState<'payments' | 'verification_queue' | 'webhooks'>('payments');
   const [methodFilter, setMethodFilter] = useState<string>('all');
   const [showEODModal, setShowEODModal] = useState<boolean>(false);
 
@@ -165,9 +167,23 @@ export const PaymentList: React.FC<PaymentListProps> = ({
             </span>
           )}
         </button>
+
+        <button
+          onClick={() => setActiveSubTab('webhooks')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+            activeSubTab === 'webhooks'
+              ? 'bg-gradient-to-r from-cyan-500/20 to-blue-500/20 text-cyan-300 border border-cyan-500/50 shadow-sm'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+          }`}
+        >
+          <Zap className="w-4 h-4 text-amber-300" />
+          <span>⚡ Live Gateways & Auto-Reconnect</span>
+        </button>
       </div>
 
-      {activeSubTab === 'verification_queue' ? (
+      {activeSubTab === 'webhooks' ? (
+        <PaymentWebhookManager />
+      ) : activeSubTab === 'verification_queue' ? (
         <PaymentVerificationQueue onSelectCustomer={onSelectCustomer} />
       ) : (
         <>

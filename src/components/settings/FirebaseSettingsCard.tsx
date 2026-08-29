@@ -14,10 +14,11 @@ import {
   Check,
   HardDrive,
   Radio,
+  Trash2,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { firebaseConfig, testFirebaseConnection, FirebaseConnectionTestResult } from '../../config/firebase';
-import { seedFirestoreFromLocalData } from '../../services/firestoreService';
+import { seedFirestoreFromLocalData, purgeFirestoreCollections } from '../../services/firestoreService';
 
 export const FirebaseSettingsCard: React.FC = () => {
   const {
@@ -38,7 +39,10 @@ export const FirebaseSettingsCard: React.FC = () => {
     addonCatalog,
     businessProfile,
     showToast,
+    resetToDefault,
   } = useApp();
+
+  const [isPurging, setIsPurging] = useState<boolean>(false);
 
   const [testResult, setTestResult] = useState<FirebaseConnectionTestResult | null>(null);
   const [isTesting, setIsTesting] = useState<boolean>(false);
@@ -108,6 +112,31 @@ export const FirebaseSettingsCard: React.FC = () => {
       showToast('success', 'Cloud Sync Complete', `All ${result.totalUploaded} records synced to Firestore (${firebaseConfig.projectId}).`);
     } else {
       showToast('error', 'Cloud Migration Failed', result.error || 'Failed to complete upload.');
+    }
+  };
+
+  const handlePurgeFirestore = async () => {
+    if (
+      !window.confirm(
+        '⚠️ DANGER: This will permanently delete ALL documents in Cloud Firestore (invoices, subscribers, payments, NAP boxes, fiber cables, etc.) and reset your system to a 100% clean slate. Are you sure?'
+      )
+    ) {
+      return;
+    }
+
+    setIsPurging(true);
+    try {
+      const res = await purgeFirestoreCollections();
+      await resetToDefault();
+      if (res.success) {
+        showToast('success', 'Cloud Firestore Purged', `Deleted ${res.deletedCount} remote documents. Database is now clean!`);
+      } else {
+        showToast('error', 'Purge Encountered Error', res.error || 'Check Firestore rules.');
+      }
+    } catch (err: any) {
+      showToast('error', 'Purge Failed', err.message);
+    } finally {
+      setIsPurging(false);
     }
   };
 
@@ -217,15 +246,28 @@ service cloud.firestore {
               </p>
             </div>
 
-            <button
-              type="button"
-              onClick={handleMigrateToFirestore}
-              disabled={isMigrating}
-              className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl font-bold shadow-lg shadow-cyan-600/20 transition-all hover:scale-105 active:scale-95 disabled:opacity-50 whitespace-nowrap"
-            >
-              <UploadCloud className={`w-4 h-4 ${isMigrating ? 'animate-bounce' : ''}`} />
-              <span>{isMigrating ? 'Uploading...' : 'Sync Local Data to Cloud'}</span>
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={handleMigrateToFirestore}
+                disabled={isMigrating || isPurging}
+                className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl font-bold shadow-lg shadow-cyan-600/20 transition-all hover:scale-105 active:scale-95 disabled:opacity-50 whitespace-nowrap"
+              >
+                <UploadCloud className={`w-4 h-4 ${isMigrating ? 'animate-bounce' : ''}`} />
+                <span>{isMigrating ? 'Uploading...' : 'Sync Local Data to Cloud'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handlePurgeFirestore}
+                disabled={isPurging || isMigrating}
+                className="flex items-center gap-2 px-3.5 py-2.5 bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800/70 rounded-xl font-bold shadow-lg shadow-rose-950/30 transition-all hover:scale-105 active:scale-95 disabled:opacity-50 whitespace-nowrap"
+                title="Permanently wipe all test/mock documents in Firestore"
+              >
+                {isPurging ? <RefreshCw className="w-4 h-4 animate-spin text-rose-400" /> : <Trash2 className="w-4 h-4 text-rose-400" />}
+                <span>{isPurging ? 'Purging...' : '🧹 Wipe Cloud Firestore'}</span>
+              </button>
+            </div>
           </div>
 
           {isMigrating && (

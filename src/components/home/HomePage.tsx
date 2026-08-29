@@ -52,6 +52,9 @@ export const HomePage: React.FC<HomePageProps> = ({
   const [applicantName, setApplicantName] = useState<string>('');
   const [applicantMobile, setApplicantMobile] = useState<string>('09');
   const [applicantEmail, setApplicantEmail] = useState<string>('');
+  const [applicantInstallDate, setApplicantInstallDate] = useState<string>(
+    new Date().toISOString().slice(0, 10)
+  );
   const [applicantStreet, setApplicantStreet] = useState<string>('');
   const [applicantBarangay, setApplicantBarangay] = useState<string>('Binauahan');
   const [applicantLandmark, setApplicantLandmark] = useState<string>('');
@@ -108,7 +111,7 @@ export const HomePage: React.FC<HomePageProps> = ({
       monthlyFee: selectedPlan.monthlyFee,
       billingDay: 1,
       status: 'pending_install',
-      installationDate: new Date().toISOString().slice(0, 10),
+      installationDate: applicantInstallDate || new Date().toISOString().slice(0, 10),
       balance: 0,
       advanceDeposit: 0,
       network: {
@@ -236,26 +239,14 @@ export const HomePage: React.FC<HomePageProps> = ({
 
         {/* Right CTA Actions */}
         <div className="flex items-center gap-2 sm:gap-3">
-          {currentAuthUser ? (
+          {currentAuthUser && currentAuthUser.role === 'subscriber' ? (
             <div className="flex items-center gap-2">
-              <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-xl">
-                <div className="w-6 h-6 rounded-lg bg-gradient-to-tr from-cyan-600 to-blue-600 text-white flex items-center justify-center font-bold text-[10px] uppercase">
-                  {currentAuthUser.displayName?.slice(0, 2) || 'US'}
-                </div>
-                <span className="text-xs font-bold text-slate-200 hidden sm:inline">
-                  {currentAuthUser.displayName?.split(' ')[0] || currentAuthUser.email}
-                </span>
-                <span className="text-[9px] font-mono text-cyan-400 font-bold uppercase">
-                  {currentAuthUser.role}
-                </span>
-              </div>
-
               <button
                 type="button"
-                onClick={onOpenAdminDashboard}
-                className="flex items-center gap-1.5 px-3 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-cyan-600/20"
+                onClick={() => onOpenClientPortal()}
+                className="flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-cyan-600/20"
               >
-                <span>Console</span>
+                <span>My Portal</span>
                 <ArrowRight className="w-3.5 h-3.5" />
               </button>
 
@@ -285,7 +276,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                 className="flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-cyan-600/25 transition-all hover:scale-105 active:scale-95"
               >
                 <Zap className="w-3.5 h-3.5" />
-                <span>Sign Up</span>
+                <span>Apply Online</span>
               </button>
             </div>
           )}
@@ -717,8 +708,8 @@ export const HomePage: React.FC<HomePageProps> = ({
             <button onClick={() => setShowSignInModal(true)} className="hover:text-cyan-400">
               Subscriber Portal
             </button>
-            <button onClick={onOpenAdminDashboard} className="hover:text-cyan-400">
-              Admin Login
+            <button onClick={() => openAuthModal('signin')} className="hover:text-cyan-400">
+              Staff Portal
             </button>
           </div>
         </div>
@@ -835,15 +826,33 @@ export const HomePage: React.FC<HomePageProps> = ({
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-slate-400 mb-1 font-semibold">Email Address (Optional)</label>
-                  <input
-                    type="email"
-                    value={applicantEmail}
-                    onChange={(e) => setApplicantEmail(e.target.value)}
-                    placeholder="client@gmail.com"
-                    className="w-full px-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500"
-                  />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-slate-400 mb-1 font-semibold">Email Address (Optional)</label>
+                    <input
+                      type="email"
+                      value={applicantEmail}
+                      onChange={(e) => setApplicantEmail(e.target.value)}
+                      placeholder="client@gmail.com"
+                      className="w-full px-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-400 mb-1 font-semibold">Preferred Installation Date *</label>
+                    <input
+                      type="date"
+                      required
+                      value={applicantInstallDate}
+                      onClick={(e) => {
+                        if ('showPicker' in e.currentTarget) {
+                          try { e.currentTarget.showPicker(); } catch {}
+                        }
+                      }}
+                      onChange={(e) => setApplicantInstallDate(e.target.value)}
+                      className="w-full px-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500 cursor-pointer [color-scheme:dark]"
+                    />
+                  </div>
                 </div>
 
                 {/* Address Information */}

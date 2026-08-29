@@ -79,7 +79,11 @@ export const MikrotikDeviceManager: React.FC = () => {
     model: 'MikroTik CCR2004-16G-2S+',
     role: 'core_pppoe',
     ipAddress: '192.168.88.1',
+    port: 80,
     webfigPort: 80,
+    username: 'admin',
+    password: '',
+    useSsl: false,
     status: 'online',
     rosVersion: 'RouterOS v7.15.3 (Stable)',
     cpuLoad: 7,
@@ -109,7 +113,11 @@ export const MikrotikDeviceManager: React.FC = () => {
       model: 'MikroTik CCR2004-16G-2S+',
       role: 'core_pppoe',
       ipAddress: '192.168.88.1',
+      port: 80,
       webfigPort: 80,
+      username: 'admin',
+      password: '',
+      useSsl: false,
       status: 'online',
       rosVersion: 'RouterOS v7.15.3 (Stable)',
       cpuLoad: 6,
@@ -131,7 +139,11 @@ export const MikrotikDeviceManager: React.FC = () => {
       model: dev.model,
       role: dev.role,
       ipAddress: dev.ipAddress,
+      port: dev.port || 80,
       webfigPort: dev.webfigPort,
+      username: dev.username || 'admin',
+      password: dev.password || '',
+      useSsl: dev.useSsl || false,
       status: dev.status,
       rosVersion: dev.rosVersion,
       cpuLoad: dev.cpuLoad,
@@ -801,17 +813,68 @@ export const MikrotikDeviceManager: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block text-slate-400 mb-1 font-semibold">Router IP Address *</label>
+                  <label className="block text-slate-400 mb-1 font-semibold">Router IP / Host *</label>
                   <input
                     type="text"
                     required
                     value={formData.ipAddress}
                     onChange={(e) => setFormData({ ...formData, ipAddress: e.target.value })}
-                    placeholder="192.168.88.1"
+                    placeholder="192.168.88.1 or noc.swiftstream.ph"
                     className="w-full px-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-mono focus:outline-none focus:border-cyan-500"
                   />
                 </div>
 
+                <div>
+                  <label className="block text-slate-400 mb-1 font-semibold">Remote API / REST Port *</label>
+                  <input
+                    type="number"
+                    value={formData.port || 80}
+                    onChange={(e) => setFormData({ ...formData, port: parseInt(e.target.value) || 80 })}
+                    placeholder="80 / 443 / 8728"
+                    className="w-full px-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-mono focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
+              </div>
+
+              {/* RouterOS Credentials & SSL */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-4 rounded-2xl bg-slate-950/70 border border-slate-800">
+                <div>
+                  <label className="block text-slate-400 mb-1 font-semibold">API Username *</label>
+                  <input
+                    type="text"
+                    value={formData.username || 'admin'}
+                    onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+                    placeholder="admin"
+                    className="w-full px-3.5 py-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 font-mono focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-400 mb-1 font-semibold">API Password</label>
+                  <input
+                    type="password"
+                    value={formData.password || ''}
+                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                    placeholder="••••••••"
+                    className="w-full px-3.5 py-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 font-mono focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
+
+                <div className="flex flex-col justify-center">
+                  <label className="block text-slate-400 mb-2 font-semibold">Security</label>
+                  <label className="flex items-center gap-2 cursor-pointer text-slate-300">
+                    <input
+                      type="checkbox"
+                      checked={formData.useSsl || false}
+                      onChange={(e) => setFormData({ ...formData, useSsl: e.target.checked })}
+                      className="rounded accent-cyan-500 w-4 h-4"
+                    />
+                    <span className="text-[11px] font-medium">Use HTTPS / SSL</span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-slate-400 mb-1 font-semibold">WebFig Web Port</label>
                   <input
@@ -821,17 +884,17 @@ export const MikrotikDeviceManager: React.FC = () => {
                     className="w-full px-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-mono focus:outline-none focus:border-cyan-500"
                   />
                 </div>
-              </div>
 
-              <div>
-                <label className="block text-slate-400 mb-1 font-semibold">Installation / POP Location</label>
-                <input
-                  type="text"
-                  value={formData.location}
-                  onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-                  placeholder="e.g. Main POP Rack, Binauahan, Lagonoy"
-                  className="w-full px-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500"
-                />
+                <div>
+                  <label className="block text-slate-400 mb-1 font-semibold">Installation / POP Location</label>
+                  <input
+                    type="text"
+                    value={formData.location}
+                    onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+                    placeholder="e.g. Main POP Rack, Binauahan, Lagonoy"
+                    className="w-full px-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
               </div>
 
               <div>

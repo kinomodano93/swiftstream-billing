@@ -74,8 +74,10 @@ export interface BusinessProfile {
     sendgrid: string;
     smsApiKey: string;
     mikrotikIp: string;
+    mikrotikPort?: number;
     mikrotikUser: string;
     mikrotikPassword?: string;
+    mikrotikUseSsl?: boolean;
     geminiApiKey?: string;
     geminiModel?: string;
   };
@@ -456,7 +458,12 @@ export interface MikrotikDevice {
   model: string;
   role: 'core_pppoe' | 'distribution' | 'hotspot' | 'backup';
   ipAddress: string;
+  port?: number;
+  apiPort?: number;
   webfigPort: number;
+  username?: string;
+  password?: string;
+  useSsl?: boolean;
   status: 'online' | 'offline' | 'connecting';
   rosVersion: string;
   cpuLoad: number;
