@@ -240,7 +240,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </h3>
                 <p className="text-[11px] text-slate-400">
                   {mode === 'signin' && 'Sign in to access your Admin Dashboard or Subscriber Portal'}
-                  {mode === 'signup' && 'Register new staff or submit subscriber connection application'}
+                  {mode === 'signup' && 'Apply for a new Pure Fiber Internet connection in Lagonoy'}
                   {mode === 'forgot' && 'Reset your forgotten account password'}
                 </p>
               </div>
@@ -285,7 +285,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
-                Sign Up / Apply
+                Apply (Fiber Plan)
               </button>
             </div>
           )}
