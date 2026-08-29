@@ -98,6 +98,80 @@ export const testRouterConnection = async (
   creds: MikrotikCredentials
 ): Promise<RouterHealthInfo> => {
   const startTime = performance.now();
+  const cleanHost = creds.ipAddress.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  const port = creds.port || (creds.useHttps ? 443 : 80);
+
+  // 1. Try Firebase Cloud Function backend endpoint first (Zero CORS / Mixed Content)
+  const cloudEndpoints = [
+    '/api/mikrotikTest',
+    'https://asia-southeast1-swiftstream-portal.cloudfunctions.net/mikrotikTest',
+  ];
+
+  for (const endpoint of cloudEndpoints) {
+    try {
+      const fnController = new AbortController();
+      const fnTimeout = setTimeout(() => fnController.abort(), 10000);
+      const fnRes = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          host: cleanHost,
+          port,
+          username: creds.username,
+          password: creds.password,
+        }),
+        signal: fnController.signal,
+      });
+      clearTimeout(fnTimeout);
+
+      if (fnRes.ok) {
+        const payload = await fnRes.json();
+        if (payload?.success && payload?.router) {
+          const res = Array.isArray(payload.router) ? payload.router[0] : payload.router;
+          const totalMem = res['total-memory'] ? Math.round(Number(res['total-memory']) / (1024 * 1024)) : 0;
+          const freeMem = res['free-memory'] ? Math.round(Number(res['free-memory']) / (1024 * 1024)) : 0;
+          const detectedBoard = res['board-name'] || res['model'] || res['platform'] || 'CCR2116-12G-4S+';
+          const detectedPlatform = res['platform'] || res['architecture-name'] || 'MikroTik';
+          const detectedVersion = res['version'] || 'RouterOS v7';
+          const cpu = parseInt(res['cpu-load'] || '0', 10);
+          const up = res['uptime'] || '0s';
+
+          return {
+            status: 'connected',
+            boardName: detectedBoard,
+            model: detectedPlatform,
+            version: detectedVersion,
+            cpuLoad: isNaN(cpu) ? 0 : cpu,
+            uptime: up,
+            totalMemoryMb: totalMem,
+            freeMemoryMb: freeMem,
+            activePppoeCount: 0,
+            latencyMs: Math.max(1, Math.round(performance.now() - startTime)),
+            timestamp: new Date().toISOString(),
+          };
+        }
+      } else if (fnRes.status === 401 || fnRes.status === 403) {
+        return {
+          status: 'auth_failed',
+          boardName: 'MikroTik Router',
+          model: 'RouterOS Device',
+          version: 'v7.x',
+          cpuLoad: 0,
+          uptime: '0s',
+          totalMemoryMb: 0,
+          freeMemoryMb: 0,
+          activePppoeCount: 0,
+          latencyMs: Math.round(performance.now() - startTime),
+          timestamp: new Date().toISOString(),
+          errorMessage: 'Invalid username or password for RouterOS REST API (HTTP 401/403).',
+        };
+      }
+    } catch (_) {
+      // Continue to next endpoint or direct proxy fallback
+    }
+  }
+
+  // 2. Direct proxy or in-browser fallback
   const url = `${getBaseUrl(creds)}/system/resource`;
 
   try {

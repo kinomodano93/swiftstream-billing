@@ -1,4 +1,16 @@
 {
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "default",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "firebase-debug.*.log"
+      ]
+    }
+  ],
   "firestore": {
     "rules": "firestore.rules"
   },
@@ -30,6 +42,13 @@
       }
     ],
     "rewrites": [
+      {
+        "source": "/api/mikrotikTest",
+        "function": {
+          "functionId": "mikrotikTest",
+          "region": "asia-southeast1"
+        }
+      },
       {
         "source": "**",
         "destination": "/index.html"
