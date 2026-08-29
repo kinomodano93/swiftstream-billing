@@ -8,6 +8,23 @@ export type RepairStatus = 'received' | 'diagnosing' | 'in_progress' | 'ready' |
 
 export type ReminderType = 'upcoming_due' | 'due_today' | 'overdue_warning' | 'disconnection_notice' | 'payment_confirmation';
 
+export interface XenditConfig {
+  enabled: boolean;
+  provider: 'Xendit' | 'PayMongo' | 'Dragonpay';
+  country: 'Philippines (Xendit PH)' | 'Indonesia (Xendit ID)' | 'Malaysia (Xendit MY)' | 'Vietnam (Xendit VN)' | 'Thailand (Xendit TH)';
+  isProduction: boolean;
+  secretKey: string;
+  webhookToken: string;
+  webhookUrl: string;
+  defaultChannel: string;
+  enabledChannels: string[];
+  hasTransactionFee: boolean;
+  transactionFeeAmount: number;
+  autoDebitEnabled: boolean;
+  autoDebitChargeAfterDays: number;
+  autoDebitChannels: string[];
+}
+
 export interface BusinessProfile {
   name: string;
   tradeName: string;
@@ -50,6 +67,7 @@ export interface BusinessProfile {
     xenditPublicKey?: string;
     xenditWebhookToken?: string;
     xenditChannels?: string[];
+    xenditConfig?: XenditConfig;
   };
   apiKeys: {
     resend: string;
@@ -61,6 +79,8 @@ export interface BusinessProfile {
     geminiApiKey?: string;
     geminiModel?: string;
   };
+  smsGateway?: SmsGatewayConfig;
+  staffWebhooks?: StaffWebhooksConfig;
   smtp?: SmtpConfig;
   currencySymbol: string;
   currencyCode: string;
@@ -116,7 +136,9 @@ export interface Customer {
   status: CustomerStatus;
   installationDate: string;
   balance: number; // positive = unpaid balance, negative = advance credit
+  walletBalance?: number; // Pre-paid advance credits pool
   advanceDeposit: number;
+  contractMonths?: number;
   network: CustomerNetwork;
   installationDetails?: {
     technician?: string;
@@ -155,6 +177,9 @@ export interface Invoice {
   items: InvoiceItem[];
   subtotal: number;
   discount: number;
+  appliedCredit?: number; // Wallet balance credit deducted
+  isProrated?: boolean;
+  proratedDays?: number;
   previousBalance: number;
   totalAmount: number;
   amountPaid: number;
@@ -183,6 +208,8 @@ export interface Payment {
   paymentMethod: PaymentMethod;
   referenceNumber?: string;
   cashierName: string;
+  remittanceStatus?: 'pending' | 'remitted';
+  remittedAt?: string;
   notes?: string;
   isAdvancePayment: boolean;
   xenditDetails?: {
@@ -192,6 +219,33 @@ export interface Payment {
     fee?: number;
   };
   createdAt: string;
+}
+
+export interface DailyRemittanceRecord {
+  id: string;
+  remittanceDate: string;
+  cashierName: string;
+  totalCash: number;
+  totalGcash: number;
+  totalMaya: number;
+  totalBank: number;
+  totalCollected: number;
+  paymentCount: number;
+  actualCashInDrawer: number;
+  discrepancy: number; // actual - totalCash
+  status: 'open' | 'closed' | 'audited';
+  verifiedBy?: string;
+  notes?: string;
+  closedAt?: string;
+}
+
+export interface AddonCatalogItem {
+  id: string;
+  name: string;
+  category: 'hardware' | 'service' | 'fee' | 'static_ip';
+  price: number;
+  isRecurring: boolean;
+  description: string;
 }
 
 export interface GeoPoint {
@@ -554,6 +608,130 @@ export interface AuditLog {
   status: 'success' | 'failed';
 }
 
+export type WorkOrderType =
+  | 'new_installation'
+  | 'line_repair'
+  | 'onu_replacement'
+  | 'signal_restoration'
+  | 'relocation'
+  | 'preventive_maintenance';
 
+export type WorkOrderStatus =
+  | 'dispatched'
+  | 'en_route'
+  | 'on_site'
+  | 'testing'
+  | 'completed'
+  | 'cancelled';
 
+export interface OpticalReading {
+  opticalPowerDbm: number;
+  grade: 'PASS' | 'MARGINAL' | 'FAIL' | 'OVERPOWERED';
+  wavelength: '1310nm' | '1490nm' | '1550nm';
+  recordedAt: string;
+  napLossDbm?: number;
+}
 
+export interface WorkOrder {
+  id: string;
+  orderNumber: string;
+  type: WorkOrderType;
+  customerId: string;
+  customerName: string;
+  mobile: string;
+  address: string;
+  planName: string;
+  technician: string;
+  status: WorkOrderStatus;
+  scheduledDate: string;
+  priority: 'low' | 'normal' | 'high' | 'urgent';
+  assignedNapId?: string;
+  assignedNapPort?: number;
+  dropCableMeters?: number;
+  onuSerial?: string;
+  macAddress?: string;
+  opticalReading?: OpticalReading;
+  gpsCoordinates?: {
+    lat: number;
+    lng: number;
+    accuracyMeters?: number;
+  };
+  notes?: string;
+  completedAt?: string;
+  createdAt: string;
+}
+
+export type SmsProviderType = 'semaphore' | 'philsms' | 'twilio' | 'sandbox';
+
+export interface SmsGatewayConfig {
+  provider: SmsProviderType;
+  apiKey: string;
+  senderName: string; // e.g. "SWIFTSTREAM"
+  // Twilio Specific
+  twilioAccountSid?: string;
+  twilioAuthToken?: string;
+  twilioFromNumber?: string;
+  // PhilSMS Specific
+  philsmsSenderId?: string;
+  enabled: boolean;
+  lastTestedAt?: string;
+}
+
+export interface StaffWebhooksConfig {
+  telegramEnabled: boolean;
+  telegramBotToken?: string;
+  telegramChatId?: string;
+  discordEnabled: boolean;
+  discordWebhookUrl?: string;
+  // Notification Toggles
+  notifyOnOutage: boolean;
+  notifyOnCashierRemittance: boolean;
+  notifyOnTelemetryWatchdog: boolean;
+  notifyOnUrgentRepair: boolean;
+}
+
+export type OutageType =
+  | 'fiber_cut'
+  | 'olt_pon_failure'
+  | 'power_interruption'
+  | 'emergency_splicing'
+  | 'scheduled_maintenance';
+
+export interface OutageBroadcastRecord {
+  id: string;
+  incidentNumber: string;
+  type: OutageType;
+  title: string;
+  description: string;
+  targetScope: 'all' | 'nap_box' | 'olt_pon' | 'barangay';
+  targetEntityId?: string;
+  targetEntityName?: string;
+  impactedSubscribersCount: number;
+  estimatedRestorationTime: string;
+  advisoryMessage: string;
+  channelsSent: ('sms' | 'email' | 'telegram' | 'discord')[];
+  status: 'active_outage' | 'restoring' | 'resolved';
+  declaredBy: string;
+  declaredAt: string;
+  resolvedAt?: string;
+}
+
+export interface PaymentSubmission {
+  id: string;
+  submissionNumber: string;
+  customerId: string;
+  customerName: string;
+  accountNo: string;
+  invoiceId?: string;
+  invoiceNumber?: string;
+  amount: number;
+  paymentMethod: PaymentMethod;
+  referenceNumber: string;
+  receiptImageUrl?: string;
+  status: 'pending_review' | 'approved' | 'rejected';
+  submittedAt: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  rejectionReason?: string;
+  notes?: string;
+}

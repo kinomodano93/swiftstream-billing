@@ -13,10 +13,14 @@ import {
   Smartphone,
   Wifi,
   Battery,
+  Bot,
+  Layers,
+  Sparkles,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { ReminderType } from '../../types';
+import { ReminderType, OutageBroadcastRecord } from '../../types';
 import { formatCurrency, formatDateTime, formatPhoneNumber } from '../../utils/formatters';
+import { OutageBroadcastModal } from './OutageBroadcastModal';
 
 export const ReminderCenter: React.FC = () => {
   const { customers, reminders, businessProfile, sendReminder, sendBatchReminders } = useApp();
@@ -26,6 +30,27 @@ export const ReminderCenter: React.FC = () => {
   const [channel, setChannel] = useState<'sms' | 'email' | 'both'>('sms');
   const [isSendingBatch, setIsSendingBatch] = useState<boolean>(false);
   const [activePreviewText, setActivePreviewText] = useState<string | null>(null);
+  const [showOutageModal, setShowOutageModal] = useState<boolean>(false);
+
+  const [outageHistory, setOutageHistory] = useState<OutageBroadcastRecord[]>([
+    {
+      id: 'outage-init-1',
+      incidentNumber: 'OUT-918241',
+      type: 'fiber_cut',
+      title: 'Service Interruption - NAP-01 Binauahan Center',
+      description: 'Fiber cable cut along Purok Maharlika caused by DPWH road widening. Core splicing in progress.',
+      targetScope: 'nap_box',
+      targetEntityName: 'NAP-01 Binauahan Center (Binauahan)',
+      impactedSubscribersCount: 8,
+      estimatedRestorationTime: '2 - 3 Hours',
+      advisoryMessage: 'SWIFTSTREAM EMERGENCY FIBER CABLE CUT ADVISORY: Please be advised of a service interruption affecting NAP-01 Binauahan Center. Field fiber splicers are actively restoring lines. ETR: 2-3 Hours.',
+      channelsSent: ['sms', 'telegram', 'discord'],
+      status: 'resolved',
+      declaredBy: 'Leonardo Flojo',
+      declaredAt: '2026-08-28 11:30:00',
+      resolvedAt: '2026-08-28 13:45:00',
+    },
+  ]);
 
   const selectedCustomer = customers.find((c) => c.id === selectedCustomerId);
 
@@ -70,15 +95,23 @@ export const ReminderCenter: React.FC = () => {
         <div>
           <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2">
             <Send className="w-5 h-5 text-cyan-400" />
-            <span>SMS & Email Automated Billing Dispatcher</span>
+            <span>SMS, Outage Blast & Staff Bot Dispatcher</span>
           </h2>
           <p className="text-xs text-slate-400 mt-1">
-            Send instant payment notices, GCash transfer instructions, and automated cutoff warnings.
+            Multi-Gateway SMS (Semaphore / PhilSMS / Twilio), 1-click community fiber outage broadcasts, and Telegram/Discord staff webhooks.
           </p>
         </div>
 
-        {/* Batch Broadcast Buttons */}
-        <div className="flex items-center gap-2">
+        {/* Action Buttons */}
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => setShowOutageModal(true)}
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-rose-600/20 transition-all hover:scale-105"
+          >
+            <AlertTriangle className="w-4 h-4" />
+            <span>Declare Fiber Outage & Blast</span>
+          </button>
+
           <button
             disabled={isSendingBatch}
             onClick={() => handleBatchBroadcast('upcoming')}
@@ -96,6 +129,49 @@ export const ReminderCenter: React.FC = () => {
             <AlertTriangle className="w-3.5 h-3.5" />
             <span>Blast Overdue Warnings</span>
           </button>
+        </div>
+      </div>
+
+      {/* Gateway Status Bar */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+        <div className="p-3.5 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-between">
+          <div>
+            <span className="text-[10px] text-slate-500 block">SMS Gateway Provider:</span>
+            <span className="font-bold text-slate-200 uppercase font-mono">
+              {businessProfile.smsGateway?.provider || 'Semaphore API'}
+            </span>
+          </div>
+          <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+        </div>
+
+        <div className="p-3.5 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-between">
+          <div>
+            <span className="text-[10px] text-slate-500 block">Sender ID / Mask:</span>
+            <span className="font-bold text-cyan-300 font-mono">
+              {businessProfile.smsGateway?.senderName || 'SWIFTSTREAM'}
+            </span>
+          </div>
+          <Smartphone className="w-4 h-4 text-cyan-400" />
+        </div>
+
+        <div className="p-3.5 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-between">
+          <div>
+            <span className="text-[10px] text-slate-500 block">Telegram Staff Bot:</span>
+            <span className="font-bold text-sky-400">
+              {businessProfile.staffWebhooks?.telegramEnabled ? '🟢 NOC Connected' : '⚪ Disabled'}
+            </span>
+          </div>
+          <Bot className="w-4 h-4 text-sky-400" />
+        </div>
+
+        <div className="p-3.5 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-between">
+          <div>
+            <span className="text-[10px] text-slate-500 block">Discord Webhook:</span>
+            <span className="font-bold text-purple-400">
+              {businessProfile.staffWebhooks?.discordEnabled ? '🟢 Staff Channel' : '⚪ Disabled'}
+            </span>
+          </div>
+          <Zap className="w-4 h-4 text-purple-400" />
         </div>
       </div>
 
@@ -301,6 +377,67 @@ export const ReminderCenter: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Outage Incident Records Log */}
+      <div className="p-6 rounded-3xl bg-slate-900 border border-slate-800 shadow-card space-y-4">
+        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 rounded-xl bg-rose-950 text-rose-400 border border-rose-800/40">
+              <AlertTriangle className="w-4 h-4" />
+            </div>
+            <div>
+              <h4 className="font-bold text-sm text-slate-100">Community Outage Broadcast History</h4>
+              <p className="text-xs text-slate-400">Past declared fiber cuts, OLT degradations, and restoration logs</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {outageHistory.map((item) => (
+            <div
+              key={item.id}
+              className="p-4 rounded-2xl bg-slate-950/70 border border-slate-800 space-y-2.5 text-xs"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <span className="font-mono text-[10px] text-rose-400 font-bold bg-rose-950/60 px-2 py-0.5 rounded border border-rose-800/40">
+                    {item.incidentNumber}
+                  </span>
+                  <h5 className="font-bold text-slate-200 mt-1">{item.title}</h5>
+                </div>
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-emerald-950 text-emerald-300 border border-emerald-800/40">
+                  {item.status}
+                </span>
+              </div>
+
+              <p className="text-[11px] text-slate-400 line-clamp-2">{item.description}</p>
+
+              <div className="grid grid-cols-2 gap-2 text-[10px] text-slate-500 pt-2 border-t border-slate-800/60">
+                <div>
+                  <span>Impacted:</span> <strong className="text-slate-300">{item.impactedSubscribersCount} Subscribers</strong>
+                </div>
+                <div>
+                  <span>ETR:</span> <strong className="text-cyan-300">{item.estimatedRestorationTime}</strong>
+                </div>
+                <div className="col-span-2 flex items-center justify-between text-slate-500">
+                  <span>Declared by {item.declaredBy}</span>
+                  <span>{formatDateTime(item.declaredAt)}</span>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Outage Modal */}
+      {showOutageModal && (
+        <OutageBroadcastModal
+          onClose={() => setShowOutageModal(false)}
+          onBroadcastComplete={(record) => {
+            setOutageHistory((prev) => [record, ...prev]);
+          }}
+        />
+      )}
     </div>
   );
 };

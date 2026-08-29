@@ -54,13 +54,26 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
     toggleCustomerStatus,
     syncCustomerMikrotik,
     sendReminder,
+    addCustomerWalletCredit,
     setActiveTab: setGlobalActiveTab,
   } = useApp();
 
   const [activeTab, setActiveTab] = useState<'profile' | 'invoices' | 'payments' | 'repairs'>('profile');
+  const [showCreditInput, setShowCreditInput] = useState<boolean>(false);
+  const [creditAmountInput, setCreditAmountInput] = useState<string>('');
 
   const customer = customers.find((c) => c.id === customerId);
   if (!customer) return null;
+
+  const handleAddCredit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const amount = parseFloat(creditAmountInput);
+    if (amount > 0) {
+      addCustomerWalletCredit(customer.id, amount, 'Advance credit top-up');
+      setShowCreditInput(false);
+      setCreditAmountInput('');
+    }
+  };
 
   const customerInvoices = invoices.filter((inv) => inv.customerId === customer.id);
   const customerPayments = payments.filter((p) => p.customerId === customer.id);
@@ -145,6 +158,15 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
             </button>
 
             <button
+              onClick={() => setShowCreditInput((prev) => !prev)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-600/20 text-cyan-400 hover:bg-cyan-600 hover:text-white rounded-lg font-semibold transition-colors"
+              title="Add Advance Credit Wallet Balance"
+            >
+              <CreditCard className="w-3.5 h-3.5" />
+              <span>+ Add Credit</span>
+            </button>
+
+            <button
               onClick={() => {
                 onClose();
                 setGlobalActiveTab('portal');
@@ -157,17 +179,60 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
             </button>
           </div>
 
-          <div className="flex items-center gap-3">
-            <span className="text-slate-400">Current Ledger Balance:</span>
-            <span
-              className={`font-mono text-base font-bold ${
-                customer.balance > 0 ? 'text-rose-400' : customer.balance < 0 ? 'text-emerald-400' : 'text-slate-300'
-              }`}
-            >
-              {formatCurrency(customer.balance)}
-            </span>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-1.5 text-xs">
+              <span className="text-slate-400">Credit Wallet:</span>
+              <span className="font-mono font-bold text-emerald-400">
+                {formatCurrency(customer.walletBalance || 0)}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1.5 text-xs border-l border-slate-800 pl-3">
+              <span className="text-slate-400">Balance Due:</span>
+              <span
+                className={`font-mono text-base font-bold ${
+                  customer.balance > 0 ? 'text-rose-400' : customer.balance < 0 ? 'text-emerald-400' : 'text-slate-300'
+                }`}
+              >
+                {formatCurrency(customer.balance)}
+              </span>
+            </div>
           </div>
         </div>
+
+        {/* Inline Credit Top-Up Input Banner */}
+        {showCreditInput && (
+          <form onSubmit={handleAddCredit} className="px-6 py-2.5 bg-cyan-950/40 border-b border-cyan-800/40 flex items-center justify-between gap-3 text-xs animate-in slide-in-from-top-2">
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-cyan-300">Deposit Advance Credit:</span>
+              <input
+                type="number"
+                step="any"
+                autoFocus
+                value={creditAmountInput}
+                onChange={(e) => setCreditAmountInput(e.target.value)}
+                placeholder="Amount (e.g. 1500)"
+                className="w-36 px-2.5 py-1 bg-slate-900 border border-slate-700 rounded-lg text-slate-100 font-mono text-xs focus:outline-none focus:border-cyan-500"
+                required
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="submit"
+                className="px-3 py-1 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold rounded-lg transition-colors"
+              >
+                Deposit Credit
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowCreditInput(false)}
+                className="px-2 py-1 text-slate-400 hover:text-slate-200"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        )}
 
         {/* Navigation Tabs */}
         <div className="flex border-b border-slate-800 px-6 bg-slate-950/40 text-xs">

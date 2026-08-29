@@ -16,6 +16,7 @@ import {
   Globe,
   LogOut,
   Server,
+  Smartphone,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 
@@ -26,6 +27,7 @@ export const Sidebar: React.FC = () => {
   const overdueCount = customers.filter((c) => c.status === 'overdue' || c.status === 'suspended').length;
   const unpaidInvoicesCount = invoices.filter((i) => i.status === 'unpaid' || i.status === 'overdue').length;
   const openRepairsCount = repairOrders.filter((r) => r.status !== 'completed' && r.status !== 'cancelled').length;
+  const pendingInstallsCount = customers.filter((c) => c.status === 'pending_install').length;
 
   const navItems = [
     {
@@ -47,6 +49,13 @@ export const Sidebar: React.FC = () => {
       icon: Radio,
       badge: 'Client View',
       badgeColor: 'bg-cyan-500/20 text-cyan-300 font-bold',
+    },
+    {
+      id: 'field_ops',
+      label: 'Field Tech & Installs',
+      icon: Smartphone,
+      badge: pendingInstallsCount > 0 ? `${pendingInstallsCount} new` : 'PWA',
+      badgeColor: 'bg-emerald-500/20 text-emerald-300 font-bold font-mono',
     },
     {
       id: 'customers',

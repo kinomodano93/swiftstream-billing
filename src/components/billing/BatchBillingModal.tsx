@@ -18,6 +18,8 @@ export const BatchBillingModal: React.FC<BatchBillingModalProps> = ({ onClose })
   const [billingMonth, setBillingMonth] = useState<string>(defaultMonth);
   const [dueDate, setDueDate] = useState<string>(defaultDueDate);
   const [cycleDayFilter, setCycleDayFilter] = useState<string>('all');
+  const [applyWalletCredits, setApplyWalletCredits] = useState<boolean>(true);
+  const [enableProration, setEnableProration] = useState<boolean>(true);
   const [isDone, setIsDone] = useState<boolean>(false);
   const [resultCount, setResultCount] = useState<number>(0);
   const [resultAmount, setResultAmount] = useState<number>(0);
@@ -44,6 +46,8 @@ export const BatchBillingModal: React.FC<BatchBillingModalProps> = ({ onClose })
       billingMonth,
       dueDate,
       billingCycleDay: cycleDayFilter === 'all' ? undefined : Number(cycleDayFilter),
+      applyWalletCredits,
+      enableProration,
     });
 
     setResultCount(res.count);
@@ -119,6 +123,35 @@ export const BatchBillingModal: React.FC<BatchBillingModalProps> = ({ onClose })
                     <option value="20">Day 20 Cut-off Only</option>
                   </select>
                 </div>
+              </div>
+
+              {/* Automation Checkboxes */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3.5 bg-slate-950/40 rounded-2xl border border-slate-800/80">
+                <label className="flex items-center gap-2.5 cursor-pointer text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={applyWalletCredits}
+                    onChange={(e) => setApplyWalletCredits(e.target.checked)}
+                    className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-0"
+                  />
+                  <div>
+                    <span className="font-bold block">Auto-Deduct Advance Credit Wallets</span>
+                    <span className="text-[10px] text-slate-500">Applies subscriber prepayments to reduce balance due</span>
+                  </div>
+                </label>
+
+                <label className="flex items-center gap-2.5 cursor-pointer text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={enableProration}
+                    onChange={(e) => setEnableProration(e.target.checked)}
+                    className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-0"
+                  />
+                  <div>
+                    <span className="font-bold block">Mid-Month Installation Proration</span>
+                    <span className="text-[10px] text-slate-500">Calculates exact active days for newly activated subscribers</span>
+                  </div>
+                </label>
               </div>
 
               {/* Generation Summary Box */}

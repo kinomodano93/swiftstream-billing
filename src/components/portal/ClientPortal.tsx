@@ -30,6 +30,8 @@ import {
   Layers,
   Zap,
   Globe,
+  X,
+  Smartphone,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import confetti from 'canvas-confetti';
@@ -47,6 +49,7 @@ import {
 } from '../../utils/formatters';
 import { generateInvoicePDF, generateOfficialReceiptPDF } from '../../utils/pdfGenerator';
 import { XENDIT_CHANNELS, createXenditCheckoutSession } from '../../utils/xenditService';
+import { generateDynamicQrPhPayload } from '../../utils/qrPhGenerator';
 import { GeminiAiAssistant } from '../ai/GeminiAiAssistant';
 
 interface ClientPortalProps {
@@ -64,10 +67,12 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
     customers,
     invoices,
     payments,
+    paymentSubmissions,
     repairOrders,
     plans,
     businessProfile,
     recordPayment,
+    submitPaymentProof,
     addRepairOrder,
     logout,
   } = useApp();
@@ -89,6 +94,9 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
   const [payAmount, setPayAmount] = useState<string>('');
   const [payMethod, setPayMethod] = useState<PaymentMethod>('gcash');
   const [payReference, setPayReference] = useState<string>('');
+  const [receiptImageBase64, setReceiptImageBase64] = useState<string | null>(null);
+  const [showFullQrModal, setShowFullQrModal] = useState<boolean>(false);
+  const [submittedProofSuccess, setSubmittedProofSuccess] = useState<boolean>(false);
   const [xenditSubChannel, setXenditSubChannel] = useState<string>('7ELEVEN');
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [isSubmittingPayment, setIsSubmittingPayment] = useState<boolean>(false);
@@ -132,6 +140,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
   // Unpaid invoices for this subscriber
   const unpaidInvoices = customerInvoices.filter((i) => i.status !== 'paid');
   const latestUnpaidInvoice = unpaidInvoices[0];
+  const selectedPayInvoice = customerInvoices.find((i) => i.id === payInvoiceId);
 
   // Pre-fill payment amount when switching to Pay tab or selecting invoice
   useEffect(() => {
@@ -202,16 +211,32 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
 
     setIsSubmittingPayment(true);
 
-    const newPayment = recordPayment({
-      customerId: customer.id,
-      invoiceId: payInvoiceId || latestUnpaidInvoice?.id || undefined,
-      amount: amountNum,
-      paymentMethod: payMethod,
-      referenceNumber: ref,
-      cashierName: payMethod === 'xendit' ? `Xendit Gateway (${xenditSubChannel})` : 'Online Portal Gateway (GCash/Maya Self-Pay)',
-      notes: `Subscriber self-service payment via Client Portal. Channel: ${payMethod.toUpperCase()} (${xenditSubChannel}). Ref: ${ref}`,
-      isAdvancePayment: customer.balance <= 0,
-    });
+    if (payMethod === 'xendit') {
+      const newPayment = recordPayment({
+        customerId: customer.id,
+        invoiceId: payInvoiceId || latestUnpaidInvoice?.id || undefined,
+        amount: amountNum,
+        paymentMethod: payMethod,
+        referenceNumber: ref,
+        cashierName: `Xendit Gateway (${xenditSubChannel})`,
+        notes: `Direct Xendit payment via Client Portal (${xenditSubChannel}). Ref: ${ref}`,
+        isAdvancePayment: customer.balance <= 0,
+      });
+      setJustPaidPaymentId(newPayment.id);
+    } else {
+      // Submit for Cashier Verification Queue
+      submitPaymentProof({
+        customerId: customer.id,
+        invoiceId: payInvoiceId || latestUnpaidInvoice?.id || undefined,
+        amount: amountNum,
+        paymentMethod: payMethod,
+        referenceNumber: ref,
+        receiptImageUrl: receiptImageBase64 || undefined,
+        notes: `Submitted via Client Portal (${payMethod.toUpperCase()}). Pending cashier audit.`,
+      });
+      setSubmittedProofSuccess(true);
+      setTimeout(() => setSubmittedProofSuccess(false), 8000);
+    }
 
     try {
       confetti({
@@ -224,8 +249,8 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
     }
 
     setIsSubmittingPayment(false);
-    setJustPaidPaymentId(newPayment.id);
     setPayReference('');
+    setReceiptImageBase64(null);
   };
 
   // Handle Trouble Ticket Submission
@@ -1240,84 +1265,95 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                   </div>
                 </div>
               ) : (
-                /* Direct GCash, Maya, or Bank QR & Details */
-                <div className="p-5 rounded-2xl bg-slate-950 border border-slate-800 space-y-4">
-                  <div className="flex flex-col sm:flex-row items-center gap-5">
-                    {payMethod === 'gcash' && businessProfile.paymentGateways.gcashQrImage ? (
-                      <div className="bg-white p-2 rounded-2xl border border-slate-700 flex-shrink-0 shadow-lg">
-                        <img
-                          src={businessProfile.paymentGateways.gcashQrImage}
-                          alt="Official GCash QR"
-                          className="w-28 h-28 object-contain rounded-xl"
-                        />
+                /* Dynamic QR Ph / GCash / Maya Interoperable QR Gateway */
+                <div className="p-5 rounded-3xl bg-slate-950 border border-slate-800 space-y-4">
+                  <div className="flex flex-col md:flex-row items-center gap-6">
+                    {/* QR Code Container with QR Ph Official Header */}
+                    <div className="bg-white p-4 rounded-3xl border-2 border-slate-700 flex-shrink-0 shadow-2xl flex flex-col items-center gap-2">
+                      <div className="flex items-center gap-1.5 text-slate-900 font-bold text-[11px] tracking-wider uppercase border-b border-slate-200 pb-1 w-full justify-center">
+                        <QrCode className="w-4 h-4 text-rose-600" />
+                        <span>BSP QR Ph Dynamic</span>
                       </div>
-                    ) : payMethod === 'maya' && businessProfile.paymentGateways.mayaQrImage ? (
-                      <div className="bg-white p-2 rounded-2xl border border-slate-700 flex-shrink-0 shadow-lg">
-                        <img
-                          src={businessProfile.paymentGateways.mayaQrImage}
-                          alt="Official Maya QR"
-                          className="w-28 h-28 object-contain rounded-xl"
-                        />
-                      </div>
-                    ) : (
-                      <div className="bg-white p-3 rounded-2xl border border-slate-700 flex-shrink-0 shadow-lg">
-                        <QRCodeSVG value={qrPaymentPayload} size={110} />
-                      </div>
-                    )}
 
-                    <div className="space-y-2 text-xs flex-1">
+                      <QRCodeSVG
+                        value={
+                          generateDynamicQrPhPayload({
+                            merchantName: businessProfile.tradeName || 'SWIFTSTREAM TELECOM',
+                            merchantCity: businessProfile.address.city || 'LAGONOY',
+                            accountNumber: customer.accountNo,
+                            amount: Number(payAmount) || (customer.balance > 0 ? customer.balance : customer.monthlyFee),
+                            invoiceNumber: selectedPayInvoice?.invoiceNumber || 'BILL-2026',
+                            mobileNumber: businessProfile.paymentGateways.gcashNumber || '09624171684',
+                            serviceProvider: payMethod === 'gcash' ? 'gcash' : payMethod === 'maya' ? 'maya' : 'qrph_national',
+                          })
+                        }
+                        size={150}
+                        level="M"
+                      />
+
+                      <div className="text-center text-[10px] text-slate-600 font-mono font-bold">
+                        ₱{(Number(payAmount) || (customer.balance > 0 ? customer.balance : customer.monthlyFee)).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      </div>
+                    </div>
+
+                    <div className="space-y-3 text-xs flex-1">
                       <div className="flex items-center justify-between">
-                        <span className="font-bold text-slate-200">
-                          {payMethod === 'gcash'
-                            ? 'GCash Registered Account'
-                            : payMethod === 'maya'
-                            ? 'Maya Merchant Account'
-                            : 'BDO / Landbank Account'}
+                        <span className="font-bold text-slate-100 flex items-center gap-1.5">
+                          <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                          <span>QR Ph Interoperable National Gateway</span>
                         </span>
-                        <span className="text-[10px] text-emerald-400 bg-emerald-950 px-2 py-0.5 rounded font-mono font-semibold">
-                          Instant Verification
+                        <span className="text-[10px] text-cyan-400 bg-cyan-950 border border-cyan-800/40 px-2 py-0.5 rounded-full font-mono font-bold">
+                          Dynamic Amount Embedded
                         </span>
                       </div>
 
-                      <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between">
-                        <div>
-                          <span className="text-[10px] text-slate-500 block">Account Number / Mobile:</span>
-                          <span className="font-mono font-bold text-sm text-cyan-400">
-                            {payMethod === 'gcash'
-                              ? businessProfile.paymentGateways.gcashNumber
-                              : payMethod === 'maya'
-                              ? businessProfile.paymentGateways.mayaNumber
-                              : businessProfile.paymentGateways.bankAccountNumber}
-                          </span>
-                        </div>
-                        <button
-                          onClick={() =>
-                            handleCopy(
-                              payMethod === 'gcash'
+                      <p className="text-slate-400 text-[11px] leading-relaxed">
+                        Open your <strong>GCash</strong>, <strong>Maya</strong>, <strong>BDO Pay</strong>, <strong>BPI</strong>, <strong>GoTyme</strong>, or <strong>SeaBank</strong> app and scan this dynamic QR code. The exact bill amount and your subscriber Account No. (<strong>{customer.accountNo}</strong>) are automatically filled in.
+                      </p>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                        <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between">
+                          <div>
+                            <span className="text-[10px] text-slate-500 block">Registered Account:</span>
+                            <span className="font-mono font-bold text-slate-200">
+                              {payMethod === 'gcash'
                                 ? businessProfile.paymentGateways.gcashNumber
                                 : payMethod === 'maya'
                                 ? businessProfile.paymentGateways.mayaNumber
-                                : businessProfile.paymentGateways.bankAccountNumber,
-                              'acct'
-                            )
-                          }
-                          className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg text-xs flex items-center gap-1"
-                        >
-                          {copiedField === 'acct' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                          <span>{copiedField === 'acct' ? 'Copied' : 'Copy'}</span>
-                        </button>
-                      </div>
+                                : businessProfile.paymentGateways.bankAccountNumber}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleCopy(
+                                payMethod === 'gcash'
+                                  ? businessProfile.paymentGateways.gcashNumber
+                                  : payMethod === 'maya'
+                                  ? businessProfile.paymentGateways.mayaNumber
+                                  : businessProfile.paymentGateways.bankAccountNumber,
+                                'acct'
+                              )
+                            }
+                            className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg"
+                            title="Copy Account Number"
+                          >
+                            {copiedField === 'acct' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                          </button>
+                        </div>
 
-                      <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between">
-                        <div>
-                          <span className="text-[10px] text-slate-500 block">Account Name:</span>
-                          <span className="font-bold text-slate-200">
-                            {payMethod === 'gcash'
-                              ? businessProfile.paymentGateways.gcashName
-                              : payMethod === 'maya'
-                              ? businessProfile.paymentGateways.mayaName
-                              : businessProfile.paymentGateways.bankAccountName}
-                          </span>
+                        <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between">
+                          <div>
+                            <span className="text-[10px] text-slate-500 block">Merchant Name:</span>
+                            <span className="font-bold text-slate-200 truncate block max-w-[140px]">
+                              {payMethod === 'gcash'
+                                ? businessProfile.paymentGateways.gcashName
+                                : payMethod === 'maya'
+                                ? businessProfile.paymentGateways.mayaName
+                                : businessProfile.paymentGateways.bankAccountName}
+                            </span>
+                          </div>
+                          <span className="text-[10px] font-mono text-emerald-400">Verified</span>
                         </div>
                       </div>
                     </div>
@@ -1325,15 +1361,18 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                 </div>
               )}
 
-              {/* Step 3: Enter Amount & Reference No. */}
+              {/* Step 2: Upload Proof Screenshot & Submit Reference */}
               <form onSubmit={handleConfirmOnlinePayment} className="space-y-4 text-xs">
-                <span className="font-bold text-slate-300 uppercase tracking-wider block">
-                  2. Submit Payment Verification
-                </span>
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-slate-200 uppercase tracking-wider block">
+                    2. Submit Proof of Payment & Reference No.
+                  </span>
+                  <span className="text-[11px] text-cyan-400 font-medium">Cashier Verification Required</span>
+                </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-slate-400 mb-1 font-medium">Amount to Pay (PHP ₱) *</label>
+                    <label className="block text-slate-400 mb-1 font-medium">Amount Transferred (PHP ₱) *</label>
                     <input
                       type="number"
                       step="any"
@@ -1364,17 +1403,137 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                   </div>
                 </div>
 
+                {/* Screenshot Uploader Dropzone */}
+                {payMethod !== 'xendit' && (
+                  <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-2">
+                    <label className="block text-slate-300 font-semibold">
+                      Upload Payment Screenshot / Transfer Receipt (Optional):
+                    </label>
+
+                    {receiptImageBase64 ? (
+                      <div className="flex items-center gap-3 p-3 bg-slate-900 rounded-xl border border-slate-700">
+                        <img
+                          src={receiptImageBase64}
+                          alt="Receipt Preview"
+                          className="w-12 h-12 object-cover rounded-lg border border-slate-600"
+                        />
+                        <div className="flex-1">
+                          <span className="font-bold text-slate-200 block text-xs">Payment Screenshot Attached</span>
+                          <span className="text-[10px] text-emerald-400">Ready for cashier review</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setReceiptImageBase64(null)}
+                          className="p-1.5 text-rose-400 hover:text-rose-300 hover:bg-rose-950/40 rounded-lg"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="relative border-2 border-dashed border-slate-700 hover:border-cyan-500/60 rounded-2xl p-4 text-center cursor-pointer transition-colors">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              const reader = new FileReader();
+                              reader.onload = (event) => {
+                                setReceiptImageBase64(event.target?.result as string);
+                              };
+                              reader.readAsDataURL(file);
+                            }
+                          }}
+                          className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                        />
+                        <div className="flex flex-col items-center justify-center gap-1.5 text-slate-400">
+                          <Smartphone className="w-6 h-6 text-cyan-400" />
+                          <span className="font-semibold text-slate-200">Tap to upload receipt photo / screenshot</span>
+                          <span className="text-[10px] text-slate-500">Supports JPG, PNG, WEBP (Max 5MB)</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div className="pt-2">
                   <button
                     type="submit"
                     disabled={isSubmittingPayment}
-                    className="w-full flex items-center justify-center gap-2 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-sm font-bold shadow-lg shadow-emerald-600/20 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50"
+                    className="w-full flex items-center justify-center gap-2 py-3.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-2xl text-sm font-bold shadow-lg shadow-emerald-600/20 transition-all hover:scale-[1.01] active:scale-[0.98] disabled:opacity-50"
                   >
                     <Check className="w-4 h-4" />
-                    <span>Confirm & Generate Official Receipt (OR)</span>
+                    <span>
+                      {payMethod === 'xendit'
+                        ? 'Confirm & Pay via Xendit'
+                        : 'Submit Payment Proof for Cashier Verification'}
+                    </span>
                   </button>
                 </div>
+
+                {submittedProofSuccess && (
+                  <div className="p-4 rounded-2xl bg-emerald-950/60 border border-emerald-800/60 text-emerald-200 flex items-start gap-3 animate-in fade-in">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+                    <div>
+                      <h4 className="font-bold text-xs">Payment Proof Submitted Successfully!</h4>
+                      <p className="text-[11px] text-slate-300 mt-0.5">
+                        Our cashier has received your transaction reference. Once verified against our bank terminal, your invoice will be marked as paid and you will receive an SMS confirmation.
+                      </p>
+                    </div>
+                  </div>
+                )}
               </form>
+
+              {/* Subscriber's Recent Payment Proof Submissions Tracker */}
+              {customer && paymentSubmissions.filter((s) => s.customerId === customer.id).length > 0 && (
+                <div className="p-5 rounded-3xl bg-slate-900 border border-slate-800 space-y-3">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                    <span className="font-bold text-slate-200 text-xs flex items-center gap-2">
+                      <Clock className="w-4 h-4 text-cyan-400" />
+                      <span>Your Payment Verification History</span>
+                    </span>
+                  </div>
+
+                  <div className="space-y-2">
+                    {paymentSubmissions
+                      .filter((s) => s.customerId === customer.id)
+                      .map((sub) => (
+                        <div
+                          key={sub.id}
+                          className="p-3 rounded-2xl bg-slate-950 border border-slate-800/80 flex items-center justify-between text-xs"
+                        >
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono font-bold text-slate-200">#{sub.submissionNumber}</span>
+                              <span className="font-mono text-emerald-400 font-bold">{formatCurrency(sub.amount)}</span>
+                            </div>
+                            <span className="text-[10px] text-slate-500 font-mono">
+                              Ref: {sub.referenceNumber} • {formatDateTime(sub.submittedAt)}
+                            </span>
+                          </div>
+
+                          <div>
+                            {sub.status === 'pending_review' && (
+                              <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase bg-amber-950 text-amber-300 border border-amber-800/40">
+                                Pending Cashier Review
+                              </span>
+                            )}
+                            {sub.status === 'approved' && (
+                              <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase bg-emerald-950 text-emerald-300 border border-emerald-800/40">
+                                Verified & OR Issued
+                              </span>
+                            )}
+                            {sub.status === 'rejected' && (
+                              <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase bg-rose-950 text-rose-300 border border-rose-800/40">
+                                Rejected: {sub.rejectionReason}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}

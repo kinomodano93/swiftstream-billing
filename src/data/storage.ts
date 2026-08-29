@@ -13,6 +13,9 @@ import {
   Plan,
   ReminderLog,
   RepairOrder,
+  DailyRemittanceRecord,
+  AddonCatalogItem,
+  PaymentSubmission,
 } from '../types';
 import {
   initialAuditLogs,
@@ -29,6 +32,9 @@ import {
   initialPlans,
   initialReminders,
   initialRepairOrders,
+  initialDailyRemittances,
+  initialAddonCatalog,
+  initialPaymentSubmissions,
 } from './initialData';
 
 const STORAGE_KEYS = {
@@ -46,6 +52,9 @@ const STORAGE_KEYS = {
   FIBER_CABLES: 'swiftstream_fiber_cables_v1',
   FIBER_CLOSURES: 'swiftstream_fiber_closures_v1',
   OLT_NODE: 'swiftstream_olt_node_v1',
+  DAILY_REMITTANCES: 'swiftstream_daily_remittances_v1',
+  ADDON_CATALOG: 'swiftstream_addon_catalog_v1',
+  PAYMENT_SUBMISSIONS: 'swiftstream_payment_submissions_v1',
 };
 
 export const loadStoredData = () => {
@@ -106,6 +115,18 @@ export const loadStoredData = () => {
       localStorage.getItem(STORAGE_KEYS.OLT_NODE) || JSON.stringify(initialOltNode)
     ) as OltPopNode;
 
+    const dailyRemittances = JSON.parse(
+      localStorage.getItem(STORAGE_KEYS.DAILY_REMITTANCES) || JSON.stringify(initialDailyRemittances)
+    ) as DailyRemittanceRecord[];
+
+    const addonCatalog = JSON.parse(
+      localStorage.getItem(STORAGE_KEYS.ADDON_CATALOG) || JSON.stringify(initialAddonCatalog)
+    ) as AddonCatalogItem[];
+
+    const paymentSubmissions = JSON.parse(
+      localStorage.getItem(STORAGE_KEYS.PAYMENT_SUBMISSIONS) || JSON.stringify(initialPaymentSubmissions)
+    ) as PaymentSubmission[];
+
     return {
       businessProfile,
       customers,
@@ -121,6 +142,9 @@ export const loadStoredData = () => {
       fiberCables,
       fiberClosures,
       oltNode,
+      dailyRemittances,
+      addonCatalog,
+      paymentSubmissions,
     };
   } catch (error) {
     console.error('Failed to load data from localStorage, falling back to defaults:', error);
@@ -139,6 +163,9 @@ export const loadStoredData = () => {
       fiberCables: initialFiberCables,
       fiberClosures: initialFiberClosures,
       oltNode: initialOltNode,
+      dailyRemittances: initialDailyRemittances,
+      addonCatalog: initialAddonCatalog,
+      paymentSubmissions: initialPaymentSubmissions,
     };
   }
 };

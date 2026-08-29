@@ -247,9 +247,119 @@ export const generateOfficialReceiptPDF = (payment: Payment, business: BusinessP
 
   doc.setFontSize(7);
   doc.setFont('helvetica', 'normal');
-  doc.text('Thank you for your prompt payment!', 40, 100, { align: 'center' });
-  doc.text('Your internet service is active.', 40, 104, { align: 'center' });
-  doc.text('THIS SERVES AS AN OFFICIAL RECEIPT', 40, 110, { align: 'center' });
+  return doc;
+};
+
+export const generateThermalReceiptPDF = (
+  payment: Payment,
+  invoice: Invoice | undefined,
+  business: BusinessProfile,
+  paperWidth: '58mm' | '80mm' = '80mm'
+): jsPDF => {
+  const widthMm = paperWidth === '58mm' ? 58 : 80;
+  const heightMm = paperWidth === '58mm' ? 180 : 190;
+  const centerX = widthMm / 2;
+  const margin = paperWidth === '58mm' ? 4 : 6;
+  const rightX = widthMm - margin;
+
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: [widthMm, heightMm],
+  });
+
+  // Business Header
+  doc.setFontSize(paperWidth === '58mm' ? 9 : 10.5);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(0, 0, 0);
+  doc.text(business.name.toUpperCase(), centerX, 9, { align: 'center' });
+
+  doc.setFontSize(paperWidth === '58mm' ? 6.5 : 7.5);
+  doc.setFont('helvetica', 'normal');
+  doc.text('High-Speed Fiber & Technical Services', centerX, 13, { align: 'center' });
+  doc.text(`TIN: ${business.tin}`, centerX, 17, { align: 'center' });
+  doc.text(`${business.address.barangay}, ${business.address.city}, ${business.address.province}`, centerX, 21, { align: 'center' });
+  doc.text(`Cell: ${business.representative.mobile}`, centerX, 25, { align: 'center' });
+
+  doc.setLineWidth(0.3);
+  doc.line(margin, 28, rightX, 28);
+
+  // Title
+  doc.setFontSize(paperWidth === '58mm' ? 8 : 9);
+  doc.setFont('helvetica', 'bold');
+  doc.text('COLLECTION OFFICIAL RECEIPT', centerX, 33, { align: 'center' });
+
+  doc.setFontSize(paperWidth === '58mm' ? 6.5 : 7.5);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`OR No: ${payment.receiptNumber}`, margin, 38);
+  doc.text(`Date: ${formatDateTime(payment.paymentDate)}`, margin, 42);
+  doc.text(`Cashier: ${payment.cashierName}`, margin, 46);
+
+  doc.line(margin, 49, rightX, 49);
+
+  // Subscriber Details
+  doc.text(`Subscriber Account:`, margin, 54);
+  doc.setFont('helvetica', 'bold');
+  doc.text(payment.customerName, margin, 58);
+
+  doc.setFont('helvetica', 'normal');
+  doc.text(`Account No: ${payment.accountNo}`, margin, 63);
+  doc.text(`Payment Mode: ${payment.paymentMethod.toUpperCase()}`, margin, 67);
+  if (payment.referenceNumber) {
+    doc.text(`Ref Code: ${payment.referenceNumber}`, margin, 71);
+  }
+
+  doc.line(margin, 74, rightX, 74);
+
+  // Items
+  doc.setFont('helvetica', 'bold');
+  doc.text('Particulars', margin, 78);
+  doc.text('Amount', rightX, 78, { align: 'right' });
+  doc.line(margin, 80, rightX, 80);
+
+  let currentY = 85;
+  doc.setFont('helvetica', 'normal');
+
+  if (invoice?.items && invoice.items.length > 0) {
+    invoice.items.slice(0, 3).forEach((item) => {
+      const desc = item.description.length > 22 ? item.description.slice(0, 22) + '...' : item.description;
+      doc.text(desc, margin, currentY);
+      doc.text(formatCurrency(item.amount), rightX, currentY, { align: 'right' });
+      currentY += 4.5;
+    });
+  } else {
+    doc.text('Fiber Internet Service', margin, currentY);
+    doc.text(formatCurrency(payment.amount), rightX, currentY, { align: 'right' });
+    currentY += 4.5;
+  }
+
+  doc.line(margin, currentY + 1, rightX, currentY + 1);
+  currentY += 6;
+
+  // Amount Paid
+  doc.setFontSize(paperWidth === '58mm' ? 8 : 9);
+  doc.setFont('helvetica', 'bold');
+  doc.text('TOTAL PAID:', margin, currentY);
+  doc.setFontSize(paperWidth === '58mm' ? 9.5 : 11);
+  doc.text(formatCurrency(payment.amount), rightX, currentY, { align: 'right' });
+
+  currentY += 7;
+  if (invoice) {
+    doc.setFontSize(paperWidth === '58mm' ? 6.5 : 7.5);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Remaining Balance: ${formatCurrency(invoice.balanceDue)}`, margin, currentY);
+    currentY += 5;
+  }
+
+  doc.line(margin, currentY, rightX, currentY);
+  currentY += 6;
+
+  // Footer
+  doc.setFontSize(paperWidth === '58mm' ? 6 : 7);
+  doc.setFont('helvetica', 'normal');
+  doc.text('STATUS: LINE ACTIVE & UNBLOCKED', centerX, currentY, { align: 'center' });
+  doc.text('Thank you for your prompt payment!', centerX, currentY + 4, { align: 'center' });
+  doc.text('THIS SERVES AS AN OFFICIAL RECEIPT', centerX, currentY + 9, { align: 'center' });
 
   return doc;
 };

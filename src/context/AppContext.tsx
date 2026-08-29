@@ -7,16 +7,20 @@ import {
   BusinessProfile,
   Customer,
   CustomerStatus,
+  DailyRemittanceRecord,
+  AddonCatalogItem,
   Expense,
   FiberCable,
   FiberClosure,
   Invoice,
   InvoiceItem,
+  InvoiceStatus,
   MikrotikDevice,
   NapBox,
   OltPopNode,
   Payment,
   PaymentMethod,
+  PaymentSubmission,
   Plan,
   ReminderLog,
   ReminderType,
@@ -32,6 +36,13 @@ import {
 import { generateId } from '../utils/formatters';
 import { generateReminderMessage, sendMockNotification } from '../utils/smsSender';
 import { generateHtmlInvoiceEmail, sendSmtpEmail } from '../utils/smtpService';
+import { sendTelegramStaffAlert, sendDiscordStaffAlert } from '../utils/webhookService';
+import {
+  COLLECTIONS,
+  subscribeToCollection,
+  saveFirestoreDoc,
+  deleteFirestoreDoc,
+} from '../services/firestoreService';
 
 export interface ToastNotification {
   id: string;
@@ -56,6 +67,8 @@ interface AppContextType {
   mikrotikDevices: MikrotikDevice[];
   expenses: Expense[];
   auditLogs: AuditLog[];
+  dailyRemittances: DailyRemittanceRecord[];
+  addonCatalog: AddonCatalogItem[];
   activeTab: string;
   searchTerm: string;
   notifications: ToastNotification[];
@@ -72,6 +85,7 @@ interface AppContextType {
   updateCustomer: (id: string, updates: Partial<Customer>) => void;
   deleteCustomer: (id: string) => void;
   toggleCustomerStatus: (id: string, newStatus: CustomerStatus) => void;
+  addCustomerWalletCredit: (customerId: string, amount: number, notes?: string) => void;
   syncCustomerMikrotik: (id: string) => void;
   syncAllSubscribersToMikrotik: () => void;
   provisionSubscriber: (
@@ -91,8 +105,19 @@ interface AppContextType {
   createInvoice: (invoice: Omit<Invoice, 'id' | 'createdAt'>) => Invoice;
   updateInvoice: (id: string, updates: Partial<Invoice>) => void;
   deleteInvoice: (id: string) => void;
-  generateBatchInvoices: (options: { billingMonth: string; dueDate: string; billingCycleDay?: number }) => { count: number; totalAmount: number };
+  generateBatchInvoices: (options: {
+    billingMonth: string;
+    dueDate: string;
+    billingCycleDay?: number;
+    applyWalletCredits?: boolean;
+    enableProration?: boolean;
+  }) => { count: number; totalAmount: number };
   applyInvoiceDiscount: (invoiceId: string, discountAmount: number) => void;
+  runDailyGraceAudit: () => { isolatedCount: number; reactivatedCount: number; graceCount: number };
+
+  // Daily Remittance & Cashier Actions
+  addDailyRemittance: (remittance: Omit<DailyRemittanceRecord, 'id'>) => DailyRemittanceRecord;
+  closeDailyRemittance: (id: string, actualCashInDrawer: number, verifiedBy?: string, notes?: string) => void;
 
   // Payment Actions
   recordPayment: (paymentData: {
@@ -106,6 +131,20 @@ interface AppContextType {
     isAdvancePayment?: boolean;
   }) => Payment;
   deletePayment: (id: string) => void;
+
+  // Proof-of-Payment Submissions
+  paymentSubmissions: PaymentSubmission[];
+  submitPaymentProof: (submission: {
+    customerId: string;
+    invoiceId?: string;
+    amount: number;
+    paymentMethod: PaymentMethod;
+    referenceNumber: string;
+    receiptImageUrl?: string;
+    notes?: string;
+  }) => PaymentSubmission;
+  approvePaymentSubmission: (id: string, reviewedBy?: string) => Payment | null;
+  rejectPaymentSubmission: (id: string, reason: string, reviewedBy?: string) => void;
 
   // Plan Actions
   addPlan: (plan: Omit<Plan, 'id'>) => void;
@@ -176,6 +215,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [mikrotikDevices, setMikrotikDevices] = useState<MikrotikDevice[]>(initial.mikrotikDevices);
   const [expenses, setExpenses] = useState<Expense[]>(initial.expenses);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(initial.auditLogs);
+  const [dailyRemittances, setDailyRemittances] = useState<DailyRemittanceRecord[]>(initial.dailyRemittances);
+  const [addonCatalog, setAddonCatalog] = useState<AddonCatalogItem[]>(initial.addonCatalog);
+  const [paymentSubmissions, setPaymentSubmissions] = useState<PaymentSubmission[]>(initial.paymentSubmissions || []);
 
   const [activeTab, setActiveTab] = useState<string>('home');
   const [searchTerm, setSearchTerm] = useState<string>('');
@@ -244,6 +286,69 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     saveToStorage(STORAGE_KEYS.OLT_NODE, oltNode);
   }, [oltNode]);
 
+  useEffect(() => {
+    saveToStorage(STORAGE_KEYS.DAILY_REMITTANCES, dailyRemittances);
+  }, [dailyRemittances]);
+
+  useEffect(() => {
+    saveToStorage(STORAGE_KEYS.ADDON_CATALOG, addonCatalog);
+  }, [addonCatalog]);
+
+  useEffect(() => {
+    saveToStorage(STORAGE_KEYS.PAYMENT_SUBMISSIONS, paymentSubmissions);
+  }, [paymentSubmissions]);
+
+  // --- Real-time Cloud Firestore Subscriptions ---
+  useEffect(() => {
+    const unsubCustomers = subscribeToCollection<Customer>(COLLECTIONS.CUSTOMERS, (data) => {
+      if (data && data.length > 0) setCustomers(data);
+    });
+    const unsubInvoices = subscribeToCollection<Invoice>(COLLECTIONS.INVOICES, (data) => {
+      if (data && data.length > 0) setInvoices(data);
+    });
+    const unsubPayments = subscribeToCollection<Payment>(COLLECTIONS.PAYMENTS, (data) => {
+      if (data && data.length > 0) setPayments(data);
+    });
+    const unsubSubmissions = subscribeToCollection<PaymentSubmission>(COLLECTIONS.PAYMENT_SUBMISSIONS, (data) => {
+      if (data && data.length > 0) setPaymentSubmissions(data);
+    });
+    const unsubPlans = subscribeToCollection<Plan>(COLLECTIONS.PLANS, (data) => {
+      if (data && data.length > 0) setPlans(data);
+    });
+    const unsubRepairOrders = subscribeToCollection<RepairOrder>(COLLECTIONS.REPAIR_ORDERS, (data) => {
+      if (data && data.length > 0) setRepairOrders(data);
+    });
+    const unsubNapBoxes = subscribeToCollection<NapBox>(COLLECTIONS.NAP_BOXES, (data) => {
+      if (data && data.length > 0) setNapBoxes(data);
+    });
+    const unsubFiberCables = subscribeToCollection<FiberCable>(COLLECTIONS.FIBER_CABLES, (data) => {
+      if (data && data.length > 0) setFiberCables(data);
+    });
+    const unsubFiberClosures = subscribeToCollection<FiberClosure>(COLLECTIONS.FIBER_CLOSURES, (data) => {
+      if (data && data.length > 0) setFiberClosures(data);
+    });
+    const unsubMikrotik = subscribeToCollection<MikrotikDevice>(COLLECTIONS.MIKROTIK_DEVICES, (data) => {
+      if (data && data.length > 0) setMikrotikDevices(data);
+    });
+    const unsubExpenses = subscribeToCollection<Expense>(COLLECTIONS.EXPENSES, (data) => {
+      if (data && data.length > 0) setExpenses(data);
+    });
+
+    return () => {
+      unsubCustomers();
+      unsubInvoices();
+      unsubPayments();
+      unsubSubmissions();
+      unsubPlans();
+      unsubRepairOrders();
+      unsubNapBoxes();
+      unsubFiberCables();
+      unsubFiberClosures();
+      unsubMikrotik();
+      unsubExpenses();
+    };
+  }, []);
+
   const logAuditEvent = (event: Omit<AuditLog, 'id' | 'timestamp'>) => {
     const newLog: AuditLog = {
       ...event,
@@ -280,6 +385,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     setCustomers((prev) => [newCustomer, ...prev]);
+    saveFirestoreDoc(COLLECTIONS.CUSTOMERS, newCustomer);
 
     // If assigned to a NAP box, update the port status
     if (newCustomer.network.napBoxId && newCustomer.network.napPortNumber) {
@@ -298,7 +404,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               }
               return port;
             });
-            return { ...box, ports: updatedPorts };
+            const updatedBox = { ...box, ports: updatedPorts };
+            saveFirestoreDoc(COLLECTIONS.NAP_BOXES, updatedBox);
+            return updatedBox;
           }
           return box;
         })
@@ -319,7 +427,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const updateCustomer = (id: string, updates: Partial<Customer>) => {
     setCustomers((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, ...updates, updatedAt: new Date().toISOString() } : c))
+      prev.map((c) => {
+        if (c.id === id) {
+          const updated = { ...c, ...updates, updatedAt: new Date().toISOString() };
+          saveFirestoreDoc(COLLECTIONS.CUSTOMERS, updated);
+          return updated;
+        }
+        return c;
+      })
     );
     showToast('info', 'Customer Updated', 'Subscriber profile details have been saved.');
     logAuditEvent({
@@ -336,6 +451,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const target = customers.find((c) => c.id === id);
     if (!target) return;
 
+    deleteFirestoreDoc(COLLECTIONS.CUSTOMERS, id);
+
     // Release NAP port
     if (target.network.napBoxId) {
       setNapBoxes((prev) =>
@@ -344,7 +461,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             const updatedPorts = box.ports.map((p) =>
               p.customerId === id ? { portNumber: p.portNumber, status: 'available' as const } : p
             );
-            return { ...box, ports: updatedPorts };
+            const updatedBox = { ...box, ports: updatedPorts };
+            saveFirestoreDoc(COLLECTIONS.NAP_BOXES, updatedBox);
+            return updatedBox;
           }
           return box;
         })
@@ -548,6 +667,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     billingMonth: string; // e.g. "2026-09"
     dueDate: string; // e.g. "2026-09-10"
     billingCycleDay?: number;
+    applyWalletCredits?: boolean;
+    enableProration?: boolean;
   }): { count: number; totalAmount: number } => {
     const activeSubscribers = customers.filter(
       (c) => c.status === 'active' || c.status === 'overdue'
@@ -580,16 +701,45 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       const invoiceNumStr = `INV-${year.slice(2)}${month}-${String(invoices.length + index + 1).padStart(4, '0')}`;
       const previousBal = customer.balance > 0 ? customer.balance : 0;
-      const subtotal = customer.monthlyFee;
-      const totalAmount = subtotal + previousBal;
+
+      // Mid-Month Proration Calculation
+      let planFee = customer.monthlyFee;
+      let isProrated = false;
+      let proratedDays = lastDayOfMonth;
+
+      if (options.enableProration !== false && customer.installationDate.startsWith(options.billingMonth)) {
+        const installDay = parseInt(customer.installationDate.split('-')[2]) || 1;
+        if (installDay > 1) {
+          proratedDays = lastDayOfMonth - installDay + 1;
+          planFee = Math.round((proratedDays / lastDayOfMonth) * customer.monthlyFee);
+          isProrated = true;
+        }
+      }
+
+      const subtotal = planFee;
+      let totalAmount = subtotal + previousBal;
+
+      // Advance Credit Wallet Application
+      let appliedCredit = 0;
+      let currentWalletBal = customer.walletBalance || 0;
+
+      if (options.applyWalletCredits !== false && currentWalletBal > 0) {
+        appliedCredit = Math.min(currentWalletBal, totalAmount);
+        currentWalletBal -= appliedCredit;
+      }
+
+      const balanceDue = Math.max(0, totalAmount - appliedCredit);
+      const invoiceStatus = balanceDue === 0 ? ('paid' as const) : ('unpaid' as const);
 
       const items: InvoiceItem[] = [
         {
           id: generateId('ITEM'),
-          description: `Monthly Fiber Service - ${customer.planName}`,
+          description: isProrated
+            ? `Monthly Fiber (${customer.planName}) - Prorated (${proratedDays}/${lastDayOfMonth} Days)`
+            : `Monthly Fiber Service - ${customer.planName}`,
           quantity: 1,
-          unitPrice: customer.monthlyFee,
-          amount: customer.monthlyFee,
+          unitPrice: planFee,
+          amount: planFee,
           type: 'plan',
         },
       ];
@@ -602,6 +752,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           unitPrice: previousBal,
           amount: previousBal,
           type: 'late_fee',
+        });
+      }
+
+      if (appliedCredit > 0) {
+        items.push({
+          id: generateId('ITEM'),
+          description: `Advance Credit Wallet Deduction`,
+          quantity: 1,
+          unitPrice: -appliedCredit,
+          amount: -appliedCredit,
+          type: 'discount',
         });
       }
 
@@ -621,13 +782,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         items,
         subtotal,
         discount: 0,
+        appliedCredit,
+        isProrated,
+        proratedDays: isProrated ? proratedDays : undefined,
         previousBalance: previousBal,
         totalAmount,
-        amountPaid: 0,
-        balanceDue: totalAmount,
-        status: 'unpaid',
+        amountPaid: appliedCredit,
+        balanceDue,
+        status: invoiceStatus,
         sentViaSms: false,
         sentViaEmail: false,
+        paidAt: invoiceStatus === 'paid' ? new Date().toISOString() : undefined,
         createdAt: new Date().toISOString(),
       };
 
@@ -635,12 +800,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       generatedCount++;
       totalGeneratedAmount += totalAmount;
 
-      // Update customer balance
+      // Update customer balance & wallet
       const custIndex = updatedCustomers.findIndex((c) => c.id === customer.id);
       if (custIndex >= 0) {
         updatedCustomers[custIndex] = {
           ...updatedCustomers[custIndex],
-          balance: totalAmount,
+          balance: balanceDue,
+          walletBalance: currentWalletBal,
         };
       }
     });
@@ -688,6 +854,108 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     showToast('success', 'Discount Applied', `₱${discountAmount} discount applied to ${invoice.invoiceNumber}.`);
   };
 
+  const addCustomerWalletCredit = (customerId: string, amount: number, notes?: string) => {
+    setCustomers((prev) =>
+      prev.map((c) => {
+        if (c.id === customerId) {
+          const newWallet = (c.walletBalance || 0) + amount;
+          return { ...c, walletBalance: newWallet, updatedAt: new Date().toISOString() };
+        }
+        return c;
+      })
+    );
+    showToast('success', 'Credit Added', `Added ₱${amount.toLocaleString()} advance credit wallet funds.`);
+    logAuditEvent({
+      userName: 'Admin Leonardo Flojo',
+      action: 'WALLET_CREDIT_ADDED',
+      category: 'billing',
+      severity: 'info',
+      details: `Added ₱${amount.toFixed(2)} advance credit to customer ${customerId}. Notes: ${notes || 'N/A'}.`,
+      status: 'success',
+    });
+  };
+
+  // --- Automated Grace Period & Isolation Audit ---
+  const runDailyGraceAudit = (): { isolatedCount: number; reactivatedCount: number; graceCount: number } => {
+    const today = new Date();
+    const graceDays = businessProfile.invoiceGracePeriodDays || 5;
+
+    let isolatedCount = 0;
+    let reactivatedCount = 0;
+    let graceCount = 0;
+
+    const updatedCustomers = customers.map((c) => {
+      // Find open invoices for this customer
+      const openInvoices = invoices.filter(
+        (inv) => inv.customerId === c.id && (inv.status === 'unpaid' || inv.status === 'overdue')
+      );
+
+      if (openInvoices.length === 0 && (c.status === 'overdue' || c.status === 'suspended') && c.balance === 0) {
+        // Auto-reactivate
+        reactivatedCount++;
+        return {
+          ...c,
+          status: 'active' as const,
+          network: { ...c.network, isMikrotikSynced: true },
+          updatedAt: new Date().toISOString(),
+        };
+      }
+
+      // Check if any invoice is past the grace period
+      let isPastGrace = false;
+      let isInGrace = false;
+
+      openInvoices.forEach((inv) => {
+        const dueDate = new Date(inv.dueDate);
+        const daysPastDue = Math.floor((today.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24));
+
+        if (daysPastDue > graceDays) {
+          isPastGrace = true;
+        } else if (daysPastDue > 0) {
+          isInGrace = true;
+        }
+      });
+
+      if (isPastGrace && c.status !== 'suspended') {
+        isolatedCount++;
+        return {
+          ...c,
+          status: 'suspended' as const,
+          network: { ...c.network, isMikrotikSynced: false },
+          updatedAt: new Date().toISOString(),
+        };
+      } else if (isInGrace && c.status === 'active') {
+        graceCount++;
+        return {
+          ...c,
+          status: 'overdue' as const,
+          updatedAt: new Date().toISOString(),
+        };
+      }
+
+      return c;
+    });
+
+    setCustomers(updatedCustomers);
+
+    logAuditEvent({
+      userName: 'System Auto-Grace Auditor',
+      action: 'DAILY_GRACE_AUDIT_EXECUTED',
+      category: 'network',
+      severity: isolatedCount > 0 ? 'warning' : 'info',
+      details: `Daily audit complete. ${isolatedCount} accounts isolated, ${reactivatedCount} accounts reactivated, ${graceCount} in grace period.`,
+      status: 'success',
+    });
+
+    showToast(
+      'info',
+      'Daily Grace Audit Complete',
+      `Audit executed: ${isolatedCount} isolated, ${reactivatedCount} reactivated, ${graceCount} in grace period.`
+    );
+
+    return { isolatedCount, reactivatedCount, graceCount };
+  };
+
   // --- Payment Operations ---
   const recordPayment = (paymentData: {
     customerId: string;
@@ -717,33 +985,47 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       paymentMethod: paymentData.paymentMethod,
       referenceNumber: paymentData.referenceNumber,
       cashierName: paymentData.cashierName || businessProfile.representative.firstName + ' ' + businessProfile.representative.lastName,
+      remittanceStatus: 'pending',
       notes: paymentData.notes,
       isAdvancePayment: !!paymentData.isAdvancePayment,
       createdAt: new Date().toISOString(),
     };
 
     setPayments((prev) => [newPayment, ...prev]);
+    saveFirestoreDoc(COLLECTIONS.PAYMENTS, newPayment);
+
+    let excessWalletCredit = 0;
 
     // Update Invoice if linked
     if (invoice) {
+      const neededToPay = invoice.balanceDue;
       const newAmountPaid = invoice.amountPaid + paymentData.amount;
       const newBalanceDue = Math.max(0, invoice.totalAmount - invoice.discount - newAmountPaid);
-      const newStatus = newBalanceDue <= 0 ? 'paid' : 'partially_paid';
+      const newStatus: InvoiceStatus = newBalanceDue <= 0 ? 'paid' : 'partially_paid';
+
+      if (paymentData.amount > neededToPay) {
+        excessWalletCredit = paymentData.amount - neededToPay;
+      }
 
       setInvoices((prev) =>
-        prev.map((inv) =>
-          inv.id === invoice.id
-            ? {
-                ...inv,
-                amountPaid: newAmountPaid,
-                balanceDue: newBalanceDue,
-                status: newStatus,
-                paidAt: newStatus === 'paid' ? new Date().toISOString() : inv.paidAt,
-                paymentMethodUsed: paymentData.paymentMethod,
-              }
-            : inv
-        )
+        prev.map((inv) => {
+          if (inv.id === invoice.id) {
+            const updatedInv = {
+              ...inv,
+              amountPaid: newAmountPaid,
+              balanceDue: newBalanceDue,
+              status: newStatus,
+              paidAt: newStatus === 'paid' ? new Date().toISOString() : inv.paidAt,
+              paymentMethodUsed: paymentData.paymentMethod,
+            };
+            saveFirestoreDoc(COLLECTIONS.INVOICES, updatedInv);
+            return updatedInv;
+          }
+          return inv;
+        })
       );
+    } else if (paymentData.isAdvancePayment) {
+      excessWalletCredit = paymentData.amount;
     }
 
     // Update Customer Balance and auto-reactivate if suspended/overdue
@@ -751,16 +1033,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       prev.map((c) => {
         if (c.id === paymentData.customerId) {
           const updatedBal = Math.max(0, c.balance - paymentData.amount);
+          const newWallet = (c.walletBalance || 0) + excessWalletCredit;
           const shouldReactivate = (c.status === 'suspended' || c.status === 'overdue') && updatedBal === 0;
 
-          return {
+          const updatedCust = {
             ...c,
             balance: updatedBal,
+            walletBalance: newWallet,
             advanceDeposit: paymentData.isAdvancePayment ? c.advanceDeposit + paymentData.amount : c.advanceDeposit,
-            status: shouldReactivate ? 'active' : c.status,
+            status: shouldReactivate ? ('active' as const) : c.status,
             network: shouldReactivate ? { ...c.network, isMikrotikSynced: true } : c.network,
             updatedAt: new Date().toISOString(),
           };
+          saveFirestoreDoc(COLLECTIONS.CUSTOMERS, updatedCust);
+          return updatedCust;
         }
         return c;
       })
@@ -788,19 +1074,211 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       action: 'PAYMENT_COLLECTED',
       category: 'billing',
       severity: 'info',
-      details: `Collected ₱${paymentData.amount.toFixed(2)} via ${paymentData.paymentMethod.toUpperCase()} (OR: ${receiptNumber}) from ${customer?.fullName || 'Customer'}.`,
+      details: `Collected ₱${paymentData.amount.toFixed(2)} via ${paymentData.paymentMethod.toUpperCase()} (OR: ${receiptNumber}) from ${customer?.fullName || 'Customer'}. Excess credited to wallet: ₱${excessWalletCredit.toFixed(2)}.`,
       status: 'success',
     });
 
     return newPayment;
   };
 
+  // --- Daily Remittances Operations ---
+  const addDailyRemittance = (remittanceData: Omit<DailyRemittanceRecord, 'id'>): DailyRemittanceRecord => {
+    const newRemittance: DailyRemittanceRecord = {
+      ...remittanceData,
+      id: generateId('REMIT'),
+    };
+    setDailyRemittances((prev) => [newRemittance, ...prev]);
+    showToast('success', 'Remittance Created', `Created remittance sheet for ${newRemittance.remittanceDate}.`);
+    return newRemittance;
+  };
+
+  const closeDailyRemittance = (id: string, actualCashInDrawer: number, verifiedBy?: string, notes?: string) => {
+    setDailyRemittances((prev) =>
+      prev.map((r) => {
+        if (r.id === id) {
+          const discrepancy = actualCashInDrawer - r.totalCash;
+          return {
+            ...r,
+            actualCashInDrawer,
+            discrepancy,
+            verifiedBy: verifiedBy || 'Leonardo Flojo Jr.',
+            notes: notes || r.notes,
+            status: 'closed' as const,
+            closedAt: new Date().toISOString(),
+          };
+        }
+        return r;
+      })
+    );
+
+    // Mark today's payments as remitted
+    setPayments((prev) =>
+      prev.map((p) => ({
+        ...p,
+        remittanceStatus: 'remitted' as const,
+        remittedAt: new Date().toISOString(),
+      }))
+    );
+
+    showToast('success', 'Remittance Drawer Closed', 'Cash drawer reconciliation complete and locked.');
+    logAuditEvent({
+      userName: verifiedBy || 'Admin Leonardo Flojo',
+      action: 'CASHIER_REMITTANCE_CLOSED',
+      category: 'billing',
+      severity: 'info',
+      details: `Closed daily cash drawer. Counted Cash: ₱${actualCashInDrawer.toLocaleString()}. Verified by ${verifiedBy || 'Leonardo Flojo Jr.'}.`,
+      status: 'success',
+    });
+
+    if (businessProfile.staffWebhooks?.notifyOnCashierRemittance) {
+      sendTelegramStaffAlert(
+        `💰 <b>CASHIER REMITTANCE EOD CLOSED</b>\n\n📌 <b>Date:</b> ${new Date().toLocaleDateString()}\n💵 <b>Physical Cash Count:</b> ₱${actualCashInDrawer.toLocaleString()}\n👤 <b>Audited By:</b> ${verifiedBy || 'Leonardo Flojo Jr.'}\n🔒 <b>Status:</b> Z-Reading Settled & Remittance Locked`,
+        businessProfile.staffWebhooks
+      );
+      sendDiscordStaffAlert(
+        '💰 Daily Cashier Remittance Locked (Z-Reading)',
+        `End-of-day cash drawer has been audited and locked by **${verifiedBy || 'Leonardo Flojo Jr.'}**.`,
+        [
+          { name: 'Counted Physical Cash', value: `₱${actualCashInDrawer.toLocaleString()}`, inline: true },
+          { name: 'Audit Status', value: '🟢 Settled & Locked', inline: true },
+        ],
+        0x10b981,
+        businessProfile.staffWebhooks
+      );
+    }
+  };
+
   const deletePayment = (id: string) => {
     const target = payments.find((p) => p.id === id);
     if (!target) return;
 
+    deleteFirestoreDoc(COLLECTIONS.PAYMENTS, id);
     setPayments((prev) => prev.filter((p) => p.id !== id));
     showToast('warning', 'Payment Voided', `Receipt ${target.receiptNumber} has been removed.`);
+  };
+
+  const submitPaymentProof = (submissionData: {
+    customerId: string;
+    invoiceId?: string;
+    amount: number;
+    paymentMethod: PaymentMethod;
+    referenceNumber: string;
+    receiptImageUrl?: string;
+    notes?: string;
+  }): PaymentSubmission => {
+    const customer = customers.find((c) => c.id === submissionData.customerId);
+    const invoice = submissionData.invoiceId ? invoices.find((i) => i.id === submissionData.invoiceId) : undefined;
+    const submissionNumber = `SUB-${new Date().getFullYear().toString().slice(2)}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+    const newSub: PaymentSubmission = {
+      id: generateId('SUB'),
+      submissionNumber,
+      customerId: submissionData.customerId,
+      customerName: customer?.fullName || 'Subscriber',
+      accountNo: customer?.accountNo || 'N/A',
+      invoiceId: invoice?.id,
+      invoiceNumber: invoice?.invoiceNumber,
+      amount: submissionData.amount,
+      paymentMethod: submissionData.paymentMethod,
+      referenceNumber: submissionData.referenceNumber,
+      receiptImageUrl: submissionData.receiptImageUrl,
+      status: 'pending_review',
+      submittedAt: new Date().toISOString(),
+      notes: submissionData.notes,
+    };
+
+    setPaymentSubmissions((prev) => [newSub, ...prev]);
+    saveFirestoreDoc(COLLECTIONS.PAYMENT_SUBMISSIONS, newSub);
+
+    logAuditEvent({
+      userName: customer?.fullName || 'Subscriber Portal',
+      action: 'PAYMENT_PROOF_SUBMITTED',
+      category: 'billing',
+      severity: 'info',
+      details: `Submitted payment proof (${submissionNumber}) for ₱${submissionData.amount.toLocaleString()} via ${submissionData.paymentMethod.toUpperCase()} (Ref: ${submissionData.referenceNumber}).`,
+      status: 'success',
+    });
+
+    showToast('success', 'Payment Proof Submitted', `Your payment receipt (${submissionNumber}) is now queued for cashier verification.`);
+    return newSub;
+  };
+
+  const approvePaymentSubmission = (id: string, reviewedBy?: string): Payment | null => {
+    const sub = paymentSubmissions.find((s) => s.id === id);
+    if (!sub) return null;
+
+    const cashier = reviewedBy || businessProfile.representative.firstName + ' ' + businessProfile.representative.lastName;
+
+    // 1. Record official payment
+    const payment = recordPayment({
+      customerId: sub.customerId,
+      invoiceId: sub.invoiceId,
+      amount: sub.amount,
+      paymentMethod: sub.paymentMethod,
+      referenceNumber: sub.referenceNumber,
+      cashierName: cashier,
+      notes: `Verified from Online Submission #${sub.submissionNumber}. ${sub.notes || ''}`,
+      isAdvancePayment: !sub.invoiceId,
+    });
+
+    // 2. Update submission state
+    const updatedSub: PaymentSubmission = {
+      ...sub,
+      status: 'approved' as const,
+      reviewedBy: cashier,
+      reviewedAt: new Date().toISOString(),
+    };
+
+    setPaymentSubmissions((prev) =>
+      prev.map((s) => (s.id === id ? updatedSub : s))
+    );
+    saveFirestoreDoc(COLLECTIONS.PAYMENT_SUBMISSIONS, updatedSub);
+
+    // 3. Send SMS Acknowledgment
+    sendReminder(sub.customerId, 'payment_confirmation', 'sms');
+
+    logAuditEvent({
+      userName: cashier,
+      action: 'PAYMENT_PROOF_APPROVED',
+      category: 'billing',
+      severity: 'info',
+      details: `Approved online payment proof (${sub.submissionNumber}) for ${sub.customerName}. Issued OR #${payment.receiptNumber}.`,
+      status: 'success',
+    });
+
+    showToast('success', 'Payment Approved & OR Issued', `Receipt ${payment.receiptNumber} generated and SMS sent to ${sub.customerName}.`);
+    return payment;
+  };
+
+  const rejectPaymentSubmission = (id: string, reason: string, reviewedBy?: string) => {
+    const sub = paymentSubmissions.find((s) => s.id === id);
+    if (!sub) return;
+
+    const cashier = reviewedBy || businessProfile.representative.firstName + ' ' + businessProfile.representative.lastName;
+
+    const updatedSub: PaymentSubmission = {
+      ...sub,
+      status: 'rejected' as const,
+      rejectionReason: reason,
+      reviewedBy: cashier,
+      reviewedAt: new Date().toISOString(),
+    };
+
+    setPaymentSubmissions((prev) =>
+      prev.map((s) => (s.id === id ? updatedSub : s))
+    );
+    saveFirestoreDoc(COLLECTIONS.PAYMENT_SUBMISSIONS, updatedSub);
+
+    logAuditEvent({
+      userName: cashier,
+      action: 'PAYMENT_PROOF_REJECTED',
+      category: 'billing',
+      severity: 'warning',
+      details: `Rejected payment proof (${sub.submissionNumber}) for ${sub.customerName}. Reason: ${reason}`,
+      status: 'failed',
+    });
+
+    showToast('error', 'Payment Proof Rejected', `Submission ${sub.submissionNumber} marked as rejected.`);
   };
 
   // --- Plan Operations ---
@@ -1264,6 +1742,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         activeTab,
         searchTerm,
         notifications,
+        dailyRemittances,
+        addonCatalog,
         setActiveTab,
         setSearchTerm,
         showToast,
@@ -1273,6 +1753,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateCustomer,
         deleteCustomer,
         toggleCustomerStatus,
+        addCustomerWalletCredit,
         syncCustomerMikrotik,
         syncAllSubscribersToMikrotik,
         provisionSubscriber,
@@ -1281,8 +1762,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         deleteInvoice,
         generateBatchInvoices,
         applyInvoiceDiscount,
+        runDailyGraceAudit,
+        addDailyRemittance,
+        closeDailyRemittance,
         recordPayment,
         deletePayment,
+        paymentSubmissions,
+        submitPaymentProof,
+        approvePaymentSubmission,
+        rejectPaymentSubmission,
         addPlan,
         updatePlan,
         deletePlan,

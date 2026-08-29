@@ -23,6 +23,7 @@ import { FinancialReports } from './components/reports/FinancialReports';
 import { SettingsModal } from './components/settings/SettingsModal';
 import { ClientPortal } from './components/portal/ClientPortal';
 import { HomePage } from './components/home/HomePage';
+import { FieldTechHub } from './components/field/FieldTechHub';
 import { GeminiAiAssistant } from './components/ai/GeminiAiAssistant';
 import { Customer, RepairOrder } from './types';
 
@@ -123,6 +124,8 @@ const MainLayout: React.FC = () => {
               onSelectCustomer={(id) => setSelectedCustomerId(id)}
             />
           )}
+
+          {activeTab === 'field_ops' && <FieldTechHub />}
 
           {activeTab === 'customers' && (
             <CustomerList

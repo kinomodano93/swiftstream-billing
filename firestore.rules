@@ -1,0 +1,81 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // System health check
+    match /_system_health/{document=**} {
+      allow read, write: if true;
+    }
+    
+    // ISP Operations collections: Subscribers, Invoices, Payments, Network Assets
+    match /customers/{customerId} {
+      allow read, write: if true; // In production: request.auth != null
+    }
+    
+    match /invoices/{invoiceId} {
+      allow read, write: if true;
+    }
+    
+    match /payments/{paymentId} {
+      allow read, write: if true;
+    }
+    
+    match /payment_submissions/{submissionId} {
+      allow read, write: if true;
+    }
+    
+    match /plans/{planId} {
+      allow read, write: if true;
+    }
+    
+    match /repair_orders/{orderId} {
+      allow read, write: if true;
+    }
+    
+    match /nap_boxes/{boxId} {
+      allow read, write: if true;
+    }
+    
+    match /fiber_cables/{cableId} {
+      allow read, write: if true;
+    }
+    
+    match /fiber_closures/{closureId} {
+      allow read, write: if true;
+    }
+    
+    match /olt_nodes/{nodeId} {
+      allow read, write: if true;
+    }
+    
+    match /mikrotik_devices/{deviceId} {
+      allow read, write: if true;
+    }
+    
+    match /expenses/{expenseId} {
+      allow read, write: if true;
+    }
+    
+    match /audit_logs/{logId} {
+      allow read, write: if true;
+    }
+    
+    match /daily_remittances/{remittanceId} {
+      allow read, write: if true;
+    }
+    
+    match /addon_catalog/{itemId} {
+      allow read, write: if true;
+    }
+    
+    match /business_profile/{profileId} {
+      allow read, write: if true;
+    }
+    
+    // Default fallback
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}
+

@@ -16,6 +16,7 @@ import { Payment, PaymentMethod } from '../../types';
 import { formatCurrency, formatDateTime, getPaymentMethodLabel } from '../../utils/formatters';
 import { generateOfficialReceiptPDF } from '../../utils/pdfGenerator';
 import { EODModal } from './EODModal';
+import { PaymentVerificationQueue } from './PaymentVerificationQueue';
 
 interface PaymentListProps {
   onOpenPaymentModal: () => void;
@@ -28,10 +29,12 @@ export const PaymentList: React.FC<PaymentListProps> = ({
   onSelectReceipt,
   onSelectCustomer,
 }) => {
-  const { payments, businessProfile, deletePayment, searchTerm, setSearchTerm } = useApp();
-
+  const { payments, paymentSubmissions, businessProfile, deletePayment, searchTerm, setSearchTerm } = useApp();
+  const [activeSubTab, setActiveSubTab] = useState<'payments' | 'verification_queue'>('payments');
   const [methodFilter, setMethodFilter] = useState<string>('all');
   const [showEODModal, setShowEODModal] = useState<boolean>(false);
+
+  const pendingSubmissionsCount = paymentSubmissions.filter((s) => s.status === 'pending_review').length;
 
   const filteredPayments = payments.filter((p) => {
     const matchesSearch =
@@ -132,177 +135,223 @@ export const PaymentList: React.FC<PaymentListProps> = ({
         </div>
       </div>
 
-      {/* Payment Channel Breakdown Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800">
-          <span className="text-[11px] text-slate-400 font-medium">📱 GCash Collections</span>
-          <h4 className="text-lg font-bold text-cyan-400 mt-1">{formatCurrency(gcashTotal)}</h4>
-        </div>
+      {/* Sub Navigation Tabs */}
+      <div className="flex items-center gap-2 border-b border-slate-800 pb-2">
+        <button
+          onClick={() => setActiveSubTab('payments')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+            activeSubTab === 'payments'
+              ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+          }`}
+        >
+          <Receipt className="w-4 h-4" />
+          <span>Official Receipts & Collections ({payments.length})</span>
+        </button>
 
-        <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800">
-          <span className="text-[11px] text-slate-400 font-medium">💵 Cash Over Counter</span>
-          <h4 className="text-lg font-bold text-emerald-400 mt-1">{formatCurrency(cashTotal)}</h4>
-        </div>
-
-        <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800">
-          <span className="text-[11px] text-slate-400 font-medium">💳 Maya (PayMaya)</span>
-          <h4 className="text-lg font-bold text-purple-400 mt-1">{formatCurrency(mayaTotal)}</h4>
-        </div>
-
-        <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800">
-          <span className="text-[11px] text-slate-400 font-medium">🏦 Bank / Check</span>
-          <h4 className="text-lg font-bold text-amber-400 mt-1">{formatCurrency(bankTotal)}</h4>
-        </div>
+        <button
+          onClick={() => setActiveSubTab('verification_queue')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+            activeSubTab === 'verification_queue'
+              ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+          }`}
+        >
+          <CheckCircle2 className="w-4 h-4" />
+          <span>Proof-of-Payment Queue</span>
+          {pendingSubmissionsCount > 0 && (
+            <span className="px-2 py-0.5 rounded-full text-[10px] bg-amber-500/30 text-amber-300 border border-amber-500/50 font-mono animate-pulse">
+              {pendingSubmissionsCount} Pending
+            </span>
+          )}
+        </button>
       </div>
 
-      {/* Filter Tabs & Search */}
-      <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-1.5">
-            {[
-              { id: 'all', label: 'All Payments' },
-              { id: 'gcash', label: 'GCash' },
-              { id: 'cash', label: 'Cash Counter' },
-              { id: 'maya', label: 'Maya' },
-              { id: 'bank_transfer', label: 'Bank Transfer' },
-              { id: 'check', label: 'Check' },
-            ].map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setMethodFilter(tab.id)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                  methodFilter === tab.id
-                    ? 'bg-emerald-600 text-white shadow-sm'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
+      {activeSubTab === 'verification_queue' ? (
+        <PaymentVerificationQueue onSelectCustomer={onSelectCustomer} />
+      ) : (
+        <>
+          {/* Payment Channel Breakdown Cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800">
+              <span className="text-[11px] text-slate-400 font-medium">📱 GCash Collections</span>
+              <h4 className="text-lg font-bold text-cyan-400 mt-1">{formatCurrency(gcashTotal)}</h4>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800">
+              <span className="text-[11px] text-slate-400 font-medium">💵 Cash Over Counter</span>
+              <h4 className="text-lg font-bold text-emerald-400 mt-1">{formatCurrency(cashTotal)}</h4>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800">
+              <span className="text-[11px] text-slate-400 font-medium">💳 Maya (PayMaya)</span>
+              <h4 className="text-lg font-bold text-purple-400 mt-1">{formatCurrency(mayaTotal)}</h4>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800">
+              <span className="text-[11px] text-slate-400 font-medium">🏦 Bank / Check</span>
+              <h4 className="text-lg font-bold text-amber-400 mt-1">{formatCurrency(bankTotal)}</h4>
+            </div>
           </div>
 
-          <div className="relative min-w-[240px]">
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search OR #, subscriber, ref..."
-              className="w-full pl-9 pr-3 py-1.5 bg-slate-950/70 border border-slate-800 rounded-lg text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500"
-            />
+          {/* Filter Tabs & Search */}
+          <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-1.5">
+                {[
+                  { id: 'all', label: 'All Payments' },
+                  { id: 'gcash', label: 'GCash' },
+                  { id: 'cash', label: 'Cash Counter' },
+                  { id: 'maya', label: 'Maya' },
+                  { id: 'bank_transfer', label: 'Bank Transfer' },
+                  { id: 'check', label: 'Check' },
+                ].map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setMethodFilter(tab.id)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                      methodFilter === tab.id
+                        ? 'bg-emerald-600 text-white shadow-sm'
+                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="relative flex-1 sm:w-64 max-w-xs">
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                <input
+                  type="text"
+                  placeholder="Search receipt, name, ref..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full pl-9 pr-4 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-xs focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between pt-2 border-t border-slate-800/60 text-xs text-slate-400">
+              <span>
+                Showing <strong className="text-slate-200">{filteredPayments.length}</strong> payments
+              </span>
+              <span>
+                Total Filtered:{' '}
+                <strong className="text-emerald-400 font-mono text-sm">{formatCurrency(totalCollected)}</strong>
+              </span>
+            </div>
           </div>
-        </div>
-      </div>
 
-      {/* Payments Table */}
-      <div className="rounded-2xl bg-slate-900/80 border border-slate-800 shadow-card overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead>
-              <tr className="bg-slate-950/80 border-b border-slate-800 text-slate-400 font-semibold uppercase tracking-wider">
-                <th className="py-3.5 px-4">OR Number</th>
-                <th className="py-3.5 px-4">Subscriber</th>
-                <th className="py-3.5 px-4">Channel / Mode</th>
-                <th className="py-3.5 px-4">Reference No</th>
-                <th className="py-3.5 px-4">Applied Invoice</th>
-                <th className="py-3.5 px-4">Date & Time</th>
-                <th className="py-3.5 px-4">Amount Paid</th>
-                <th className="py-3.5 px-4">Cashier</th>
-                <th className="py-3.5 px-4 text-right">Receipt</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800/60">
-              {filteredPayments.length === 0 ? (
-                <tr>
-                  <td colSpan={9} className="py-12 text-center text-slate-500">
-                    No payment records found matching the current search.
-                  </td>
-                </tr>
-              ) : (
-                filteredPayments.map((p) => {
-                  const method = getPaymentMethodLabel(p.paymentMethod);
-                  return (
-                    <tr key={p.id} className="hover:bg-slate-800/40 transition-colors">
-                      <td className="py-3.5 px-4">
-                        <button
-                          onClick={() => onSelectReceipt(p.id)}
-                          className="font-mono font-bold text-emerald-400 hover:text-emerald-300 transition-colors"
-                        >
-                          {p.receiptNumber}
-                        </button>
-                      </td>
-
-                      <td className="py-3.5 px-4">
-                        <button
-                          onClick={() => onSelectCustomer(p.customerId)}
-                          className="font-bold text-slate-200 hover:text-cyan-400 transition-colors text-left block truncate max-w-[160px]"
-                        >
-                          {p.customerName}
-                        </button>
-                        <span className="font-mono text-[10px] text-slate-400">{p.accountNo}</span>
-                      </td>
-
-                      <td className="py-3.5 px-4">
-                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-slate-800 text-slate-200 text-[11px]">
-                          <span>{method.icon}</span>
-                          <span>{method.label}</span>
-                        </span>
-                      </td>
-
-                      <td className="py-3.5 px-4 font-mono text-[11px] text-slate-400">
-                        {p.referenceNumber || 'Counter / N/A'}
-                      </td>
-
-                      <td className="py-3.5 px-4 font-mono text-cyan-400 text-[11px]">
-                        {p.invoiceNumber || 'Advance Credit'}
-                      </td>
-
-                      <td className="py-3.5 px-4 text-slate-400 text-[11px]">
-                        {formatDateTime(p.paymentDate)}
-                      </td>
-
-                      <td className="py-3.5 px-4 font-mono font-bold text-emerald-400 text-sm">
-                        {formatCurrency(p.amount)}
-                      </td>
-
-                      <td className="py-3.5 px-4 text-slate-400 truncate max-w-[120px]">
-                        {p.cashierName}
-                      </td>
-
-                      <td className="py-3.5 px-4 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          <button
-                            onClick={() => onSelectReceipt(p.id)}
-                            className="p-1.5 bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white rounded-lg transition-colors"
-                            title="View Receipt"
-                          >
-                            <Receipt className="w-3.5 h-3.5" />
-                          </button>
-
-                          <button
-                            onClick={() => {
-                              const pdf = generateOfficialReceiptPDF(p, businessProfile);
-                              pdf.save(`${p.receiptNumber}.pdf`);
-                            }}
-                            className="p-1.5 bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600 hover:text-white rounded-lg transition-colors"
-                            title="Download Thermal 80mm PDF"
-                          >
-                            <Printer className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
+          {/* Payments Table */}
+          <div className="rounded-2xl bg-slate-900/80 border border-slate-800 overflow-hidden shadow-card">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-800 bg-slate-950/60 text-slate-400 font-semibold uppercase tracking-wider text-[10px]">
+                    <th className="py-3.5 px-4">Receipt (OR) #</th>
+                    <th className="py-3.5 px-4">Account / Subscriber</th>
+                    <th className="py-3.5 px-4">Payment Method</th>
+                    <th className="py-3.5 px-4">Reference No.</th>
+                    <th className="py-3.5 px-4">Invoice Applied</th>
+                    <th className="py-3.5 px-4">Amount Paid</th>
+                    <th className="py-3.5 px-4">Cashier</th>
+                    <th className="py-3.5 px-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60 text-slate-200">
+                  {filteredPayments.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="py-12 text-center text-slate-500">
+                        No payments found matching criteria.
                       </td>
                     </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+                  ) : (
+                    filteredPayments.map((p) => {
+                      const methodInfo = getPaymentMethodLabel(p.paymentMethod);
+                      return (
+                        <tr key={p.id} className="hover:bg-slate-800/40 transition-colors">
+                          <td className="py-3.5 px-4 font-mono font-bold text-emerald-400">
+                            {p.receiptNumber}
+                            <span className="block text-[10px] text-slate-500 font-sans font-normal">
+                              {formatDateTime(p.paymentDate)}
+                            </span>
+                          </td>
+
+                          <td className="py-3.5 px-4">
+                            <button
+                              onClick={() => onSelectCustomer(p.customerId)}
+                              className="font-semibold text-slate-100 hover:text-emerald-400 hover:underline block text-left"
+                            >
+                              {p.customerName}
+                            </button>
+                            <span className="font-mono text-[10px] text-slate-400">{p.accountNo}</span>
+                          </td>
+
+                          <td className="py-3.5 px-4">
+                            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-slate-950 border border-slate-800 font-medium">
+                              <span>{methodInfo.icon}</span>
+                              <span>{methodInfo.label}</span>
+                            </span>
+                          </td>
+
+                          <td className="py-3.5 px-4 font-mono text-slate-300">
+                            {p.referenceNumber || <span className="text-slate-600">—</span>}
+                          </td>
+
+                          <td className="py-3.5 px-4 font-mono text-slate-400">
+                            {p.invoiceNumber ? (
+                              <span className="text-slate-300">{p.invoiceNumber}</span>
+                            ) : (
+                              <span className="text-emerald-400/80 bg-emerald-950/60 px-1.5 py-0.5 rounded text-[10px]">
+                                Advance Deposit
+                              </span>
+                            )}
+                          </td>
+
+                          <td className="py-3.5 px-4 font-mono font-bold text-emerald-400 text-sm">
+                            {formatCurrency(p.amount)}
+                          </td>
+
+                          <td className="py-3.5 px-4 text-slate-400 truncate max-w-[120px]">
+                            {p.cashierName}
+                          </td>
+
+                          <td className="py-3.5 px-4 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                onClick={() => onSelectReceipt(p.id)}
+                                className="p-1.5 bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white rounded-lg transition-colors"
+                                title="View Receipt"
+                              >
+                                <Receipt className="w-3.5 h-3.5" />
+                              </button>
+
+                              <button
+                                onClick={() => {
+                                  const pdf = generateOfficialReceiptPDF(p, businessProfile);
+                                  pdf.save(`${p.receiptNumber}.pdf`);
+                                }}
+                                className="p-1.5 bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600 hover:text-white rounded-lg transition-colors"
+                                title="Download Thermal 80mm PDF"
+                              >
+                                <Printer className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
 
       {/* EOD Z-Reading Modal */}
       {showEODModal && <EODModal onClose={() => setShowEODModal(false)} />}
     </div>
   );
 };
-

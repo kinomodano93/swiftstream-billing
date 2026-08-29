@@ -12,11 +12,19 @@ import {
   CheckCircle2,
   AlertCircle,
   FileSpreadsheet,
+  Receipt,
+  Printer,
+  ShieldCheck,
+  DollarSign,
+  Layers,
+  Clock,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { Invoice, InvoiceStatus } from '../../types';
+import { Invoice, InvoiceStatus, Payment } from '../../types';
 import { formatCurrency, formatDate, getInvoiceStatusBadge } from '../../utils/formatters';
 import { generateInvoicePDF } from '../../utils/pdfGenerator';
+import { DailyRemittanceAudit } from './DailyRemittanceAudit';
+import { ThermalReceiptModal } from './ThermalReceiptModal';
 
 interface InvoiceListProps {
   onOpenBatchBillingModal: () => void;
@@ -31,9 +39,26 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
   onSelectInvoice,
   onSelectCustomer,
 }) => {
-  const { invoices, businessProfile, deleteInvoice, sendReminder, searchTerm, setSearchTerm } = useApp();
+  const {
+    invoices,
+    payments,
+    customers,
+    businessProfile,
+    deleteInvoice,
+    sendReminder,
+    runDailyGraceAudit,
+    searchTerm,
+    setSearchTerm,
+  } = useApp();
 
+  const [activeBillingTab, setActiveBillingTab] = useState<'invoices' | 'remittances' | 'grace_audit'>('invoices');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+
+  // Thermal Receipt Modal State
+  const [selectedPaymentForThermal, setSelectedPaymentForThermal] = useState<{
+    payment: Payment;
+    invoice?: Invoice;
+  } | null>(null);
 
   const filteredInvoices = invoices.filter((inv) => {
     const matchesSearch =
@@ -98,20 +123,29 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
         <div>
           <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2">
             <FileText className="w-5 h-5 text-cyan-400" />
-            <span>Billing & Invoices Management</span>
+            <span>Billing, Invoices & Cashier Hub</span>
           </h2>
           <p className="text-xs text-slate-400 mt-1">
-            Generate monthly statement of accounts, track collections, send SMS reminders, and download official PDF bills.
+            Statement of accounts, advance credit wallet proration, POS thermal receipts, and daily cashier remittance audits.
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            onClick={() => runDailyGraceAudit()}
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold transition-all hover:scale-105"
+            title="Evaluate 5-day grace period, auto-isolate overdue accounts, and unsuspend paid accounts"
+          >
+            <ShieldCheck className="w-4 h-4 text-emerald-400" />
+            <span>Run Daily Grace Audit</span>
+          </button>
+
           <button
             onClick={exportInvoicesToCSV}
             className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold transition-colors"
           >
             <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Export Invoices</span>
+            <span>Export CSV</span>
           </button>
 
           <button
@@ -124,6 +158,37 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
         </div>
       </div>
 
+      {/* Sub-Navigation Tabs */}
+      <div className="flex flex-wrap items-center gap-2 border-b border-slate-800 pb-3 text-xs">
+        <button
+          onClick={() => setActiveBillingTab('invoices')}
+          className={`flex items-center gap-2 px-3.5 py-2 rounded-xl font-bold transition-all ${
+            activeBillingTab === 'invoices'
+              ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/50 shadow-glow-cyan'
+              : 'bg-slate-900/60 text-slate-400 border border-slate-800 hover:text-slate-200'
+          }`}
+        >
+          <FileText className="w-4 h-4" />
+          <span>📄 Statements of Account ({invoices.length})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveBillingTab('remittances')}
+          className={`flex items-center gap-2 px-3.5 py-2 rounded-xl font-bold transition-all ${
+            activeBillingTab === 'remittances'
+              ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/50 shadow-glow-cyan'
+              : 'bg-slate-900/60 text-slate-400 border border-slate-800 hover:text-slate-200'
+          }`}
+        >
+          <DollarSign className="w-4 h-4" />
+          <span>💰 Daily Cashier Remittance & Drawer</span>
+        </button>
+      </div>
+
+      {activeBillingTab === 'remittances' ? (
+        <DailyRemittanceAudit />
+      ) : (
+        <>
       {/* Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 flex items-center justify-between">
@@ -235,7 +300,17 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
                         >
                           {inv.invoiceNumber}
                         </button>
-                        <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-slate-500">
+                        <div className="flex flex-wrap items-center gap-1 mt-0.5 text-[10px]">
+                          {inv.isProrated && (
+                            <span className="text-[9px] font-bold text-amber-300 bg-amber-950/60 px-1 py-0.5 rounded border border-amber-800/40">
+                              Prorated ({inv.proratedDays}d)
+                            </span>
+                          )}
+                          {inv.appliedCredit && inv.appliedCredit > 0 ? (
+                            <span className="text-[9px] font-bold text-emerald-300 bg-emerald-950/60 px-1 py-0.5 rounded border border-emerald-800/40">
+                              Credit: -{formatCurrency(inv.appliedCredit)}
+                            </span>
+                          ) : null}
                           {inv.sentViaSms && (
                             <span className="text-emerald-400 bg-emerald-950/40 px-1 rounded">SMS Sent</span>
                           )}
@@ -292,6 +367,31 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
                           )}
 
                           <button
+                            onClick={() => {
+                              const matchingPayment = payments.find((p) => p.invoiceId === inv.id) || {
+                                id: `pay-temp-${inv.id}`,
+                                receiptNumber: `OR-${inv.invoiceNumber.replace('INV-', '')}`,
+                                customerId: inv.customerId,
+                                customerName: inv.customerName,
+                                accountNo: inv.accountNo,
+                                invoiceId: inv.id,
+                                invoiceNumber: inv.invoiceNumber,
+                                amount: inv.amountPaid || inv.totalAmount,
+                                paymentDate: inv.paidAt || inv.issueDate,
+                                paymentMethod: inv.paymentMethodUsed || 'cash',
+                                cashierName: businessProfile.representative.firstName + ' ' + businessProfile.representative.lastName,
+                                isAdvancePayment: false,
+                                createdAt: inv.createdAt,
+                              };
+                              setSelectedPaymentForThermal({ payment: matchingPayment, invoice: inv });
+                            }}
+                            className="p-1.5 bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white rounded-lg transition-colors"
+                            title="Print Thermal Mini-POS Receipt (58mm/80mm)"
+                          >
+                            <Receipt className="w-3.5 h-3.5 text-cyan-400" />
+                          </button>
+
+                          <button
                             onClick={() => onSelectInvoice(inv.id)}
                             className="p-1.5 bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white rounded-lg transition-colors"
                             title="View Invoice"
@@ -341,6 +441,17 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
           </table>
         </div>
       </div>
+      </>
+      )}
+
+      {/* ================= MODAL: THERMAL POS MINI-RECEIPT (58mm / 80mm) ================= */}
+      {selectedPaymentForThermal && (
+        <ThermalReceiptModal
+          payment={selectedPaymentForThermal.payment}
+          invoice={selectedPaymentForThermal.invoice}
+          onClose={() => setSelectedPaymentForThermal(null)}
+        />
+      )}
     </div>
   );
 };

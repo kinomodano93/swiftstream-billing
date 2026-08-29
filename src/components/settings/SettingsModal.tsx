@@ -31,10 +31,24 @@ import {
   AlertCircle,
   Trash2,
   Activity,
+  Cloud,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { SmtpConfig, SmtpProviderPreset, AuditLog, AuditLogCategory, AuditLogSeverity } from '../../types';
-import { SMTP_PRESETS, testSmtpConnection } from '../../utils/smtpService';
+import {
+  SmtpConfig,
+  SmtpProviderPreset,
+  AuditLog,
+  AuditLogCategory,
+  AuditLogSeverity,
+  SmsGatewayConfig,
+  StaffWebhooksConfig,
+  SmsProviderType,
+} from '../../types';
+import { testSmtpConnection, SMTP_PRESETS } from '../../utils/smtpService';
+import { testSmsGatewayConnection } from '../../utils/smsSender';
+import { sendTelegramStaffAlert, sendDiscordStaffAlert, testWebhookIntegration } from '../../utils/webhookService';
+import { XenditGatewaySettings } from './XenditGatewaySettings';
+import { FirebaseSettingsCard } from './FirebaseSettingsCard';
 
 export const SettingsModal: React.FC = () => {
   const {
@@ -47,7 +61,7 @@ export const SettingsModal: React.FC = () => {
     resetToDefault,
   } = useApp();
 
-  const [activeTab, setActiveTab] = useState<'profile' | 'payments' | 'api' | 'audit' | 'backup'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'payments' | 'api' | 'firebase' | 'audit' | 'backup'>('profile');
 
   // Business state
   const [businessName, setBusinessName] = useState(businessProfile.name);
@@ -78,6 +92,7 @@ export const SettingsModal: React.FC = () => {
   const [bankName, setBankName] = useState(businessProfile.paymentGateways.bankName);
   const [bankAccountName, setBankAccountName] = useState(businessProfile.paymentGateways.bankAccountName);
   const [bankAccountNumber, setBankAccountNumber] = useState(businessProfile.paymentGateways.bankAccountNumber);
+  const [paymentGatewaySubTab, setPaymentGatewaySubTab] = useState<'xendit' | 'manual'>('xendit');
   const [isXenditEnabled, setIsXenditEnabled] = useState<boolean>(businessProfile.paymentGateways.isXenditEnabled ?? true);
   const [xenditMode, setXenditMode] = useState<'test' | 'live'>(businessProfile.paymentGateways.xenditMode || 'test');
   const [xenditSecretKey, setXenditSecretKey] = useState<string>(businessProfile.paymentGateways.xenditSecretKey || '');
@@ -92,6 +107,32 @@ export const SettingsModal: React.FC = () => {
   const [mikrotikPassword, setMikrotikPassword] = useState(businessProfile.apiKeys.mikrotikPassword || '');
   const [geminiApiKey, setGeminiApiKey] = useState(businessProfile.apiKeys.geminiApiKey || '');
   const [geminiModel, setGeminiModel] = useState(businessProfile.apiKeys.geminiModel || 'gemini-2.5-flash');
+
+  // SMS Gateway Configuration
+  const [smsProvider, setSmsProvider] = useState<SmsProviderType>(businessProfile.smsGateway?.provider || 'semaphore');
+  const [smsApiKey, setSmsApiKey] = useState<string>(businessProfile.smsGateway?.apiKey || '');
+  const [smsSenderName, setSmsSenderName] = useState<string>(businessProfile.smsGateway?.senderName || 'SWIFTSTREAM');
+  const [philsmsSenderId, setPhilsmsSenderId] = useState<string>(businessProfile.smsGateway?.philsmsSenderId || 'SWIFTSTREAM');
+  const [twilioSid, setTwilioSid] = useState<string>(businessProfile.smsGateway?.twilioAccountSid || '');
+  const [twilioToken, setTwilioToken] = useState<string>(businessProfile.smsGateway?.twilioAuthToken || '');
+  const [twilioFrom, setTwilioFrom] = useState<string>(businessProfile.smsGateway?.twilioFromNumber || '+12055550199');
+  const [smsEnabled, setSmsEnabled] = useState<boolean>(businessProfile.smsGateway?.enabled ?? true);
+  const [testSmsPhone, setTestSmsPhone] = useState<string>(businessProfile.representative.mobile || '09624171684');
+  const [isTestingSms, setIsTestingSms] = useState<boolean>(false);
+  const [smsTestResult, setSmsTestResult] = useState<{ success: boolean; message: string; latencyMs: number } | null>(null);
+
+  // Staff Webhooks Configuration
+  const [telegramEnabled, setTelegramEnabled] = useState<boolean>(businessProfile.staffWebhooks?.telegramEnabled ?? true);
+  const [telegramBotToken, setTelegramBotToken] = useState<string>(businessProfile.staffWebhooks?.telegramBotToken || '');
+  const [telegramChatId, setTelegramChatId] = useState<string>(businessProfile.staffWebhooks?.telegramChatId || '');
+  const [discordEnabled, setDiscordEnabled] = useState<boolean>(businessProfile.staffWebhooks?.discordEnabled ?? true);
+  const [discordWebhookUrl, setDiscordWebhookUrl] = useState<string>(businessProfile.staffWebhooks?.discordWebhookUrl || '');
+  const [notifyOnOutage, setNotifyOnOutage] = useState<boolean>(businessProfile.staffWebhooks?.notifyOnOutage ?? true);
+  const [notifyOnCashierRemittance, setNotifyOnCashierRemittance] = useState<boolean>(businessProfile.staffWebhooks?.notifyOnCashierRemittance ?? true);
+  const [notifyOnTelemetryWatchdog, setNotifyOnTelemetryWatchdog] = useState<boolean>(businessProfile.staffWebhooks?.notifyOnTelemetryWatchdog ?? true);
+  const [notifyOnUrgentRepair, setNotifyOnUrgentRepair] = useState<boolean>(businessProfile.staffWebhooks?.notifyOnUrgentRepair ?? true);
+  const [isTestingWebhook, setIsTestingWebhook] = useState<boolean>(false);
+  const [webhookTestResult, setWebhookTestResult] = useState<{ success: boolean; message: string; latencyMs: number } | null>(null);
 
   // SMTP Configuration
   const initialSmtp: SmtpConfig = businessProfile.smtp || {
@@ -168,6 +209,65 @@ export const SettingsModal: React.FC = () => {
     }
   };
 
+  const handleTestSmsGateway = async () => {
+    setIsTestingSms(true);
+    setSmsTestResult(null);
+    try {
+      const config: SmsGatewayConfig = {
+        provider: smsProvider,
+        apiKey: smsApiKey,
+        senderName: smsSenderName,
+        philsmsSenderId,
+        twilioAccountSid: twilioSid,
+        twilioAuthToken: twilioToken,
+        twilioFromNumber: twilioFrom,
+        enabled: smsEnabled,
+      };
+      const res = await testSmsGatewayConnection(
+        config,
+        testSmsPhone,
+        `SWIFTSTREAM TEST: SMS Gateway (${smsProvider.toUpperCase()}) connection verified at ${new Date().toLocaleTimeString()}.`
+      );
+      setSmsTestResult(res);
+    } catch (err: any) {
+      setSmsTestResult({
+        success: false,
+        message: err?.message || 'SMS Dispatch Error',
+        latencyMs: 0,
+      });
+    } finally {
+      setIsTestingSms(false);
+    }
+  };
+
+  const handleTestWebhook = async (type: 'telegram' | 'discord') => {
+    setIsTestingWebhook(true);
+    setWebhookTestResult(null);
+    try {
+      const config: StaffWebhooksConfig = {
+        telegramEnabled,
+        telegramBotToken,
+        telegramChatId,
+        discordEnabled,
+        discordWebhookUrl,
+        notifyOnOutage,
+        notifyOnCashierRemittance,
+        notifyOnTelemetryWatchdog,
+        notifyOnUrgentRepair,
+      };
+      const res = await testWebhookIntegration(type, config);
+      setWebhookTestResult(res);
+    } catch (err: any) {
+      setWebhookTestResult({
+        success: false,
+        message: err?.message || 'Webhook Dispatch Error',
+        latencyMs: 0,
+      });
+    } finally {
+      setIsTestingWebhook(false);
+    }
+  };
+
   const handleSaveProfile = (e: React.FormEvent) => {
     e.preventDefault();
     updateBusinessProfile({
@@ -226,6 +326,28 @@ export const SettingsModal: React.FC = () => {
         mikrotikPassword,
         geminiApiKey,
         geminiModel,
+      },
+      smsGateway: {
+        provider: smsProvider,
+        apiKey: smsApiKey,
+        senderName: smsSenderName,
+        philsmsSenderId,
+        twilioAccountSid: twilioSid,
+        twilioAuthToken: twilioToken,
+        twilioFromNumber: twilioFrom,
+        enabled: smsEnabled,
+        lastTestedAt: new Date().toISOString(),
+      },
+      staffWebhooks: {
+        telegramEnabled,
+        telegramBotToken,
+        telegramChatId,
+        discordEnabled,
+        discordWebhookUrl,
+        notifyOnOutage,
+        notifyOnCashierRemittance,
+        notifyOnTelemetryWatchdog,
+        notifyOnUrgentRepair,
       },
       smtp: {
         enabled: smtpEnabled,
@@ -317,6 +439,7 @@ export const SettingsModal: React.FC = () => {
         {[
           { id: 'profile', label: 'Company & Representative', icon: Building2 },
           { id: 'payments', label: 'Payment Gateways & QR', icon: CreditCard },
+          { id: 'firebase', label: 'Cloud Firestore Sync', icon: Cloud },
           { id: 'api', label: 'API, AI & SMTP Server', icon: Key },
           { id: 'audit', label: `Security Audit Trail (${auditLogs.length})`, icon: Shield },
           { id: 'backup', label: 'Database Backup & Restore', icon: Database },
@@ -528,121 +651,156 @@ export const SettingsModal: React.FC = () => {
 
       {/* Tab 2: Payment Gateways */}
       {activeTab === 'payments' && (
-        <form onSubmit={handleSaveProfile} className="p-6 rounded-3xl bg-slate-900/80 border border-slate-800 space-y-6 text-xs shadow-card">
-          <div className="space-y-4">
-            <h4 className="font-bold text-slate-200 uppercase tracking-wider text-[11px] text-cyan-400">
-              GCash Payment Gateway
-            </h4>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-slate-400 mb-1 font-medium">GCash Registered Number *</label>
-                <input
-                  type="text"
-                  value={gcashNumber}
-                  onChange={(e) => setGcashNumber(e.target.value)}
-                  placeholder="09XXXXXXXXX"
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-mono"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-400 mb-1 font-medium">GCash Account Name *</label>
-                <input
-                  type="text"
-                  value={gcashName}
-                  onChange={(e) => setGcashName(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100"
-                  required
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-4 pt-4 border-t border-slate-800">
-            <h4 className="font-bold text-slate-200 uppercase tracking-wider text-[11px] text-cyan-400">
-              Maya Gateway
-            </h4>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-slate-400 mb-1 font-medium">Maya Number *</label>
-                <input
-                  type="text"
-                  value={mayaNumber}
-                  onChange={(e) => setMayaNumber(e.target.value)}
-                  placeholder="09XXXXXXXXX"
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-mono"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-400 mb-1 font-medium">Maya Account Name *</label>
-                <input
-                  type="text"
-                  value={mayaName}
-                  onChange={(e) => setMayaName(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100"
-                  required
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-4 pt-4 border-t border-slate-800">
-            <h4 className="font-bold text-slate-200 uppercase tracking-wider text-[11px] text-cyan-400">
-              Bank Deposit / Wire Transfer
-            </h4>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div>
-                <label className="block text-slate-400 mb-1 font-medium">Bank Name *</label>
-                <input
-                  type="text"
-                  value={bankName}
-                  onChange={(e) => setBankName(e.target.value)}
-                  placeholder="BDO / Landbank"
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-400 mb-1 font-medium">Account Name *</label>
-                <input
-                  type="text"
-                  value={bankAccountName}
-                  onChange={(e) => setBankAccountName(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-400 mb-1 font-medium">Account Number *</label>
-                <input
-                  type="text"
-                  value={bankAccountNumber}
-                  onChange={(e) => setBankAccountNumber(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-mono"
-                  required
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className="pt-4 border-t border-slate-800 flex justify-end">
+        <div className="space-y-6">
+          {/* Sub Navigation */}
+          <div className="flex items-center gap-2 border-b border-slate-800 pb-2">
             <button
-              type="submit"
-              className="flex items-center gap-2 px-5 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl font-semibold shadow-lg shadow-cyan-600/20"
+              type="button"
+              onClick={() => setPaymentGatewaySubTab('xendit')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                paymentGatewaySubTab === 'xendit'
+                  ? 'bg-blue-600/20 text-blue-300 border border-blue-500/40 shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+              }`}
             >
-              <Check className="w-4 h-4" />
-              <span>Save Payment Channels</span>
+              <Zap className="w-4 h-4 text-blue-400" />
+              <span>Xendit Payment Gateway (PH API)</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setPaymentGatewaySubTab('manual')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                paymentGatewaySubTab === 'manual'
+                  ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+              }`}
+            >
+              <CreditCard className="w-4 h-4 text-cyan-400" />
+              <span>Direct E-Wallets & Bank Accounts (Manual QR)</span>
             </button>
           </div>
-        </form>
+
+          {paymentGatewaySubTab === 'xendit' ? (
+            <XenditGatewaySettings />
+          ) : (
+            <form onSubmit={handleSaveProfile} className="p-6 rounded-3xl bg-slate-900/80 border border-slate-800 space-y-6 text-xs shadow-card">
+              <div className="space-y-4">
+                <h4 className="font-bold text-slate-200 uppercase tracking-wider text-[11px] text-cyan-400">
+                  GCash Payment Gateway
+                </h4>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-slate-400 mb-1 font-medium">GCash Registered Number *</label>
+                    <input
+                      type="text"
+                      value={gcashNumber}
+                      onChange={(e) => setGcashNumber(e.target.value)}
+                      placeholder="09XXXXXXXXX"
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-mono"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-400 mb-1 font-medium">GCash Account Name *</label>
+                    <input
+                      type="text"
+                      value={gcashName}
+                      onChange={(e) => setGcashName(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100"
+                      required
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-4 pt-4 border-t border-slate-800">
+                <h4 className="font-bold text-slate-200 uppercase tracking-wider text-[11px] text-cyan-400">
+                  Maya Gateway
+                </h4>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-slate-400 mb-1 font-medium">Maya Number *</label>
+                    <input
+                      type="text"
+                      value={mayaNumber}
+                      onChange={(e) => setMayaNumber(e.target.value)}
+                      placeholder="09XXXXXXXXX"
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-mono"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-400 mb-1 font-medium">Maya Account Name *</label>
+                    <input
+                      type="text"
+                      value={mayaName}
+                      onChange={(e) => setMayaName(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100"
+                      required
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-4 pt-4 border-t border-slate-800">
+                <h4 className="font-bold text-slate-200 uppercase tracking-wider text-[11px] text-cyan-400">
+                  Bank Deposit / Wire Transfer
+                </h4>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-slate-400 mb-1 font-medium">Bank Name *</label>
+                    <input
+                      type="text"
+                      value={bankName}
+                      onChange={(e) => setBankName(e.target.value)}
+                      placeholder="BDO / Landbank"
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-400 mb-1 font-medium">Account Name *</label>
+                    <input
+                      type="text"
+                      value={bankAccountName}
+                      onChange={(e) => setBankAccountName(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-400 mb-1 font-medium">Account Number *</label>
+                    <input
+                      type="text"
+                      value={bankAccountNumber}
+                      onChange={(e) => setBankAccountNumber(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-mono"
+                      required
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-4 border-t border-slate-800 flex justify-end">
+                <button
+                  type="submit"
+                  className="flex items-center gap-2 px-5 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl font-semibold shadow-lg shadow-cyan-600/20"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>Save Payment Channels</span>
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
       )}
 
       {/* Tab 3: API, AI & SMTP Server */}
@@ -1002,17 +1160,342 @@ export const SettingsModal: React.FC = () => {
             </div>
           </div>
 
+          {/* Philippine SMS Gateway Integrator */}
+          <div className="space-y-4 pt-4 border-t border-slate-800">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h4 className="font-bold text-slate-200 uppercase tracking-wider text-[11px] text-cyan-400 flex items-center gap-2">
+                  <Send className="w-4 h-4 text-cyan-400" />
+                  <span>Philippine SMS Gateway Integrations</span>
+                </h4>
+                <p className="text-[11px] text-slate-400">
+                  Ready configurations for Semaphore API (Philippines), PhilSMS, Twilio, and sandbox testing.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <label className="flex items-center gap-2 cursor-pointer bg-slate-950 border border-slate-800 px-3 py-1.5 rounded-xl">
+                  <input
+                    type="checkbox"
+                    checked={smsEnabled}
+                    onChange={(e) => setSmsEnabled(e.target.checked)}
+                    className="w-4 h-4 accent-cyan-500 rounded"
+                  />
+                  <span className="text-slate-300 font-medium">Enable SMS Gateway</span>
+                </label>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-4">
+              {/* Provider Selector */}
+              <div>
+                <label className="block text-slate-400 mb-2 font-medium">Select Active SMS Gateway:</label>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { id: 'semaphore', label: 'Semaphore API (Philippines Native)' },
+                    { id: 'philsms', label: 'PhilSMS Gateway (Local PH)' },
+                    { id: 'twilio', label: 'Twilio Global SMS' },
+                    { id: 'sandbox', label: 'SwiftStream Telecom Sandbox' },
+                  ].map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => setSmsProvider(p.id as SmsProviderType)}
+                      className={`px-3 py-1.5 rounded-xl font-medium transition-all ${
+                        smsProvider === p.id
+                          ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/50 shadow-sm shadow-cyan-500/10'
+                          : 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
+                      }`}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Dynamic Provider Fields */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-slate-900">
+                {(smsProvider === 'semaphore' || smsProvider === 'philsms') && (
+                  <>
+                    <div>
+                      <label className="block text-slate-400 mb-1 font-medium">
+                        {smsProvider === 'semaphore' ? 'Semaphore API Key *' : 'PhilSMS API Token *'}
+                      </label>
+                      <input
+                        type="password"
+                        value={smsApiKey}
+                        onChange={(e) => setSmsApiKey(e.target.value)}
+                        placeholder="semi_live_..."
+                        className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 font-mono"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-slate-400 mb-1 font-medium">Sender ID / Brand Mask *</label>
+                      <input
+                        type="text"
+                        value={smsSenderName}
+                        onChange={(e) => setSmsSenderName(e.target.value)}
+                        placeholder="SWIFTSTREAM"
+                        className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 font-mono font-bold"
+                      />
+                    </div>
+                  </>
+                )}
+
+                {smsProvider === 'twilio' && (
+                  <>
+                    <div>
+                      <label className="block text-slate-400 mb-1 font-medium">Twilio Account SID *</label>
+                      <input
+                        type="text"
+                        value={twilioSid}
+                        onChange={(e) => setTwilioSid(e.target.value)}
+                        placeholder="AC..."
+                        className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 font-mono"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-slate-400 mb-1 font-medium">Twilio Auth Token *</label>
+                      <input
+                        type="password"
+                        value={twilioToken}
+                        onChange={(e) => setTwilioToken(e.target.value)}
+                        placeholder="••••••••••••"
+                        className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 font-mono"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-slate-400 mb-1 font-medium">Twilio From Number / Sender ID</label>
+                      <input
+                        type="text"
+                        value={twilioFrom}
+                        onChange={(e) => setTwilioFrom(e.target.value)}
+                        placeholder="+12055550199"
+                        className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 font-mono"
+                      />
+                    </div>
+                  </>
+                )}
+
+                {smsProvider === 'sandbox' && (
+                  <div className="sm:col-span-2 p-3 bg-cyan-950/20 border border-cyan-800/30 rounded-xl text-cyan-300">
+                    <p>💡 <strong>Sandbox Testing Mode:</strong> High-fidelity local simulation with realistic telco latency. SMS logs will be captured and previewed in real-time without consuming telco credits.</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Test SMS Dispatcher */}
+              <div className="p-3 bg-slate-900/90 border border-slate-800 rounded-xl space-y-2">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <span className="font-bold text-slate-200 text-[11px] block">
+                      🧪 Test SMS Gateway Handshake
+                    </span>
+                    <span className="text-[10px] text-slate-400">
+                      Send a live verification SMS to verify gateway authorization and delivery.
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={testSmsPhone}
+                      onChange={(e) => setTestSmsPhone(e.target.value)}
+                      placeholder="09123456789"
+                      className="px-3 py-1.5 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 font-mono text-[11px] w-36"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleTestSmsGateway}
+                      disabled={isTestingSms}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white rounded-xl font-semibold transition-all shadow-sm"
+                    >
+                      {isTestingSms ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                      <span>{isTestingSms ? 'Sending...' : 'Test SMS'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {smsTestResult && (
+                  <div
+                    className={`p-2.5 rounded-xl border text-[11px] flex items-center gap-2 ${
+                      smsTestResult.success
+                        ? 'bg-emerald-950/40 border-emerald-800/60 text-emerald-200'
+                        : 'bg-rose-950/40 border-rose-800/60 text-rose-200'
+                    }`}
+                  >
+                    {smsTestResult.success ? <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" /> : <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />}
+                    <span>{smsTestResult.message}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Telegram & Discord Staff Webhook Bot */}
+          <div className="space-y-4 pt-4 border-t border-slate-800">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h4 className="font-bold text-slate-200 uppercase tracking-wider text-[11px] text-sky-400 flex items-center gap-2">
+                  <Bot className="w-4 h-4 text-sky-400" />
+                  <span>Telegram & Discord Staff Alert Bots</span>
+                </h4>
+                <p className="text-[11px] text-slate-400">
+                  Instant webhook notifications for fiber cuts, telemetry watchdog triggers, and cashier drawer closures.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Telegram Card */}
+              <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-slate-200 flex items-center gap-1.5">
+                    <Bot className="w-4 h-4 text-sky-400" />
+                    <span>Telegram Operations Bot</span>
+                  </span>
+                  <label className="flex items-center gap-1.5 cursor-pointer text-[10px]">
+                    <input
+                      type="checkbox"
+                      checked={telegramEnabled}
+                      onChange={(e) => setTelegramEnabled(e.target.checked)}
+                      className="accent-sky-500 rounded"
+                    />
+                    <span className="text-slate-300">Enabled</span>
+                  </label>
+                </div>
+
+                <div>
+                  <label className="block text-slate-400 mb-1 font-medium">Telegram Bot Token *</label>
+                  <input
+                    type="password"
+                    value={telegramBotToken}
+                    onChange={(e) => setTelegramBotToken(e.target.value)}
+                    placeholder="bot123456:ABC-DEF..."
+                    className="w-full px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 font-mono text-[11px]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-400 mb-1 font-medium">Telegram Chat ID / Group Channel ID *</label>
+                  <input
+                    type="text"
+                    value={telegramChatId}
+                    onChange={(e) => setTelegramChatId(e.target.value)}
+                    placeholder="-1001928471920"
+                    className="w-full px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 font-mono text-[11px]"
+                  />
+                </div>
+
+                <div className="pt-2 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => handleTestWebhook('telegram')}
+                    disabled={isTestingWebhook}
+                    className="px-3 py-1.5 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white rounded-xl text-[11px] font-semibold flex items-center gap-1.5"
+                  >
+                    <Send className="w-3 h-3" />
+                    <span>Test Telegram Alert</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Discord Card */}
+              <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-slate-200 flex items-center gap-1.5">
+                    <Zap className="w-4 h-4 text-purple-400" />
+                    <span>Discord NOC Channel Webhook</span>
+                  </span>
+                  <label className="flex items-center gap-1.5 cursor-pointer text-[10px]">
+                    <input
+                      type="checkbox"
+                      checked={discordEnabled}
+                      onChange={(e) => setDiscordEnabled(e.target.checked)}
+                      className="accent-purple-500 rounded"
+                    />
+                    <span className="text-slate-300">Enabled</span>
+                  </label>
+                </div>
+
+                <div>
+                  <label className="block text-slate-400 mb-1 font-medium">Discord Webhook URL *</label>
+                  <input
+                    type="password"
+                    value={discordWebhookUrl}
+                    onChange={(e) => setDiscordWebhookUrl(e.target.value)}
+                    placeholder="https://discord.com/api/webhooks/..."
+                    className="w-full px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 font-mono text-[11px]"
+                  />
+                </div>
+
+                <div className="p-2.5 rounded-xl bg-slate-900/60 border border-slate-800/80 space-y-1.5 text-[10px]">
+                  <span className="font-semibold text-slate-400 block">Trigger Events:</span>
+                  <div className="grid grid-cols-2 gap-1 text-slate-300">
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                      <input type="checkbox" checked={notifyOnOutage} onChange={(e) => setNotifyOnOutage(e.target.checked)} className="rounded accent-purple-500" />
+                      <span>Fiber Cut Outages</span>
+                    </label>
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                      <input type="checkbox" checked={notifyOnCashierRemittance} onChange={(e) => setNotifyOnCashierRemittance(e.target.checked)} className="rounded accent-purple-500" />
+                      <span>Cashier Z-Reading EOD</span>
+                    </label>
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                      <input type="checkbox" checked={notifyOnTelemetryWatchdog} onChange={(e) => setNotifyOnTelemetryWatchdog(e.target.checked)} className="rounded accent-purple-500" />
+                      <span>Telemetry Watchdog</span>
+                    </label>
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                      <input type="checkbox" checked={notifyOnUrgentRepair} onChange={(e) => setNotifyOnUrgentRepair(e.target.checked)} className="rounded accent-purple-500" />
+                      <span>Urgent Repair Tickets</span>
+                    </label>
+                  </div>
+                </div>
+
+                <div className="pt-2 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => handleTestWebhook('discord')}
+                    disabled={isTestingWebhook}
+                    className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white rounded-xl text-[11px] font-semibold flex items-center gap-1.5"
+                  >
+                    <Send className="w-3 h-3" />
+                    <span>Test Discord Webhook</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {webhookTestResult && (
+              <div
+                className={`p-2.5 rounded-xl border text-[11px] flex items-center gap-2 ${
+                  webhookTestResult.success
+                    ? 'bg-emerald-950/40 border-emerald-800/60 text-emerald-200'
+                    : 'bg-rose-950/40 border-rose-800/60 text-rose-200'
+                }`}
+              >
+                {webhookTestResult.success ? <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" /> : <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />}
+                <span>{webhookTestResult.message}</span>
+              </div>
+            )}
+          </div>
+
           <div className="pt-4 border-t border-slate-800 flex justify-end">
             <button
               type="submit"
               className="flex items-center gap-2 px-5 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl font-semibold shadow-lg shadow-cyan-600/20 transition-colors"
             >
               <Check className="w-4 h-4" />
-              <span>Save System & SMTP Settings</span>
+              <span>Save System, SMS & Webhook Settings</span>
             </button>
           </div>
         </form>
       )}
+
+      {/* Tab: Google Firebase & Cloud Firestore Sync */}
+      {activeTab === 'firebase' && <FirebaseSettingsCard />}
 
       {/* Tab 4: Security Audit Trail & Compliance */}
       {activeTab === 'audit' && (
