@@ -40,29 +40,29 @@ import {
 } from './initialData';
 
 const STORAGE_KEYS = {
-  BUSINESS_PROFILE: 'swiftstream_business_profile_v2',
-  CUSTOMERS: 'swiftstream_customers_v2',
-  INVOICES: 'swiftstream_invoices_v2',
-  PAYMENTS: 'swiftstream_payments_v2',
-  PLANS: 'swiftstream_plans_v2',
-  NAP_BOXES: 'swiftstream_nap_boxes_v2',
-  REPAIR_ORDERS: 'swiftstream_repair_orders_v2',
-  REMINDERS: 'swiftstream_reminders_v2',
-  MIKROTIK_DEVICES: 'swiftstream_mikrotik_devices_v2',
-  EXPENSES: 'swiftstream_expenses_v2',
-  AUDIT_LOGS: 'swiftstream_audit_logs_v2',
-  FIBER_CABLES: 'swiftstream_fiber_cables_v2',
-  FIBER_CLOSURES: 'swiftstream_fiber_closures_v2',
-  OLT_NODE: 'swiftstream_olt_node_v2',
-  DAILY_REMITTANCES: 'swiftstream_daily_remittances_v2',
-  ADDON_CATALOG: 'swiftstream_addon_catalog_v2',
-  PAYMENT_SUBMISSIONS: 'swiftstream_payment_submissions_v2',
-  COVERAGE_AREAS: 'swiftstream_coverage_areas_v2',
+  BUSINESS_PROFILE: 'swiftstream_business_profile_v3',
+  CUSTOMERS: 'swiftstream_customers_v3',
+  INVOICES: 'swiftstream_invoices_v3',
+  PAYMENTS: 'swiftstream_payments_v3',
+  PLANS: 'swiftstream_plans_v3',
+  NAP_BOXES: 'swiftstream_nap_boxes_v3',
+  REPAIR_ORDERS: 'swiftstream_repair_orders_v3',
+  REMINDERS: 'swiftstream_reminders_v3',
+  MIKROTIK_DEVICES: 'swiftstream_mikrotik_devices_v3',
+  EXPENSES: 'swiftstream_expenses_v3',
+  AUDIT_LOGS: 'swiftstream_audit_logs_v3',
+  FIBER_CABLES: 'swiftstream_fiber_cables_v3',
+  FIBER_CLOSURES: 'swiftstream_fiber_closures_v3',
+  OLT_NODE: 'swiftstream_olt_node_v3',
+  DAILY_REMITTANCES: 'swiftstream_daily_remittances_v3',
+  ADDON_CATALOG: 'swiftstream_addon_catalog_v3',
+  PAYMENT_SUBMISSIONS: 'swiftstream_payment_submissions_v3',
+  COVERAGE_AREAS: 'swiftstream_coverage_areas_v3',
 };
 
-// Automatic one-time cleanup of legacy v1 mock keys
+// Automatic one-time cleanup of all legacy mock data keys (v1 and v2)
 const cleanupLegacyMockData = () => {
-  if (typeof window !== 'undefined' && !localStorage.getItem('swiftstream_v2_clean_slate_init')) {
+  if (typeof window !== 'undefined' && !localStorage.getItem('swiftstream_v3_clean_slate_init')) {
     const legacyKeys = [
       'swiftstream_customers_v1',
       'swiftstream_invoices_v1',
@@ -78,9 +78,24 @@ const cleanupLegacyMockData = () => {
       'swiftstream_daily_remittances_v1',
       'swiftstream_addon_catalog_v1',
       'swiftstream_payment_submissions_v1',
+      'swiftstream_customers_v2',
+      'swiftstream_invoices_v2',
+      'swiftstream_payments_v2',
+      'swiftstream_nap_boxes_v2',
+      'swiftstream_repair_orders_v2',
+      'swiftstream_reminders_v2',
+      'swiftstream_mikrotik_devices_v2',
+      'swiftstream_expenses_v2',
+      'swiftstream_audit_logs_v2',
+      'swiftstream_fiber_cables_v2',
+      'swiftstream_fiber_closures_v2',
+      'swiftstream_daily_remittances_v2',
+      'swiftstream_addon_catalog_v2',
+      'swiftstream_payment_submissions_v2',
+      'swiftstream_coverage_areas_v2',
     ];
     legacyKeys.forEach((k) => localStorage.removeItem(k));
-    localStorage.setItem('swiftstream_v2_clean_slate_init', 'true');
+    localStorage.setItem('swiftstream_v3_clean_slate_init', 'true');
   }
 };
 
@@ -235,5 +250,5 @@ export const exportAllDataAsJson = () => {
 
 export const resetAllDataToDefault = () => {
   Object.values(STORAGE_KEYS).forEach((k) => localStorage.removeItem(k));
-  localStorage.removeItem('swiftstream_v2_clean_slate_init');
+  localStorage.removeItem('swiftstream_v3_clean_slate_init');
 };

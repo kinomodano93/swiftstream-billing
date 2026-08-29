@@ -45,7 +45,6 @@ import {
 import { testRouterConnection, RouterHealthInfo } from '../../services/mikrotikApiService';
 import { MikrotikTelemetryViewer } from './MikrotikTelemetryViewer';
 import { PppoeManager } from './PppoeManager';
-import { MikrotikLiveBridge } from './MikrotikLiveBridge';
 
 export const MikrotikDeviceManager: React.FC = () => {
   const {
@@ -61,7 +60,7 @@ export const MikrotikDeviceManager: React.FC = () => {
   } = useApp();
 
   // Navigation Sub-tab
-  const [activeSubTab, setActiveSubTab] = useState<'bridge' | 'telemetry' | 'pppoe' | 'fleet' | 'diagnostics'>('bridge');
+  const [activeSubTab, setActiveSubTab] = useState<'fleet' | 'telemetry' | 'pppoe' | 'diagnostics'>('fleet');
 
   // Search & Filter
   const [searchTerm, setSearchTerm] = useState<string>('');
@@ -85,51 +84,128 @@ export const MikrotikDeviceManager: React.FC = () => {
   const [isTestingConnection, setIsTestingConnection] = useState<boolean>(false);
   const [testResult, setTestResult] = useState<RouterHealthInfo | null>(null);
 
+  // Quick Dynamic Port Updater Modal State (HTTP remote port)
+  const [showQuickPortModal, setShowQuickPortModal] = useState<boolean>(false);
+  const [portTargetDevice, setPortTargetDevice] = useState<MikrotikDevice | null>(null);
+  const [dynamicPorts, setDynamicPorts] = useState<{
+    webfigPort: number;
+    remoteAddress: string;
+  }>({
+    webfigPort: 10988,
+    remoteAddress: 'remote.oxapsph.com',
+  });
+  const [isTestingDynamicPort, setIsTestingDynamicPort] = useState<boolean>(false);
+  const [dynamicPortTestResult, setDynamicPortTestResult] = useState<RouterHealthInfo | null>(null);
+
+  const handleOpenQuickPortModal = (dev: MikrotikDevice) => {
+    setPortTargetDevice(dev);
+    setDynamicPorts({
+      webfigPort: dev.webfigPort || dev.port || 80,
+      remoteAddress: dev.remoteAddress || dev.ipAddress,
+    });
+    setDynamicPortTestResult(null);
+    setIsTestingDynamicPort(false);
+    setShowQuickPortModal(true);
+  };
+
+  const handleTestDynamicPort = async () => {
+    if (!portTargetDevice) return;
+    const host = dynamicPorts.remoteAddress || portTargetDevice.remoteAddress || portTargetDevice.ipAddress;
+    const port = dynamicPorts.webfigPort;
+    setIsTestingDynamicPort(true);
+    setDynamicPortTestResult(null);
+    try {
+      const res = await testRouterConnection({
+        ipAddress: host,
+        username: portTargetDevice.username || 'admin',
+        password: portTargetDevice.password || '',
+        port: port,
+        useHttps: portTargetDevice.useSsl,
+      });
+      setDynamicPortTestResult(res);
+      if (res.status === 'connected') {
+        showToast('success', 'HTTP Port Verified', `HTTP port ${port} responded (${res.latencyMs}ms latency). Router: ${res.boardName}`);
+      } else if (res.status === 'auth_failed') {
+        showToast('error', 'Auth Failed', 'HTTP port reached, but API credentials failed.');
+      } else {
+        showToast('error', 'Port Unreachable', res.errorMessage || `Port ${port} is not responding.`);
+      }
+    } catch (err: any) {
+      showToast('error', 'Test Failed', err?.message || 'Connection timeout');
+    } finally {
+      setIsTestingDynamicPort(false);
+    }
+  };
+
+  const handleSaveDynamicPorts = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!portTargetDevice) return;
+    const finalHost = dynamicPorts.remoteAddress || portTargetDevice.remoteAddress || portTargetDevice.ipAddress;
+    updateMikrotikDevice(portTargetDevice.id, {
+      webfigPort: dynamicPorts.webfigPort,
+      port: dynamicPorts.webfigPort,
+      remoteAddress: finalHost,
+      ipAddress: finalHost,
+      status: dynamicPortTestResult?.status === 'connected' ? 'online' : portTargetDevice.status,
+    });
+    showToast('success', 'HTTP Remote Port Saved', `Updated HTTP port ${dynamicPorts.webfigPort} for ${portTargetDevice.name}`);
+    setShowQuickPortModal(false);
+  };
+
   // Form State
+  const [connectionMode, setConnectionMode] = useState<'sstp_vpn' | 'direct'>('sstp_vpn');
   const [formData, setFormData] = useState<Omit<MikrotikDevice, 'id'>>({
     name: '',
-    model: 'MikroTik CCR2004-16G-2S+',
+    model: 'MikroTik RouterOS',
     role: 'core_pppoe',
-    ipAddress: '192.168.88.1',
-    port: 80,
-    webfigPort: 80,
+    connectionType: 'sstp_vpn',
+    ipAddress: 'remote.oxapsph.com',
+    remoteAddress: 'remote.oxapsph.com',
+    port: 10988,
+    webfigPort: 10988,
+    apiPort: 10878,
+    winboxPort: 10995,
+    serviceType: 'sstp',
     username: 'admin',
     password: '',
     useSsl: false,
     status: 'online',
-    rosVersion: 'RouterOS v7.15.3 (Stable)',
-    cpuLoad: 7,
-    memoryUsage: { usedMb: 412, totalMb: 4096 },
-    uptime: '19d 14h 42m',
-    activePppoeCount: customers.filter((c) => c.status === 'active').length,
-    totalQueues: customers.length,
-    temperatureC: 38,
-    location: 'Main POP Operations Rack, Binauahan, Lagonoy',
+    rosVersion: 'RouterOS v7.x',
+    cpuLoad: 0,
+    memoryUsage: { usedMb: 0, totalMb: 1024 },
+    uptime: '0m',
+    activePppoeCount: 0,
+    totalQueues: 0,
+    temperatureC: 35,
+    location: 'Main POP Operations Rack, Lagonoy',
     notes: '',
   });
 
   const handleTestConnection = async () => {
-    if (!formData.ipAddress.trim()) {
-      showToast('warning', 'Missing IP', 'Please enter a Router IP or hostname to test.');
+    const targetHost = connectionMode === 'sstp_vpn' ? (formData.remoteAddress || formData.ipAddress) : formData.ipAddress;
+    const targetPort = formData.port || formData.webfigPort || (formData.useSsl ? 443 : 80);
+
+    if (!targetHost || !targetHost.trim()) {
+      showToast('warning', 'Missing Host', 'Please enter Remote Address (e.g. remote.oxapsph.com) or Router IP.');
       return;
     }
     setIsTestingConnection(true);
     setTestResult(null);
     try {
       const res = await testRouterConnection({
-        ipAddress: formData.ipAddress,
+        ipAddress: targetHost,
         username: formData.username || 'admin',
         password: formData.password || '',
-        port: formData.port || 80,
+        port: targetPort,
         useHttps: formData.useSsl,
       });
       setTestResult(res);
       if (res.status === 'connected') {
-        showToast('success', 'Connection Verified', `Successfully connected to ${res.boardName} (${res.latencyMs}ms latency).`);
+        showToast('success', 'Connection Verified', `Connected to ${res.boardName} on port ${targetPort} (${res.latencyMs}ms latency).`);
         // Auto-update model and RouterOS version if blank or generic
         setFormData((prev) => ({
           ...prev,
-          model: prev.model && !prev.model.includes('CCR2004') ? prev.model : (res.boardName || prev.model),
+          model: res.boardName || prev.model,
           rosVersion: res.version || prev.rosVersion,
           cpuLoad: res.cpuLoad || prev.cpuLoad,
           status: 'online',
@@ -165,6 +241,7 @@ export const MikrotikDeviceManager: React.FC = () => {
       dev.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       dev.model.toLowerCase().includes(searchTerm.toLowerCase()) ||
       dev.ipAddress.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (dev.remoteAddress && dev.remoteAddress.toLowerCase().includes(searchTerm.toLowerCase())) ||
       dev.location.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesRole = selectedRole === 'all' || dev.role === selectedRole;
     return matchesSearch && matchesRole;
@@ -174,25 +251,31 @@ export const MikrotikDeviceManager: React.FC = () => {
     setEditingDevice(null);
     setTestResult(null);
     setIsTestingConnection(false);
+    setConnectionMode('sstp_vpn');
     setFormData({
       name: '',
-      model: 'MikroTik CCR2004-16G-2S+',
+      model: 'MikroTik RouterOS',
       role: 'core_pppoe',
-      ipAddress: '192.168.88.1',
-      port: 80,
-      webfigPort: 80,
+      connectionType: 'sstp_vpn',
+      ipAddress: 'remote.oxapsph.com',
+      remoteAddress: 'remote.oxapsph.com',
+      port: 10988,
+      webfigPort: 10988,
+      apiPort: 10878,
+      winboxPort: 10995,
+      serviceType: 'sstp',
       username: 'admin',
       password: '',
       useSsl: false,
       status: 'online',
-      rosVersion: 'RouterOS v7.15.3 (Stable)',
-      cpuLoad: 6,
-      memoryUsage: { usedMb: 380, totalMb: 4096 },
-      uptime: '1d 04h 12m',
-      activePppoeCount: customers.filter((c) => c.status === 'active').length,
-      totalQueues: customers.length,
-      temperatureC: 37,
-      location: 'Binauahan POP Rack, Lagonoy',
+      rosVersion: 'RouterOS v7.x',
+      cpuLoad: 0,
+      memoryUsage: { usedMb: 0, totalMb: 1024 },
+      uptime: '0m',
+      activePppoeCount: 0,
+      totalQueues: 0,
+      temperatureC: 35,
+      location: 'Main POP Operations Rack, Lagonoy',
       notes: '',
     });
     setShowAddEditModal(true);
@@ -202,13 +285,20 @@ export const MikrotikDeviceManager: React.FC = () => {
     setEditingDevice(dev);
     setTestResult(null);
     setIsTestingConnection(false);
+    const mode = dev.connectionType || (dev.ipAddress?.includes('.') && !dev.ipAddress.startsWith('192.168.') && !dev.ipAddress.startsWith('10.') ? 'sstp_vpn' : 'direct');
+    setConnectionMode(mode);
     setFormData({
       name: dev.name,
       model: dev.model,
       role: dev.role,
+      connectionType: dev.connectionType || mode,
       ipAddress: dev.ipAddress,
-      port: dev.port || 80,
-      webfigPort: dev.webfigPort,
+      remoteAddress: dev.remoteAddress || dev.ipAddress,
+      port: dev.port || dev.webfigPort || 80,
+      webfigPort: dev.webfigPort || dev.port || 80,
+      apiPort: dev.apiPort || 8728,
+      winboxPort: dev.winboxPort || 8291,
+      serviceType: dev.serviceType || 'sstp',
       username: dev.username || 'admin',
       password: dev.password || '',
       useSsl: dev.useSsl || false,
@@ -228,15 +318,27 @@ export const MikrotikDeviceManager: React.FC = () => {
 
   const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name.trim() || !formData.ipAddress.trim()) {
-      alert('Please provide a router name and IP address.');
+    const finalHost = connectionMode === 'sstp_vpn' ? (formData.remoteAddress || formData.ipAddress) : formData.ipAddress;
+    const finalPort = formData.webfigPort || formData.port || 80;
+
+    if (!formData.name.trim() || !finalHost.trim()) {
+      showToast('warning', 'Incomplete Form', 'Please provide a router name and remote address/IP.');
       return;
     }
 
+    const payload: Omit<MikrotikDevice, 'id'> = {
+      ...formData,
+      ipAddress: finalHost,
+      remoteAddress: finalHost,
+      port: finalPort,
+      webfigPort: finalPort,
+      connectionType: connectionMode,
+    };
+
     if (editingDevice) {
-      updateMikrotikDevice(editingDevice.id, formData);
+      updateMikrotikDevice(editingDevice.id, payload);
     } else {
-      addMikrotikDevice(formData);
+      addMikrotikDevice(payload);
     }
     setShowAddEditModal(false);
   };
@@ -351,20 +453,20 @@ export const MikrotikDeviceManager: React.FC = () => {
       {/* SUB-NAVIGATION TABS */}
       <div className="flex flex-wrap items-center gap-3 border-b border-slate-800 pb-4">
         <button
-          onClick={() => setActiveSubTab('bridge')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-bold transition-all ${
-            activeSubTab === 'bridge'
+          onClick={() => setActiveSubTab('fleet')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-bold transition-all cursor-pointer ${
+            activeSubTab === 'fleet'
               ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/50 shadow-glow-cyan'
               : 'bg-slate-900/60 text-slate-400 border border-slate-800 hover:text-slate-200 hover:bg-slate-800/60'
           }`}
         >
-          <Zap className="w-4 h-4 text-cyan-400 animate-pulse" />
-          <span>⚡ Live API Bridge & Automated Control</span>
+          <Server className="w-4 h-4" />
+          <span>🖥️ Router Fleet Manager ({mikrotikDevices.length} Units)</span>
         </button>
 
         <button
           onClick={() => setActiveSubTab('telemetry')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-bold transition-all ${
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-bold transition-all cursor-pointer ${
             activeSubTab === 'telemetry'
               ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/50 shadow-glow-cyan'
               : 'bg-slate-900/60 text-slate-400 border border-slate-800 hover:text-slate-200 hover:bg-slate-800/60'
@@ -376,7 +478,7 @@ export const MikrotikDeviceManager: React.FC = () => {
 
         <button
           onClick={() => setActiveSubTab('pppoe')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-bold transition-all ${
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-bold transition-all cursor-pointer ${
             activeSubTab === 'pppoe'
               ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/50 shadow-glow-cyan'
               : 'bg-slate-900/60 text-slate-400 border border-slate-800 hover:text-slate-200 hover:bg-slate-800/60'
@@ -387,20 +489,8 @@ export const MikrotikDeviceManager: React.FC = () => {
         </button>
 
         <button
-          onClick={() => setActiveSubTab('fleet')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-bold transition-all ${
-            activeSubTab === 'fleet'
-              ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/50 shadow-glow-cyan'
-              : 'bg-slate-900/60 text-slate-400 border border-slate-800 hover:text-slate-200 hover:bg-slate-800/60'
-          }`}
-        >
-          <Server className="w-4 h-4" />
-          <span>🖥️ Router Fleet Manager ({mikrotikDevices.length} Units)</span>
-        </button>
-
-        <button
           onClick={() => setActiveSubTab('diagnostics')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-bold transition-all ${
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-bold transition-all cursor-pointer ${
             activeSubTab === 'diagnostics'
               ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/50 shadow-glow-cyan'
               : 'bg-slate-900/60 text-slate-400 border border-slate-800 hover:text-slate-200 hover:bg-slate-800/60'
@@ -410,11 +500,6 @@ export const MikrotikDeviceManager: React.FC = () => {
           <span>💻 ICMP Ping & Script Center</span>
         </button>
       </div>
-
-      {/* VIEW 0: LIVE API BRIDGE & AUTOMATED CONTROL */}
-      {activeSubTab === 'bridge' && (
-        <MikrotikLiveBridge />
-      )}
 
       {/* VIEW 1: SYSTEM TELEMETRY & HEALTH HUB */}
       {activeSubTab === 'telemetry' && (
@@ -511,180 +596,250 @@ export const MikrotikDeviceManager: React.FC = () => {
 
       {/* 4. MIKROTIK DEVICE FLEET CARDS GRID */}
       <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-        {filteredDevices.map((dev) => {
-          const isCore = dev.role === 'core_pppoe';
-          const cpuColor =
-            dev.cpuLoad > 80 ? 'text-rose-400 bg-rose-500/20' : dev.cpuLoad > 50 ? 'text-amber-400 bg-amber-500/20' : 'text-emerald-400 bg-emerald-500/20';
-
-          return (
-            <div
-              key={dev.id}
-              className={`p-6 rounded-3xl border flex flex-col justify-between transition-all relative ${
-                isCore
-                  ? 'bg-slate-900 border-cyan-500/70 shadow-glow-cyan'
-                  : 'bg-slate-900/70 border-slate-800 hover:border-slate-700'
-              }`}
+        {filteredDevices.length === 0 ? (
+          <div className="col-span-full p-12 text-center rounded-3xl bg-slate-900/50 border border-slate-800 border-dashed space-y-4">
+            <div className="w-16 h-16 rounded-2xl bg-cyan-600/10 border border-cyan-500/20 text-cyan-400 mx-auto flex items-center justify-center">
+              <Server className="w-8 h-8" />
+            </div>
+            <div className="space-y-1">
+              <h4 className="text-base font-bold text-slate-200">No MikroTik Routers Found</h4>
+              <p className="text-xs text-slate-400 max-w-md mx-auto">
+                {searchTerm || selectedRole !== 'all'
+                  ? 'No router hardware matches your current search filters.'
+                  : 'Add your MikroTik RouterOS Core BNG or distribution router to monitor live traffic and auto-provision PPPoE secrets.'}
+              </p>
+            </div>
+            <button
+              onClick={handleOpenAddModal}
+              className="px-5 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-cyan-600/20 transition-all inline-flex items-center gap-2 cursor-pointer"
             >
-              {isCore && (
-                <span className="absolute -top-3 right-6 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-gradient-to-r from-cyan-500 to-blue-500 text-white shadow-md">
-                  Core PPPoE BNG
-                </span>
-              )}
+              <Plus className="w-4 h-4" />
+              <span>Add MikroTik Router</span>
+            </button>
+          </div>
+        ) : (
+          filteredDevices.map((dev) => {
+            const isCore = dev.role === 'core_pppoe';
+            const cpuColor =
+              dev.cpuLoad > 80
+                ? 'text-rose-400 bg-rose-500/20'
+                : dev.cpuLoad > 50
+                ? 'text-amber-400 bg-amber-500/20'
+                : 'text-emerald-400 bg-emerald-500/20';
 
-              <div className="space-y-4">
-                {/* Card Title & Status */}
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <div
-                      className={`w-11 h-11 rounded-2xl flex items-center justify-center ${
-                        isCore ? 'bg-cyan-600/20 text-cyan-400' : 'bg-slate-800 text-slate-300'
-                      }`}
-                    >
-                      <Server className="w-6 h-6" />
-                    </div>
-                    <div>
-                      <h3 className="font-extrabold text-base text-slate-100 leading-tight">
-                        {dev.name}
-                      </h3>
-                      <p className="text-xs text-slate-400 font-mono mt-0.5">{dev.model}</p>
-                    </div>
-                  </div>
+            return (
+              <div
+                key={dev.id}
+                className={`p-6 rounded-3xl border flex flex-col justify-between transition-all relative ${
+                  isCore
+                    ? 'bg-slate-900 border-cyan-500/70 shadow-glow-cyan'
+                    : 'bg-slate-900/70 border-slate-800 hover:border-slate-700'
+                }`}
+              >
+                {isCore && (
+                  <span className="absolute -top-3 right-6 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-gradient-to-r from-cyan-500 to-blue-500 text-white shadow-md">
+                    Core PPPoE BNG
+                  </span>
+                )}
 
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      onClick={() => handleOpenEditModal(dev)}
-                      className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded-lg transition-colors"
-                      title="Edit MikroTik Device"
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
-                    </button>
-                    {mikrotikDevices.length > 1 && (
+                <div className="space-y-4">
+                  {/* Card Title & Status */}
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div
+                        className={`w-11 h-11 rounded-2xl flex items-center justify-center ${
+                          isCore ? 'bg-cyan-600/20 text-cyan-400' : 'bg-slate-800 text-slate-300'
+                        }`}
+                      >
+                        <Server className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-extrabold text-base text-slate-100 leading-tight">
+                            {dev.name}
+                          </h3>
+                          {dev.connectionType === 'sstp_vpn' ? (
+                            <span className="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold bg-cyan-950 text-cyan-300 border border-cyan-850">
+                              ⚡ SSTP
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-md text-[10px] font-mono font-medium bg-slate-800 text-slate-400">
+                              LAN IP
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-400 font-mono mt-0.5">{dev.model}</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => handleOpenEditModal(dev)}
+                        className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded-lg transition-colors cursor-pointer"
+                        title="Edit MikroTik Device"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
                       <button
                         onClick={() => setDeviceToDelete(dev)}
-                        className="p-1.5 hover:bg-rose-950 text-slate-400 hover:text-rose-300 rounded-lg transition-colors cursor-pointer"
+                        className="p-1.5 hover:bg-rose-950 text-slate-400 hover:text-rose-400 rounded-lg transition-colors cursor-pointer"
                         title="Delete Device"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
-                    )}
+                    </div>
                   </div>
-                </div>
 
-                {/* Connection & Network Ribbon */}
-                <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800/80 space-y-2 text-xs">
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-400">Router IP Address:</span>
-                    <span className="font-mono font-bold text-cyan-400 flex items-center gap-1.5">
-                      <span>{dev.ipAddress}</span>
+                  {/* Connection & Network Ribbon */}
+                  <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800/80 space-y-2 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400">
+                        {dev.connectionType === 'sstp_vpn' ? 'Remote Host:' : 'Router IP:'}
+                      </span>
+                      <span className="font-mono font-bold text-cyan-400 flex items-center gap-1.5">
+                        <span>{dev.remoteAddress || dev.ipAddress}</span>
+                        <button
+                          onClick={() => handleCopy(dev.remoteAddress || dev.ipAddress, `ip-${dev.id}`)}
+                          className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-white"
+                          title="Copy Address"
+                        >
+                          {copiedType === `ip-${dev.id}` ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                        </button>
+                      </span>
+                    </div>
+
+                    {/* HTTP Remote Port Display & Quick Update */}
+                    <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-xs">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-lg bg-cyan-600/20 text-cyan-400 flex items-center justify-center font-bold">
+                          <Globe className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <span className="text-[10px] text-slate-400 block font-medium">HTTP Remote Port:</span>
+                          <span className="font-mono font-bold text-cyan-300 text-xs">
+                            :{dev.webfigPort || dev.port || 80}
+                          </span>
+                        </div>
+                      </div>
                       <button
-                        onClick={() => handleCopy(dev.ipAddress, `ip-${dev.id}`)}
-                        className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-white"
-                        title="Copy IP"
+                        onClick={() => handleOpenQuickPortModal(dev)}
+                        className="px-2.5 py-1 bg-cyan-950/80 hover:bg-cyan-900 text-cyan-300 border border-cyan-800/60 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer"
+                        title="Update dynamic HTTP remote port"
                       >
-                        {copiedType === `ip-${dev.id}` ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                        <RefreshCw className="w-2.5 h-2.5" />
+                        <span>Update Port</span>
                       </button>
-                    </span>
+                    </div>
+
+                    <div className="flex items-center justify-between text-[11px] pt-1">
+                      <span className="text-slate-400">RouterOS Version:</span>
+                      <span className="font-mono text-slate-300">
+                        {dev.rosVersion}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between text-[11px] pt-1 border-t border-slate-900">
+                      <span className="text-slate-400">Location:</span>
+                      <span className="text-slate-300 truncate max-w-[200px] text-right font-medium">
+                        {dev.location}
+                      </span>
+                    </div>
                   </div>
 
-                  <div className="flex items-center justify-between text-[11px]">
-                    <span className="text-slate-400">RouterOS Version:</span>
-                    <span className="font-mono text-slate-300">
-                      {dev.rosVersion}
-                    </span>
+                  {/* Live Hardware Gauges */}
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800/80 space-y-1">
+                      <div className="flex items-center justify-between text-slate-400 text-[10px] font-semibold">
+                        <span className="flex items-center gap-1">
+                          <Cpu className="w-3 h-3 text-cyan-400" />
+                          <span>CPU Load</span>
+                        </span>
+                        <span className={`px-1.5 py-0.2 rounded font-mono font-bold ${cpuColor}`}>
+                          {dev.cpuLoad}%
+                        </span>
+                      </div>
+                      <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full ${
+                            dev.cpuLoad > 80 ? 'bg-rose-500' : dev.cpuLoad > 50 ? 'bg-amber-500' : 'bg-cyan-400'
+                          }`}
+                          style={{ width: `${Math.max(dev.cpuLoad, 5)}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800/80 space-y-1">
+                      <div className="flex items-center justify-between text-slate-400 text-[10px] font-semibold">
+                        <span className="flex items-center gap-1">
+                          <HardDrive className="w-3 h-3 text-purple-400" />
+                          <span>RAM Memory</span>
+                        </span>
+                        <span className="font-mono text-purple-300 font-bold text-[10px]">
+                          {dev.memoryUsage.usedMb} MB
+                        </span>
+                      </div>
+                      <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-purple-500 rounded-full"
+                          style={{
+                            width: `${(dev.memoryUsage.usedMb / dev.memoryUsage.totalMb) * 100}%`,
+                          }}
+                        />
+                      </div>
+                    </div>
                   </div>
 
-                  <div className="flex items-center justify-between text-[11px] pt-1 border-t border-slate-900">
-                    <span className="text-slate-400">Location:</span>
-                    <span className="text-slate-300 truncate max-w-[200px] text-right font-medium">
-                      {dev.location}
+                  {/* Telemetry Footer Meta */}
+                  <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1">
+                    <span className="flex items-center gap-1">
+                      <Clock className="w-3 h-3 text-slate-500" />
+                      <span>Uptime: <strong className="text-slate-300">{dev.uptime}</strong></span>
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <Thermometer className="w-3 h-3 text-amber-400" />
+                      <span className="text-amber-300 font-mono font-bold">{dev.temperatureC}°C</span>
                     </span>
                   </div>
                 </div>
 
-                {/* Live Hardware Gauges */}
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800/80 space-y-1">
-                    <div className="flex items-center justify-between text-slate-400 text-[10px] font-semibold">
-                      <span className="flex items-center gap-1">
-                        <Cpu className="w-3 h-3 text-cyan-400" />
-                        <span>CPU Load</span>
-                      </span>
-                      <span className={`px-1.5 py-0.2 rounded font-mono font-bold ${cpuColor}`}>
-                        {dev.cpuLoad}%
-                      </span>
-                    </div>
-                    <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                      <div
-                        className={`h-full rounded-full ${
-                          dev.cpuLoad > 80 ? 'bg-rose-500' : dev.cpuLoad > 50 ? 'bg-amber-500' : 'bg-cyan-400'
-                        }`}
-                        style={{ width: `${Math.max(dev.cpuLoad, 5)}%` }}
-                      />
-                    </div>
-                  </div>
+                {/* Action Buttons Toolbar */}
+                <div className="pt-4 border-t border-slate-800/80 mt-4 grid grid-cols-3 gap-2">
+                  <a
+                    href={`http://${dev.remoteAddress || dev.ipAddress}:${dev.webfigPort || dev.port || 80}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="py-2 px-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-md transition-all hover:scale-[1.02] active:scale-[0.98]"
+                    title="Open WebFig Web Management GUI"
+                  >
+                    <Globe className="w-3.5 h-3.5" />
+                    <span>WebFig GUI</span>
+                  </a>
 
-                  <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800/80 space-y-1">
-                    <div className="flex items-center justify-between text-slate-400 text-[10px] font-semibold">
-                      <span className="flex items-center gap-1">
-                        <HardDrive className="w-3 h-3 text-purple-400" />
-                        <span>RAM Memory</span>
-                      </span>
-                      <span className="font-mono text-purple-300 font-bold text-[10px]">
-                        {dev.memoryUsage.usedMb} MB
-                      </span>
-                    </div>
-                    <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-purple-500 rounded-full"
-                        style={{
-                          width: `${(dev.memoryUsage.usedMb / dev.memoryUsage.totalMb) * 100}%`,
-                        }}
-                      />
-                    </div>
-                  </div>
-                </div>
+                  <button
+                    onClick={() => handleOpenQuickPortModal(dev)}
+                    className="py-2 px-2 bg-cyan-950/70 hover:bg-cyan-900 text-cyan-300 border border-cyan-800/50 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                    title="Quickly change dynamic HTTP remote port"
+                  >
+                    <Zap className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>HTTP Port</span>
+                  </button>
 
-                {/* Telemetry Footer Meta */}
-                <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1">
-                  <span className="flex items-center gap-1">
-                    <Clock className="w-3 h-3 text-slate-500" />
-                    <span>Uptime: <strong className="text-slate-300">{dev.uptime}</strong></span>
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <Thermometer className="w-3 h-3 text-amber-400" />
-                    <span className="text-amber-300 font-mono font-bold">{dev.temperatureC}°C</span>
-                  </span>
+                  <button
+                    onClick={() => {
+                      setScriptModalTab('pppoe');
+                      setShowScriptModal(true);
+                    }}
+                    className="py-2 px-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                    title="Open RouterOS Script Generator"
+                  >
+                    <Terminal className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>CLI Scripts</span>
+                  </button>
                 </div>
               </div>
-
-              {/* Action Buttons Toolbar */}
-              <div className="pt-4 border-t border-slate-800/80 mt-4 grid grid-cols-2 gap-2">
-                <a
-                  href={`http://${dev.ipAddress}:${dev.webfigPort || 80}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="py-2 px-3 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-md transition-all hover:scale-[1.02] active:scale-[0.98]"
-                  title="Open WebFig Web Management GUI"
-                >
-                  <Globe className="w-3.5 h-3.5" />
-                  <span>WebFig GUI</span>
-                </a>
-
-                <button
-                  onClick={() => {
-                    setScriptModalTab('pppoe');
-                    setShowScriptModal(true);
-                  }}
-                  className="py-2 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all"
-                  title="Open RouterOS Script Generator"
-                >
-                  <Terminal className="w-3.5 h-3.5 text-cyan-400" />
-                  <span>CLI Scripts</span>
-                </button>
-              </div>
-            </div>
-          );
-        })}
+            );
+          })
+        )}
       </div>
       </>
       )}
@@ -785,7 +940,7 @@ export const MikrotikDeviceManager: React.FC = () => {
         {pingResults && pingResults.length > 0 && (
           <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 font-mono text-xs text-slate-300 space-y-1 animate-in fade-in">
             <div className="text-slate-500 text-[11px] pb-1 border-b border-slate-900">
-              PING {pingTarget} (56 data bytes from MikroTik CCR2004 Core Interface SFP+1):
+              PING {pingTarget} (56 data bytes from MikroTik Gateway Interface):
             </div>
             {pingResults.map((res) => (
               <div key={res.seq} className="flex items-center justify-between text-emerald-400">
@@ -810,8 +965,9 @@ export const MikrotikDeviceManager: React.FC = () => {
       {/* ================= MODAL 1: ADD / EDIT MIKROTIK DEVICE MODAL ================= */}
       {showAddEditModal && (
         <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95">
-            <div className="p-6 border-b border-slate-800 bg-slate-950/70 flex items-center justify-between">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95">
+            {/* Modal Header */}
+            <div className="p-5 border-b border-slate-800 bg-slate-950/70 flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-cyan-600/20 text-cyan-400 flex items-center justify-center font-bold">
                   <Server className="w-5 h-5" />
@@ -821,49 +977,189 @@ export const MikrotikDeviceManager: React.FC = () => {
                     {editingDevice ? 'Edit MikroTik Device' : 'Add MikroTik Router to Fleet'}
                   </h3>
                   <p className="text-xs text-slate-400">
-                    Configure IP address, role, and RouterOS parameters
+                    Connect via SSTP remote tunnel port forwarding or direct local IP
                   </p>
                 </div>
               </div>
 
               <button
                 onClick={() => setShowAddEditModal(false)}
-                className="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-xl"
+                className="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-xl cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleFormSubmit} className="p-6 overflow-y-auto flex-1 space-y-4 text-xs">
+            {/* Connection Mode Switcher */}
+            <div className="px-5 py-2.5 bg-slate-950/90 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <span className="text-[11px] font-semibold text-slate-400">Connection Mode:</span>
+              <div className="flex items-center p-1 bg-slate-900 border border-slate-800 rounded-xl text-xs">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setConnectionMode('sstp_vpn');
+                    setFormData((prev) => ({
+                      ...prev,
+                      connectionType: 'sstp_vpn',
+                      remoteAddress: prev.remoteAddress || 'remote.oxapsph.com',
+                      port: prev.port === 80 ? 10988 : prev.port,
+                      webfigPort: prev.webfigPort === 80 ? 10988 : prev.webfigPort,
+                      apiPort: prev.apiPort === 8728 ? 10878 : prev.apiPort,
+                      winboxPort: prev.winboxPort === 8291 ? 10995 : prev.winboxPort,
+                    }));
+                  }}
+                  className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                    connectionMode === 'sstp_vpn'
+                      ? 'bg-cyan-600 text-white shadow-sm'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  ⚡ SSTP / Remote VPN (Port Forwarding)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setConnectionMode('direct');
+                    setFormData((prev) => ({
+                      ...prev,
+                      connectionType: 'direct',
+                      ipAddress: prev.ipAddress && !prev.ipAddress.includes('remote.') ? prev.ipAddress : '192.168.88.1',
+                      port: 80,
+                      webfigPort: 80,
+                      apiPort: 8728,
+                      winboxPort: 8291,
+                    }));
+                  }}
+                  className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                    connectionMode === 'direct'
+                      ? 'bg-cyan-600 text-white shadow-sm'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  🌐 Direct LAN / Static IP
+                </button>
+              </div>
+            </div>
+
+            <form onSubmit={handleFormSubmit} className="p-5 overflow-y-auto flex-1 space-y-4 text-xs">
+              {/* SSTP Remote Tunnel Mode */}
+              {connectionMode === 'sstp_vpn' ? (
+                <div className="p-4 rounded-2xl bg-cyan-950/20 border border-cyan-800/40 space-y-3.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-cyan-300 flex items-center gap-1.5">
+                      <Zap className="w-4 h-4 text-cyan-400" />
+                      SSTP / Remote Tunnel Port Forwarding Settings
+                    </span>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-700/60 font-semibold">
+                      Service: {formData.serviceType || 'sstp'}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-slate-400 mb-1 font-semibold">Router Name *</label>
+                      <input
+                        type="text"
+                        required
+                        value={formData.name}
+                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                        placeholder="e.g. maangas"
+                        className="w-full px-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-bold focus:outline-none focus:border-cyan-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-slate-400 mb-1 font-semibold">Remote Address (Tunnel Host) *</label>
+                      <input
+                        type="text"
+                        required
+                        value={formData.remoteAddress || ''}
+                        onChange={(e) => setFormData({ ...formData, remoteAddress: e.target.value, ipAddress: e.target.value })}
+                        placeholder="remote.oxapsph.com"
+                        className="w-full px-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-mono focus:outline-none focus:border-cyan-500"
+                      />
+                    </div>
+                  </div>
+
+                  {/* HTTP Remote Port Configuration */}
+                  <div className="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800/80 space-y-1.5">
+                    <label className="block text-slate-400 font-semibold text-xs">
+                      Dynamic HTTP Remote Port (Mapped to Local Port 80) *
+                    </label>
+                    <input
+                      type="number"
+                      required
+                      value={formData.webfigPort || ''}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value) || 80;
+                        setFormData({ ...formData, webfigPort: val, port: val });
+                      }}
+                      placeholder="e.g. 10988"
+                      className="w-full px-3.5 py-2 bg-slate-900 border border-cyan-800/60 rounded-xl text-slate-100 font-mono text-xs focus:outline-none focus:border-cyan-400"
+                    />
+                    <p className="text-[10px] text-slate-500">
+                      The dynamic high port assigned by your tunnel provider for WebFig and RouterOS REST API communication.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                /* Direct LAN / Public Static IP Mode */
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-slate-400 mb-1 font-semibold">Router Name *</label>
+                    <input
+                      type="text"
+                      required
+                      value={formData.name}
+                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                      placeholder="e.g. SwiftStream Core CCR BNG"
+                      className="w-full px-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-400 mb-1 font-semibold">Router Hardware Model</label>
+                    <input
+                      type="text"
+                      value={formData.model}
+                      onChange={(e) => setFormData({ ...formData, model: e.target.value })}
+                      placeholder="MikroTik CCR2004-16G-2S+ / RB5009"
+                      className="w-full px-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-400 mb-1 font-semibold">Router IP / Host *</label>
+                    <input
+                      type="text"
+                      required
+                      value={formData.ipAddress}
+                      onChange={(e) => setFormData({ ...formData, ipAddress: e.target.value })}
+                      placeholder="192.168.88.1"
+                      className="w-full px-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-mono focus:outline-none focus:border-cyan-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-400 mb-1 font-semibold">WebFig / REST Port *</label>
+                    <input
+                      type="number"
+                      value={formData.webfigPort || 80}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value) || 80;
+                        setFormData({ ...formData, webfigPort: val, port: val });
+                      }}
+                      placeholder="80"
+                      className="w-full px-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-mono focus:outline-none focus:border-cyan-500"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Role & Hardware Details */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-400 mb-1 font-semibold">Router Name *</label>
-                  <input
-                    type="text"
-                    required
-                    value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    placeholder="e.g. SwiftStream Core CCR BNG"
-                    className="w-full px-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-slate-400 mb-1 font-semibold">Router Hardware Model *</label>
-                  <input
-                    type="text"
-                    required
-                    value={formData.model}
-                    onChange={(e) => setFormData({ ...formData, model: e.target.value })}
-                    placeholder="MikroTik CCR2004-16G-2S+ / RB5009"
-                    className="w-full px-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-slate-400 mb-1 font-semibold">Role *</label>
+                  <label className="block text-slate-400 mb-1 font-semibold">Router Fleet Role *</label>
                   <select
                     value={formData.role}
                     onChange={(e) => setFormData({ ...formData, role: e.target.value as any })}
@@ -877,31 +1173,19 @@ export const MikrotikDeviceManager: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block text-slate-400 mb-1 font-semibold">Router IP / Host *</label>
+                  <label className="block text-slate-400 mb-1 font-semibold">Hardware Board Model</label>
                   <input
                     type="text"
-                    required
-                    value={formData.ipAddress}
-                    onChange={(e) => setFormData({ ...formData, ipAddress: e.target.value })}
-                    placeholder="192.168.88.1 or noc.swiftstream.ph"
-                    className="w-full px-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-mono focus:outline-none focus:border-cyan-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-slate-400 mb-1 font-semibold">Remote API / REST Port *</label>
-                  <input
-                    type="number"
-                    value={formData.port || 80}
-                    onChange={(e) => setFormData({ ...formData, port: parseInt(e.target.value) || 80 })}
-                    placeholder="80 / 443 / 8728"
-                    className="w-full px-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-mono focus:outline-none focus:border-cyan-500"
+                    value={formData.model}
+                    onChange={(e) => setFormData({ ...formData, model: e.target.value })}
+                    placeholder="CCR2004-16G-2S+ / RB750Gr3"
+                    className="w-full px-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500"
                   />
                 </div>
               </div>
 
-              {/* RouterOS Credentials & SSL */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-4 rounded-2xl bg-slate-950/70 border border-slate-800">
+              {/* RouterOS API Credentials */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3.5 rounded-2xl bg-slate-950/70 border border-slate-800">
                 <div>
                   <label className="block text-slate-400 mb-1 font-semibold">API Username *</label>
                   <input
@@ -909,7 +1193,7 @@ export const MikrotikDeviceManager: React.FC = () => {
                     value={formData.username || 'admin'}
                     onChange={(e) => setFormData({ ...formData, username: e.target.value })}
                     placeholder="admin"
-                    className="w-full px-3.5 py-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 font-mono focus:outline-none focus:border-cyan-500"
+                    className="w-full px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 font-mono focus:outline-none focus:border-cyan-500"
                   />
                 </div>
 
@@ -920,18 +1204,18 @@ export const MikrotikDeviceManager: React.FC = () => {
                     value={formData.password || ''}
                     onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                     placeholder="••••••••"
-                    className="w-full px-3.5 py-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 font-mono focus:outline-none focus:border-cyan-500"
+                    className="w-full px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 font-mono focus:outline-none focus:border-cyan-500"
                   />
                 </div>
 
                 <div className="flex flex-col justify-center">
-                  <label className="block text-slate-400 mb-2 font-semibold">Security</label>
+                  <label className="block text-slate-400 mb-1 font-semibold">Security</label>
                   <label className="flex items-center gap-2 cursor-pointer text-slate-300">
                     <input
                       type="checkbox"
                       checked={formData.useSsl || false}
                       onChange={(e) => setFormData({ ...formData, useSsl: e.target.checked })}
-                      className="rounded accent-cyan-500 w-4 h-4"
+                      className="rounded accent-cyan-500 w-4 h-4 cursor-pointer"
                     />
                     <span className="text-[11px] font-medium">Use HTTPS / SSL</span>
                   </label>
@@ -947,7 +1231,7 @@ export const MikrotikDeviceManager: React.FC = () => {
                       Live Handshake Verification
                     </span>
                     <p className="text-[11px] text-slate-500">
-                      Query RouterOS REST API endpoint (<code>/system/resource</code>) before saving
+                      Query RouterOS REST API (<code>/system/resource</code>) on port {formData.webfigPort || 80}
                     </p>
                   </div>
 
@@ -1059,54 +1343,64 @@ export const MikrotikDeviceManager: React.FC = () => {
                 )}
               </div>
 
+              {/* Location & Notes */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-400 mb-1 font-semibold">WebFig Web Port</label>
-                  <input
-                    type="number"
-                    value={formData.webfigPort}
-                    onChange={(e) => setFormData({ ...formData, webfigPort: parseInt(e.target.value) || 80 })}
-                    className="w-full px-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-mono focus:outline-none focus:border-cyan-500"
-                  />
-                </div>
-
                 <div>
                   <label className="block text-slate-400 mb-1 font-semibold">Installation / POP Location</label>
                   <input
                     type="text"
                     value={formData.location}
                     onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-                    placeholder="e.g. Main POP Rack, Binauahan, Lagonoy"
+                    placeholder="e.g. Maangas POP Rack, Lagonoy"
+                    className="w-full px-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-400 mb-1 font-semibold">Notes & Topology</label>
+                  <input
+                    type="text"
+                    value={formData.notes || ''}
+                    onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                    placeholder="SSTP tunnel port forwarding via oxapsph"
                     className="w-full px-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500"
                   />
                 </div>
               </div>
 
-              <div>
-                <label className="block text-slate-400 mb-1 font-semibold">Notes & Topology</label>
-                <textarea
-                  rows={2}
-                  value={formData.notes || ''}
-                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                  placeholder="SFP+ trunking, OLT uplink, or VLAN details..."
-                  className="w-full px-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500 resize-none"
-                />
-              </div>
-
-              <div className="pt-3 border-t border-slate-800 flex items-center justify-end gap-3">
-                <button
-                  type="button"
-                  onClick={() => setShowAddEditModal(false)}
-                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-6 py-2.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl font-bold shadow-lg shadow-cyan-600/25 transition-all"
-                >
-                  {editingDevice ? 'Save Changes' : 'Add Router'}
-                </button>
+              {/* Footer Actions */}
+              <div className="pt-3 border-t border-slate-800 flex items-center justify-between gap-3">
+                {editingDevice ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const toDel = editingDevice;
+                      setShowAddEditModal(false);
+                      setDeviceToDelete(toDel);
+                    }}
+                    className="flex items-center gap-1.5 px-3.5 py-2 bg-rose-950/70 hover:bg-rose-900 text-rose-300 border border-rose-800/60 rounded-xl text-xs font-semibold transition-all cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Delete Router</span>
+                  </button>
+                ) : (
+                  <div />
+                )}
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddEditModal(false)}
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-6 py-2.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl font-bold shadow-lg shadow-cyan-600/25 transition-all cursor-pointer"
+                  >
+                    {editingDevice ? 'Save Changes' : 'Add Router'}
+                  </button>
+                </div>
               </div>
             </form>
           </div>
@@ -1249,6 +1543,137 @@ export const MikrotikDeviceManager: React.FC = () => {
                 </div>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ================= MODAL: QUICK DYNAMIC PORT UPDATER ================= */}
+      {showQuickPortModal && portTargetDevice && (
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-lg max-h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95">
+            <div className="p-5 border-b border-slate-800 bg-slate-950/80 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-cyan-600/20 text-cyan-400 flex items-center justify-center font-bold">
+                  <Zap className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-slate-100 flex items-center gap-2">
+                    <span>Update Dynamic Remote Ports</span>
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-800 font-mono">
+                      {portTargetDevice.name}
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    SSTP & VPN tunnels allocate dynamic high ports upon reconnect. Update your active forwarded ports below.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowQuickPortModal(false)}
+                className="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-xl cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveDynamicPorts} className="p-6 overflow-y-auto flex-1 space-y-4 text-xs">
+              <div className="p-3.5 rounded-2xl bg-cyan-950/20 border border-cyan-800/40 space-y-2 text-slate-300">
+                <span className="text-slate-400 block text-[11px] font-semibold">Tunnel Host / Remote Address:</span>
+                <input
+                  type="text"
+                  required
+                  value={dynamicPorts.remoteAddress}
+                  onChange={(e) => setDynamicPorts({ ...dynamicPorts, remoteAddress: e.target.value })}
+                  placeholder="remote.oxapsph.com"
+                  className="w-full px-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-mono text-xs focus:outline-none focus:border-cyan-400"
+                />
+              </div>
+
+              {/* Single HTTP Remote Port Input */}
+              <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-1.5">
+                <label className="block text-slate-300 font-semibold text-xs">
+                  Dynamic HTTP Remote Port (Local Port 80) *
+                </label>
+                <input
+                  type="number"
+                  required
+                  value={dynamicPorts.webfigPort || ''}
+                  onChange={(e) => setDynamicPorts({ ...dynamicPorts, webfigPort: parseInt(e.target.value) || 80 })}
+                  placeholder="e.g. 10988"
+                  className="w-full px-3.5 py-2 bg-slate-900 border border-cyan-800/60 rounded-xl text-slate-100 font-mono text-xs focus:outline-none focus:border-cyan-400"
+                />
+                <p className="text-[10px] text-slate-500">
+                  Enter the dynamic remote port assigned by your tunnel service for RouterOS WebFig & REST API communication.
+                </p>
+              </div>
+
+              {/* Fast Test Dynamic Port Button & Live Feedback */}
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  disabled={isTestingDynamicPort}
+                  onClick={handleTestDynamicPort}
+                  className="w-full py-2.5 px-4 bg-slate-950 hover:bg-cyan-950/60 text-cyan-300 border border-cyan-800/60 rounded-xl font-bold flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+                >
+                  {isTestingDynamicPort ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin text-cyan-400" />
+                      <span>Testing HTTP Handshake on Port {dynamicPorts.webfigPort}...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Wifi className="w-4 h-4 text-cyan-400" />
+                      <span>Test HTTP Handshake</span>
+                    </>
+                  )}
+                </button>
+
+                {dynamicPortTestResult && (
+                  <div
+                    className={`p-3 rounded-xl border text-xs flex items-center justify-between ${
+                      dynamicPortTestResult.status === 'connected'
+                        ? 'bg-emerald-950/50 border-emerald-500/50 text-emerald-300'
+                        : 'bg-rose-950/50 border-rose-500/50 text-rose-300'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      {dynamicPortTestResult.status === 'connected' ? (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                      ) : (
+                        <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                      )}
+                      <span>
+                        {dynamicPortTestResult.status === 'connected'
+                          ? `Port responded! Model: ${dynamicPortTestResult.boardName || 'RouterOS'}`
+                          : dynamicPortTestResult.errorMessage || 'Port not reachable'}
+                      </span>
+                    </div>
+                    {dynamicPortTestResult.latencyMs > 0 && (
+                      <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-slate-900">
+                        {dynamicPortTestResult.latencyMs}ms
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Action Buttons */}
+              <div className="pt-3 border-t border-slate-800 flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowQuickPortModal(false)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-6 py-2.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl font-bold shadow-lg shadow-cyan-600/25 transition-all cursor-pointer"
+                >
+                  Save HTTP Port
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

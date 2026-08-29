@@ -156,6 +156,22 @@ export const MikrotikTelemetryViewer: React.FC<MikrotikTelemetryViewerProps> = (
     fanSpeedRpm: 4200,
   };
 
+  if (!device || !liveTelemetry) {
+    return (
+      <div className="p-12 text-center rounded-3xl bg-slate-900/50 border border-slate-800 border-dashed space-y-4">
+        <div className="w-16 h-16 rounded-2xl bg-cyan-600/10 border border-cyan-500/20 text-cyan-400 mx-auto flex items-center justify-center">
+          <Server className="w-8 h-8" />
+        </div>
+        <div className="space-y-1">
+          <h4 className="text-base font-bold text-slate-200">No Router Configured for Telemetry</h4>
+          <p className="text-xs text-slate-400 max-w-md mx-auto">
+            Please add your MikroTik RouterOS device in the Router Fleet tab to view live CPU, memory, and bandwidth telemetry.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   const queuePct = liveTelemetry.wan.queueUsagePercent;
   const queueColor = queuePct > 85 ? 'text-rose-400' : queuePct > 70 ? 'text-amber-400' : 'text-emerald-400';
   const queueBarColor = queuePct > 85 ? 'bg-rose-500' : queuePct > 70 ? 'bg-amber-500' : 'bg-emerald-500';

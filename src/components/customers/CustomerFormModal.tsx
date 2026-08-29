@@ -559,11 +559,15 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
                 }}
                 className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 font-medium focus:outline-none focus:border-cyan-500"
               >
-                {mikrotikDevices.map((dev) => (
-                  <option key={dev.id} value={dev.id}>
-                    {dev.name} — {dev.model} ({dev.ipAddress}) [{dev.role.replace('_', ' ').toUpperCase()}]
-                  </option>
-                ))}
+                {mikrotikDevices.length === 0 ? (
+                  <option value="">No MikroTik Routers Configured (Optional)</option>
+                ) : (
+                  mikrotikDevices.map((dev) => (
+                    <option key={dev.id} value={dev.id}>
+                      {dev.name} — {dev.model} ({dev.ipAddress}) [{dev.role.replace('_', ' ').toUpperCase()}]
+                    </option>
+                  ))
+                )}
               </select>
             </div>
 

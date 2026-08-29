@@ -66,7 +66,7 @@ export const testRouterConnection = async (
 
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 4000);
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
 
     const response = await fetch(url, {
       method: 'GET',
@@ -81,7 +81,7 @@ export const testRouterConnection = async (
       return {
         status: 'auth_failed',
         boardName: 'MikroTik Router',
-        model: 'RouterOS Core',
+        model: 'RouterOS Device',
         version: 'v7.x',
         cpuLoad: 0,
         uptime: '0s',
@@ -90,48 +90,71 @@ export const testRouterConnection = async (
         activePppoeCount: 0,
         latencyMs,
         timestamp: new Date().toISOString(),
-        errorMessage: 'Invalid username or password for RouterOS REST API.',
+        errorMessage: 'Invalid username or password for RouterOS REST API (HTTP 401/403).',
       };
     }
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      return {
+        status: 'unreachable',
+        boardName: 'Unknown',
+        model: 'RouterOS Device',
+        version: 'v7.x',
+        cpuLoad: 0,
+        uptime: '0s',
+        totalMemoryMb: 0,
+        freeMemoryMb: 0,
+        activePppoeCount: 0,
+        latencyMs,
+        timestamp: new Date().toISOString(),
+        errorMessage: `HTTP ${response.status}: ${response.statusText}`,
+      };
     }
 
     const data = await response.json();
     const res = Array.isArray(data) ? data[0] : data;
 
-    const totalMem = Math.round((res['total-memory'] || 1073741824) / (1024 * 1024));
-    const freeMem = Math.round((res['free-memory'] || 536870912) / (1024 * 1024));
+    const totalMem = res['total-memory'] ? Math.round(Number(res['total-memory']) / (1024 * 1024)) : 0;
+    const freeMem = res['free-memory'] ? Math.round(Number(res['free-memory']) / (1024 * 1024)) : 0;
+    const detectedBoard = res['board-name'] || res['model'] || res['platform'] || 'MikroTik RouterOS';
+    const detectedPlatform = res['platform'] || res['architecture-name'] || 'MikroTik';
+    const detectedVersion = res['version'] || 'RouterOS v7';
+    const cpu = parseInt(res['cpu-load'] || '0', 10);
+    const up = res['uptime'] || '0s';
 
     return {
       status: 'connected',
-      boardName: res['board-name'] || 'CCR2004-16G-2S+',
-      model: res['platform'] || 'MikroTik Cloud Core',
-      version: res['version'] || 'RouterOS v7.14.3',
-      cpuLoad: parseInt(res['cpu-load'] || '4', 10),
-      uptime: res['uptime'] || '18d 14h 22m',
+      boardName: detectedBoard,
+      model: detectedPlatform,
+      version: detectedVersion,
+      cpuLoad: isNaN(cpu) ? 0 : cpu,
+      uptime: up,
       totalMemoryMb: totalMem,
       freeMemoryMb: freeMem,
-      activePppoeCount: 42,
+      activePppoeCount: 0,
       latencyMs: Math.max(1, latencyMs),
       timestamp: new Date().toISOString(),
     };
   } catch (err: any) {
-    // Graceful fallback for local ISP dev / simulation
     const latencyMs = Math.round(performance.now() - startTime);
+    const isAbort = err?.name === 'AbortError';
+    const errorMsg = isAbort
+      ? `Connection timed out after 6s to ${url}. Verify remote address, dynamic port, and router firewall.`
+      : (err?.message || 'Connection refused or blocked by CORS / Network policy.');
+
     return {
-      status: 'connected',
-      boardName: 'CCR2004-16G-2S+ (Lagonoy Core)',
-      model: 'Cloud Core Router',
-      version: 'RouterOS v7.15.2 (Stable)',
-      cpuLoad: Math.floor(6 + Math.random() * 8),
-      uptime: '42d 18h 31m 09s',
-      totalMemoryMb: 4096,
-      freeMemoryMb: 3218,
-      activePppoeCount: 58,
-      latencyMs: Math.max(14, latencyMs),
+      status: 'unreachable',
+      boardName: 'Unreachable',
+      model: 'Unknown',
+      version: 'N/A',
+      cpuLoad: 0,
+      uptime: '0s',
+      totalMemoryMb: 0,
+      freeMemoryMb: 0,
+      activePppoeCount: 0,
+      latencyMs,
       timestamp: new Date().toISOString(),
+      errorMessage: errorMsg,
     };
   }
 };
@@ -385,7 +408,7 @@ export const fetchPppoeSecrets = async (
 
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3500);
+    const timeoutId = setTimeout(() => controller.abort(), 4500);
 
     const response = await fetch(url, {
       method: 'GET',
@@ -396,7 +419,7 @@ export const fetchPppoeSecrets = async (
 
     if (response.ok) {
       const data = await response.json();
-      if (Array.isArray(data) && data.length > 0) {
+      if (Array.isArray(data)) {
         return data.map((item: any) => ({
           name: item.name || '',
           password: item.password || '',
@@ -411,57 +434,10 @@ export const fetchPppoeSecrets = async (
       }
     }
   } catch (err) {
-    console.info('[MikroTik Bridge] Secrets fetched with live simulator fallback:', err);
+    console.warn('[MikroTik Bridge] Could not fetch remote PPPoE secrets:', err);
   }
 
-  // Graceful fallback / realistic router discovery
-  return [
-    {
-      name: 'swift_juan_delacruz',
-      password: '••••••••',
-      service: 'pppoe',
-      profile: 'Plan-25M',
-      remoteAddress: '192.168.10.45',
-      comment: 'Juan Dela Cruz - SWIFT-2026-101',
-      disabled: false,
-    },
-    {
-      name: 'swift_maria_santos',
-      password: '••••••••',
-      service: 'pppoe',
-      profile: 'Plan-50M',
-      remoteAddress: '192.168.10.78',
-      comment: 'Maria Santos - SWIFT-2026-102',
-      disabled: false,
-    },
-    {
-      name: 'swift_poblacion_res',
-      password: '••••••••',
-      service: 'pppoe',
-      profile: 'Plan-25M',
-      remoteAddress: '192.168.10.112',
-      comment: 'Poblacion Node 1 Line',
-      disabled: false,
-    },
-    {
-      name: 'swift_pedro_reyes',
-      password: '••••••••',
-      service: 'pppoe',
-      profile: 'Plan-100M',
-      remoteAddress: '192.168.10.155',
-      comment: 'Pedro Reyes - SWIFT-2026-103',
-      disabled: false,
-    },
-    {
-      name: 'swift_san_sebastian_feeder',
-      password: '••••••••',
-      service: 'pppoe',
-      profile: 'Plan-150M',
-      remoteAddress: '192.168.10.190',
-      comment: 'San Sebastian Feeder Link',
-      disabled: false,
-    },
-  ];
+  return [];
 };
 
 /**
@@ -474,7 +450,7 @@ export const fetchPppoeProfiles = async (
 
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3500);
+    const timeoutId = setTimeout(() => controller.abort(), 4500);
 
     const response = await fetch(url, {
       method: 'GET',
@@ -490,10 +466,10 @@ export const fetchPppoeProfiles = async (
       }
     }
   } catch (err) {
-    console.info('[MikroTik Bridge] Profiles fetched with fallback list:', err);
+    console.warn('[MikroTik Bridge] Could not fetch remote PPPoE profiles:', err);
   }
 
-  return ['default', 'default-encryption', 'Plan-25M', 'Plan-50M', 'Plan-100M', 'Plan-150M', 'isolated'];
+  return ['default'];
 };
 
 

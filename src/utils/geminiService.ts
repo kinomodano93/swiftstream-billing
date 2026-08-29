@@ -285,7 +285,7 @@ Here are the step-by-step diagnostic procedures for common fiber connection issu
 | **Est. Net Operating Income** | **${formatCurrency(totalBilled - totalExpenses)}** | Gross Billed minus Operating Expenses |
 | **Uncollected Overdue** | **${formatCurrency(totalUnpaid)}** | Across ${invoices.filter((i) => i.status === 'unpaid' || i.status === 'overdue').length} unpaid invoices |
 | **Optical NAP Capacity** | **${totalOccupiedPorts} / ${totalPorts} Ports** | ${Math.round((totalOccupiedPorts / (totalPorts || 1)) * 100)}% utilization across ${napBoxes.length} NAP boxes |
-| **Core Router** | **CCR2004-16G-2S+** | IP: \`192.168.88.1\` • Status: **ONLINE** (CPU: 7%) |
+| **MikroTik Fleet** | **${mikrotikDevices.length > 0 ? mikrotikDevices[0].name : 'No Devices'}** | ${mikrotikDevices.length > 0 ? `${mikrotikDevices[0].model} • Status: ${mikrotikDevices[0].status.toUpperCase()}` : 'Add router in Fleet Manager'} |
 | **Open Repair Tickets** | **${repairOrders.filter((r) => r.status !== 'completed' && r.status !== 'cancelled').length} Orders** | Diagnostics, motherboard, and optical repairs |
 
 💡 **Quick Operations Tips**:

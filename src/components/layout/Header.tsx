@@ -103,7 +103,7 @@ export const Header: React.FC<HeaderProps> = ({
             title="MikroTik Core Router Online - Click to open fleet manager"
           >
             <Server className="w-3.5 h-3.5 text-emerald-400" />
-            <span>CCR2004 ({coreRouter.ipAddress})</span>
+            <span>{coreRouter.name || coreRouter.model} ({coreRouter.ipAddress})</span>
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping ml-0.5" />
           </button>
         )}

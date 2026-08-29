@@ -459,10 +459,15 @@ export interface MikrotikDevice {
   name: string;
   model: string;
   role: 'core_pppoe' | 'distribution' | 'hotspot' | 'backup';
+  connectionType?: 'direct' | 'sstp_vpn';
   ipAddress: string;
+  remoteAddress?: string;
   port?: number;
   apiPort?: number;
   webfigPort: number;
+  winboxPort?: number;
+  serviceType?: string;
+  tunnelExpiry?: string;
   username?: string;
   password?: string;
   useSsl?: boolean;
