@@ -33,6 +33,13 @@ import {
   Wifi,
   Sparkles,
   ShieldAlert,
+  Key,
+  Plug,
+  Shield,
+  Lock,
+  UserCheck,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { MikrotikDevice } from '../../types';
@@ -83,6 +90,7 @@ export const MikrotikDeviceManager: React.FC = () => {
   // Test connection state in Add/Edit Router modal
   const [isTestingConnection, setIsTestingConnection] = useState<boolean>(false);
   const [testResult, setTestResult] = useState<RouterHealthInfo | null>(null);
+  const [showPassword, setShowPassword] = useState<boolean>(false);
 
   // Quick Dynamic Port Updater Modal State (HTTP remote port)
   const [showQuickPortModal, setShowQuickPortModal] = useState<boolean>(false);
@@ -658,15 +666,9 @@ export const MikrotikDeviceManager: React.FC = () => {
                           <h3 className="font-extrabold text-base text-slate-100 leading-tight">
                             {dev.name}
                           </h3>
-                          {dev.connectionType === 'sstp_vpn' ? (
-                            <span className="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold bg-cyan-950 text-cyan-300 border border-cyan-850">
-                              ⚡ SSTP
-                            </span>
-                          ) : (
-                            <span className="px-2 py-0.5 rounded-md text-[10px] font-mono font-medium bg-slate-800 text-slate-400">
-                              LAN IP
-                            </span>
-                          )}
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold bg-cyan-950 text-cyan-300 border border-cyan-800/60">
+                            RouterOS v7
+                          </span>
                         </div>
                         <p className="text-xs text-slate-400 font-mono mt-0.5">{dev.model}</p>
                       </div>
@@ -693,13 +695,11 @@ export const MikrotikDeviceManager: React.FC = () => {
                   {/* Connection & Network Ribbon */}
                   <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800/80 space-y-2 text-xs">
                     <div className="flex items-center justify-between">
-                      <span className="text-slate-400">
-                        {dev.connectionType === 'sstp_vpn' ? 'Remote Host:' : 'Router IP:'}
-                      </span>
+                      <span className="text-slate-400">Host IP / Domain:</span>
                       <span className="font-mono font-bold text-cyan-400 flex items-center gap-1.5">
-                        <span>{dev.remoteAddress || dev.ipAddress}</span>
+                        <span>{dev.ipAddress || dev.remoteAddress}</span>
                         <button
-                          onClick={() => handleCopy(dev.remoteAddress || dev.ipAddress, `ip-${dev.id}`)}
+                          onClick={() => handleCopy(dev.ipAddress || dev.remoteAddress || '', `ip-${dev.id}`)}
                           className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-white"
                           title="Copy Address"
                         >
@@ -708,26 +708,26 @@ export const MikrotikDeviceManager: React.FC = () => {
                       </span>
                     </div>
 
-                    {/* HTTP Remote Port Display & Quick Update */}
+                    {/* REST API Port Display */}
                     <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-xs">
                       <div className="flex items-center gap-2.5">
                         <div className="w-8 h-8 rounded-lg bg-cyan-600/20 text-cyan-400 flex items-center justify-center font-bold">
                           <Globe className="w-4 h-4" />
                         </div>
                         <div>
-                          <span className="text-[10px] text-slate-400 block font-medium">HTTP Remote Port:</span>
+                          <span className="text-[10px] text-slate-400 block font-medium">REST API Port:</span>
                           <span className="font-mono font-bold text-cyan-300 text-xs">
-                            :{dev.webfigPort || dev.port || 80}
+                            :{dev.port || dev.webfigPort || 80}
                           </span>
                         </div>
                       </div>
                       <button
                         onClick={() => handleOpenQuickPortModal(dev)}
                         className="px-2.5 py-1 bg-cyan-950/80 hover:bg-cyan-900 text-cyan-300 border border-cyan-800/60 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer"
-                        title="Update dynamic HTTP remote port"
+                        title="Update REST API port"
                       >
                         <RefreshCw className="w-2.5 h-2.5" />
-                        <span>Update Port</span>
+                        <span>Edit Port</span>
                       </button>
                     </div>
 
@@ -805,7 +805,7 @@ export const MikrotikDeviceManager: React.FC = () => {
                 {/* Action Buttons Toolbar */}
                 <div className="pt-4 border-t border-slate-800/80 mt-4 grid grid-cols-3 gap-2">
                   <a
-                    href={`http://${dev.remoteAddress || dev.ipAddress}:${dev.webfigPort || dev.port || 80}`}
+                    href={`http://${dev.ipAddress || dev.remoteAddress}:${dev.port || dev.webfigPort || 80}`}
                     target="_blank"
                     rel="noreferrer"
                     className="py-2 px-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-md transition-all hover:scale-[1.02] active:scale-[0.98]"
@@ -816,12 +816,12 @@ export const MikrotikDeviceManager: React.FC = () => {
                   </a>
 
                   <button
-                    onClick={() => handleOpenQuickPortModal(dev)}
-                    className="py-2 px-2 bg-cyan-950/70 hover:bg-cyan-900 text-cyan-300 border border-cyan-800/50 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer"
-                    title="Quickly change dynamic HTTP remote port"
+                    onClick={() => handleOpenEditModal(dev)}
+                    className="py-2 px-2 bg-slate-900 hover:bg-slate-850 text-cyan-300 border border-slate-800 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                    title="Edit router settings"
                   >
-                    <Zap className="w-3.5 h-3.5 text-cyan-400" />
-                    <span>HTTP Port</span>
+                    <Edit2 className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Settings</span>
                   </button>
 
                   <button
@@ -969,15 +969,15 @@ export const MikrotikDeviceManager: React.FC = () => {
             {/* Modal Header */}
             <div className="p-5 border-b border-slate-800 bg-slate-950/70 flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-cyan-600/20 text-cyan-400 flex items-center justify-center font-bold">
-                  <Server className="w-5 h-5" />
+                <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-400 flex items-center justify-center font-bold border border-amber-500/20">
+                  <Key className="w-5 h-5" />
                 </div>
                 <div>
                   <h3 className="font-bold text-base text-slate-100">
                     {editingDevice ? 'Edit MikroTik Device' : 'Add MikroTik Router to Fleet'}
                   </h3>
                   <p className="text-xs text-slate-400">
-                    Connect via SSTP remote tunnel port forwarding or direct local IP
+                    Configure WireGuard tunnel, SSTP remote forwarding, or direct router IP
                   </p>
                 </div>
               </div>
@@ -990,180 +990,91 @@ export const MikrotikDeviceManager: React.FC = () => {
               </button>
             </div>
 
-            {/* Connection Mode Switcher */}
-            <div className="px-5 py-2.5 bg-slate-950/90 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <span className="text-[11px] font-semibold text-slate-400">Connection Mode:</span>
-              <div className="flex items-center p-1 bg-slate-900 border border-slate-800 rounded-xl text-xs">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setConnectionMode('sstp_vpn');
-                    setFormData((prev) => ({
-                      ...prev,
-                      connectionType: 'sstp_vpn',
-                      remoteAddress: prev.remoteAddress || 'remote.oxapsph.com',
-                      port: prev.port === 80 ? 10988 : prev.port,
-                      webfigPort: prev.webfigPort === 80 ? 10988 : prev.webfigPort,
-                      apiPort: prev.apiPort === 8728 ? 10878 : prev.apiPort,
-                      winboxPort: prev.winboxPort === 8291 ? 10995 : prev.winboxPort,
-                    }));
-                  }}
-                  className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
-                    connectionMode === 'sstp_vpn'
-                      ? 'bg-cyan-600 text-white shadow-sm'
-                      : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  ⚡ SSTP / Remote VPN (Port Forwarding)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setConnectionMode('direct');
-                    setFormData((prev) => ({
-                      ...prev,
-                      connectionType: 'direct',
-                      ipAddress: prev.ipAddress && !prev.ipAddress.includes('remote.') ? prev.ipAddress : '192.168.88.1',
-                      port: 80,
-                      webfigPort: 80,
-                      apiPort: 8728,
-                      winboxPort: 8291,
-                    }));
-                  }}
-                  className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
-                    connectionMode === 'direct'
-                      ? 'bg-cyan-600 text-white shadow-sm'
-                      : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  🌐 Direct LAN / Static IP
-                </button>
-              </div>
-            </div>
-
             <form onSubmit={handleFormSubmit} className="p-5 overflow-y-auto flex-1 space-y-4 text-xs">
-              {/* SSTP Remote Tunnel Mode */}
-              {connectionMode === 'sstp_vpn' ? (
-                <div className="p-4 rounded-2xl bg-cyan-950/20 border border-cyan-800/40 space-y-3.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-cyan-300 flex items-center gap-1.5">
-                      <Zap className="w-4 h-4 text-cyan-400" />
-                      SSTP / Remote Tunnel Port Forwarding Settings
-                    </span>
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-700/60 font-semibold">
-                      Service: {formData.serviceType || 'sstp'}
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-slate-400 mb-1 font-semibold">Router Name *</label>
-                      <input
-                        type="text"
-                        required
-                        value={formData.name}
-                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                        placeholder="e.g. maangas"
-                        className="w-full px-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-bold focus:outline-none focus:border-cyan-500"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-slate-400 mb-1 font-semibold">Remote Address (Tunnel Host) *</label>
-                      <input
-                        type="text"
-                        required
-                        value={formData.remoteAddress || ''}
-                        onChange={(e) => setFormData({ ...formData, remoteAddress: e.target.value, ipAddress: e.target.value })}
-                        placeholder="remote.oxapsph.com"
-                        className="w-full px-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-mono focus:outline-none focus:border-cyan-500"
-                      />
-                    </div>
-                  </div>
-
-                  {/* HTTP Remote Port Configuration */}
-                  <div className="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800/80 space-y-1.5">
-                    <label className="block text-slate-400 font-semibold text-xs">
-                      Dynamic HTTP Remote Port (Mapped to Local Port 80) *
-                    </label>
-                    <input
-                      type="number"
-                      required
-                      value={formData.webfigPort || ''}
-                      onChange={(e) => {
-                        const val = parseInt(e.target.value) || 80;
-                        setFormData({ ...formData, webfigPort: val, port: val });
-                      }}
-                      placeholder="e.g. 10988"
-                      className="w-full px-3.5 py-2 bg-slate-900 border border-cyan-800/60 rounded-xl text-slate-100 font-mono text-xs focus:outline-none focus:border-cyan-400"
-                    />
-                    <p className="text-[10px] text-slate-500">
-                      The dynamic high port assigned by your tunnel provider for WebFig and RouterOS REST API communication.
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                /* Direct LAN / Public Static IP Mode */
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-slate-400 mb-1 font-semibold">Router Name *</label>
-                    <input
-                      type="text"
-                      required
-                      value={formData.name}
-                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                      placeholder="e.g. SwiftStream Core CCR BNG"
-                      className="w-full px-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-slate-400 mb-1 font-semibold">Router Hardware Model</label>
-                    <input
-                      type="text"
-                      value={formData.model}
-                      onChange={(e) => setFormData({ ...formData, model: e.target.value })}
-                      placeholder="MikroTik CCR2004-16G-2S+ / RB5009"
-                      className="w-full px-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-slate-400 mb-1 font-semibold">Router IP / Host *</label>
-                    <input
-                      type="text"
-                      required
-                      value={formData.ipAddress}
-                      onChange={(e) => setFormData({ ...formData, ipAddress: e.target.value })}
-                      placeholder="192.168.88.1"
-                      className="w-full px-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-mono focus:outline-none focus:border-cyan-500"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-slate-400 mb-1 font-semibold">WebFig / REST Port *</label>
-                    <input
-                      type="number"
-                      value={formData.webfigPort || 80}
-                      onChange={(e) => {
-                        const val = parseInt(e.target.value) || 80;
-                        setFormData({ ...formData, webfigPort: val, port: val });
-                      }}
-                      placeholder="80"
-                      className="w-full px-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-mono focus:outline-none focus:border-cyan-500"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* Role & Hardware Details */}
+              {/* Row 1: Device Name * | Host IP / Domain * */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-400 mb-1 font-semibold">Router Fleet Role *</label>
+                  <label className="block text-slate-300 mb-1.5 font-semibold text-xs">Device Name *</label>
+                  <input
+                    type="text"
+                    required
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    placeholder="e.g. Core Gateway - Datacenter"
+                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 placeholder-slate-600 focus:outline-none focus:border-cyan-500 font-medium"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 mb-1.5 font-semibold text-xs">Host IP / Domain *</label>
+                  <input
+                    type="text"
+                    required
+                    value={formData.ipAddress}
+                    onChange={(e) => setFormData({ ...formData, ipAddress: e.target.value, remoteAddress: e.target.value })}
+                    placeholder="192.168.88.1 or router.domain.com"
+                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 placeholder-slate-600 font-mono focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
+              </div>
+
+              {/* Row 2: REST API Port | API Username | API Password */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-slate-300 mb-1.5 font-semibold text-xs">REST API Port</label>
+                  <input
+                    type="number"
+                    value={formData.port || formData.webfigPort || ''}
+                    onChange={(e) => {
+                      const p = parseInt(e.target.value, 10) || 80;
+                      setFormData({ ...formData, port: p, webfigPort: p });
+                    }}
+                    placeholder="443"
+                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 placeholder-slate-600 font-mono focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 mb-1.5 font-semibold text-xs">API Username</label>
+                  <input
+                    type="text"
+                    value={formData.username || ''}
+                    onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+                    placeholder="admin"
+                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 placeholder-slate-600 font-mono focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 mb-1.5 font-semibold text-xs">API Password</label>
+                  <div className="relative">
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      value={formData.password || ''}
+                      onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                      placeholder="Router password"
+                      className="w-full px-3.5 py-2.5 pr-10 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 placeholder-slate-600 font-mono focus:outline-none focus:border-cyan-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 transition-colors p-0.5 cursor-pointer"
+                      title={showPassword ? 'Hide password' : 'Show password'}
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Row 3: Role | Hardware Board Model */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 mb-1.5 font-semibold text-xs">Router Fleet Role *</label>
                   <select
                     value={formData.role}
                     onChange={(e) => setFormData({ ...formData, role: e.target.value as any })}
-                    className="w-full px-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500"
+                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500 font-medium"
                   >
                     <option value="core_pppoe">Core PPPoE BNG</option>
                     <option value="distribution">Distribution Node</option>
@@ -1173,52 +1084,39 @@ export const MikrotikDeviceManager: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block text-slate-400 mb-1 font-semibold">Hardware Board Model</label>
+                  <label className="block text-slate-300 mb-1.5 font-semibold text-xs">Hardware Board Model</label>
                   <input
                     type="text"
                     value={formData.model}
                     onChange={(e) => setFormData({ ...formData, model: e.target.value })}
-                    placeholder="CCR2004-16G-2S+ / RB750Gr3"
-                    className="w-full px-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500"
+                    placeholder="CCR2116-12G-4S+ / RB5009"
+                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 placeholder-slate-600 focus:outline-none focus:border-cyan-500 font-medium"
                   />
                 </div>
               </div>
 
-              {/* RouterOS API Credentials */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3.5 rounded-2xl bg-slate-950/70 border border-slate-800">
+              {/* Row 4: Installation Location & Notes */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-400 mb-1 font-semibold">API Username *</label>
+                  <label className="block text-slate-300 mb-1.5 font-semibold text-xs">Installation / POP Location</label>
                   <input
                     type="text"
-                    value={formData.username || 'admin'}
-                    onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-                    placeholder="admin"
-                    className="w-full px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 font-mono focus:outline-none focus:border-cyan-500"
+                    value={formData.location}
+                    onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+                    placeholder="e.g. Main POP Operations Rack"
+                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 placeholder-slate-600 focus:outline-none focus:border-cyan-500"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-slate-400 mb-1 font-semibold">API Password</label>
+                  <label className="block text-slate-300 mb-1.5 font-semibold text-xs">Notes & Topology</label>
                   <input
-                    type="password"
-                    value={formData.password || ''}
-                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                    placeholder="••••••••"
-                    className="w-full px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 font-mono focus:outline-none focus:border-cyan-500"
+                    type="text"
+                    value={formData.notes || ''}
+                    onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                    placeholder="e.g. Primary uplink on SFP+1"
+                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 placeholder-slate-600 focus:outline-none focus:border-cyan-500"
                   />
-                </div>
-
-                <div className="flex flex-col justify-center">
-                  <label className="block text-slate-400 mb-1 font-semibold">Security</label>
-                  <label className="flex items-center gap-2 cursor-pointer text-slate-300">
-                    <input
-                      type="checkbox"
-                      checked={formData.useSsl || false}
-                      onChange={(e) => setFormData({ ...formData, useSsl: e.target.checked })}
-                      className="rounded accent-cyan-500 w-4 h-4 cursor-pointer"
-                    />
-                    <span className="text-[11px] font-medium">Use HTTPS / SSL</span>
-                  </label>
                 </div>
               </div>
 
