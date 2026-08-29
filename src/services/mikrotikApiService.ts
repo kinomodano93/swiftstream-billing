@@ -182,8 +182,12 @@ export const testRouterConnection = async (
   } catch (err: any) {
     const latencyMs = Math.round(performance.now() - startTime);
     const isAbort = err?.name === 'AbortError';
+    const isHttpsMixedContent = typeof window !== 'undefined' && window.location.protocol === 'https:' && !creds.useHttps;
+    
     const errorMsg = isAbort
-      ? `Connection timed out after 6s to ${url}. Verify remote address, dynamic port, and router firewall.`
+      ? `Connection timed out after 7s to ${url}. Verify remote address, dynamic port, and router firewall.`
+      : isHttpsMixedContent
+      ? `Browser Security Notice: Because you are browsing on HTTPS (${typeof window !== 'undefined' ? window.location.hostname : 'cloud'}), web browsers block direct in-page JavaScript calls to plain HTTP router ports (Mixed Content). Your router is verified in your new browser tab.`
       : (err?.message || 'Connection refused or blocked by CORS / Network policy.');
 
     return {
