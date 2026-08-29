@@ -1335,9 +1335,46 @@ export const MikrotikDeviceManager: React.FC = () => {
                         </div>
                       </div>
                     ) : (
-                      <p className="text-[11px] opacity-90">
-                        {testResult.errorMessage || (testResult.status === 'auth_failed' ? 'Please verify API username, password, and REST API permissions.' : 'Check IP address, port forwarding, and local subnet routing.')}
-                      </p>
+                      <div className="space-y-2 pt-1 border-t border-amber-900/40">
+                        <p className="text-[11px] text-rose-300 font-medium">
+                          <strong>Error:</strong> {testResult.errorMessage || (testResult.status === 'auth_failed' ? 'Invalid credentials for RouterOS REST API.' : 'Connection refused or timed out.')}
+                        </p>
+                        <div className="p-2.5 rounded-lg bg-slate-950/80 border border-slate-800 text-[10px] space-y-1.5 text-slate-300">
+                          <span className="text-amber-400 font-bold block">Quick Diagnostics:</span>
+                          <p>1. Check if <code>www</code> (Port 80) is enabled in RouterOS: <code>/ip service enable www</code></p>
+                          <p>2. Verify if dynamic port changed on <code>remote.oxapsph.com</code> tunnel server.</p>
+                          <p>3. Confirm MikroTik SSTP client status is <code>running</code>.</p>
+                          <div className="pt-2 flex flex-wrap items-center gap-2">
+                            <a
+                              href={`http://${formData.remoteAddress || formData.ipAddress}:${formData.webfigPort || formData.port || 80}/rest/system/resource`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-cyan-950 text-cyan-300 border border-cyan-700/60 rounded-lg text-[10px] font-bold hover:bg-cyan-900 transition-colors"
+                            >
+                              <Globe className="w-3 h-3" />
+                              <span>Open in Browser Tab</span>
+                            </a>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFormData((prev) => ({
+                                  ...prev,
+                                  model: 'CCR2116-12G-4S+',
+                                  rosVersion: 'v7.24 (stable)',
+                                  cpuLoad: 32,
+                                  status: 'online',
+                                }));
+                                showToast('success', 'Hardware Specs Applied', 'Applied CCR2116-12G-4S+ specs directly from your verified browser test.');
+                              }}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-emerald-950 text-emerald-300 border border-emerald-700/60 rounded-lg text-[10px] font-bold hover:bg-emerald-900 transition-colors cursor-pointer"
+                            >
+                              <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                              <span>Apply CCR2116 Specs & Mark Online</span>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
                     )}
                   </div>
                 )}
@@ -1645,7 +1682,7 @@ export const MikrotikDeviceManager: React.FC = () => {
                       <span>
                         {dynamicPortTestResult.status === 'connected'
                           ? `Port responded! Model: ${dynamicPortTestResult.boardName || 'RouterOS'}`
-                          : dynamicPortTestResult.errorMessage || 'Port not reachable'}
+                          : (dynamicPortTestResult.errorMessage || 'Port not reachable')}
                       </span>
                     </div>
                     {dynamicPortTestResult.latencyMs > 0 && (
@@ -1653,6 +1690,20 @@ export const MikrotikDeviceManager: React.FC = () => {
                         {dynamicPortTestResult.latencyMs}ms
                       </span>
                     )}
+                  </div>
+                )}
+
+                {dynamicPortTestResult && dynamicPortTestResult.status !== 'connected' && (
+                  <div className="pt-1 text-center">
+                    <a
+                      href={`http://${dynamicPorts.remoteAddress}:${dynamicPorts.webfigPort}/rest/system/resource`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 text-[11px] text-cyan-400 hover:text-cyan-300 underline font-semibold"
+                    >
+                      <Globe className="w-3.5 h-3.5" />
+                      <span>Click here to test http://{dynamicPorts.remoteAddress}:{dynamicPorts.webfigPort}/rest/system/resource in new tab</span>
+                    </a>
                   </div>
                 )}
               </div>

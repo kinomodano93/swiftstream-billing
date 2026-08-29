@@ -56,6 +56,42 @@ const getBaseUrl = (creds: MikrotikCredentials): string => {
 };
 
 /**
+ * Robust fetch wrapper that prioritizes the local proxy on dev to eliminate CORS blocks
+ */
+const executeMikrotikRequest = async (
+  targetUrl: string,
+  options: RequestInit
+): Promise<Response> => {
+  const isDev = typeof window !== 'undefined' && (
+    window.location.hostname === 'localhost' ||
+    window.location.hostname === '127.0.0.1' ||
+    window.location.port === '5173'
+  );
+
+  // In local development, use Vite proxy to bypass browser CORS restrictions
+  if (isDev) {
+    try {
+      const proxyUrl = `/api/mikrotik-proxy?url=${encodeURIComponent(targetUrl)}`;
+      const proxyRes = await fetch(proxyUrl, {
+        method: options.method || 'GET',
+        headers: {
+          ...(options.headers || {}),
+          'x-target-url': targetUrl,
+        },
+        body: options.body,
+        signal: options.signal,
+      });
+      return proxyRes;
+    } catch (proxyErr) {
+      console.warn('[MikroTik Bridge] Proxy attempt failed, attempting direct fetch:', proxyErr);
+    }
+  }
+
+  // Direct browser fetch
+  return await fetch(targetUrl, options);
+};
+
+/**
  * 1. Test Live MikroTik RouterOS Connection & Fetch System Health
  */
 export const testRouterConnection = async (
@@ -66,9 +102,9 @@ export const testRouterConnection = async (
 
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 6000);
+    const timeoutId = setTimeout(() => controller.abort(), 7000);
 
-    const response = await fetch(url, {
+    const response = await executeMikrotikRequest(url, {
       method: 'GET',
       headers: getAuthHeaders(creds.username, creds.password),
       signal: controller.signal,
@@ -95,6 +131,14 @@ export const testRouterConnection = async (
     }
 
     if (!response.ok) {
+      let errorDetail = `HTTP ${response.status}: ${response.statusText || 'Connection Failed'}`;
+      try {
+        const errJson = await response.json();
+        if (errJson?.error || errJson?.message || errJson?.detail) {
+          errorDetail = errJson.error || errJson.message || errJson.detail;
+        }
+      } catch (_) {}
+
       return {
         status: 'unreachable',
         boardName: 'Unknown',
@@ -107,7 +151,7 @@ export const testRouterConnection = async (
         activePppoeCount: 0,
         latencyMs,
         timestamp: new Date().toISOString(),
-        errorMessage: `HTTP ${response.status}: ${response.statusText}`,
+        errorMessage: errorDetail,
       };
     }
 
@@ -181,7 +225,7 @@ export const provisionPppoeSecret = async (
 
   try {
     const url = `${getBaseUrl(creds)}/ppp/secret`;
-    await fetch(url, {
+    await executeMikrotikRequest(url, {
       method: 'PUT',
       headers: getAuthHeaders(creds.username, creds.password),
       body: JSON.stringify({
@@ -227,7 +271,7 @@ export const isolateOverdueSubscriber = async (
 
   try {
     const url = `${getBaseUrl(creds)}/ip/firewall/address-list`;
-    await fetch(url, {
+    await executeMikrotikRequest(url, {
       method: 'PUT',
       headers: getAuthHeaders(creds.username, creds.password),
       body: JSON.stringify({
@@ -273,7 +317,7 @@ export const reconnectSubscriber = async (
 
   try {
     const url = `${getBaseUrl(creds)}/ppp/secret`;
-    await fetch(url, {
+    await executeMikrotikRequest(url, {
       method: 'PATCH',
       headers: getAuthHeaders(creds.username, creds.password),
       body: JSON.stringify({
@@ -308,7 +352,7 @@ export const kickPppoeSession = async (
 
   try {
     const url = `${getBaseUrl(creds)}/ppp/active`;
-    await fetch(url, {
+    await executeMikrotikRequest(url, {
       method: 'DELETE',
       headers: getAuthHeaders(creds.username, creds.password),
       body: JSON.stringify({ name: username }),
@@ -408,9 +452,9 @@ export const fetchPppoeSecrets = async (
 
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 4500);
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
 
-    const response = await fetch(url, {
+    const response = await executeMikrotikRequest(url, {
       method: 'GET',
       headers: getAuthHeaders(creds.username, creds.password),
       signal: controller.signal,
@@ -450,9 +494,9 @@ export const fetchPppoeProfiles = async (
 
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 4500);
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
 
-    const response = await fetch(url, {
+    const response = await executeMikrotikRequest(url, {
       method: 'GET',
       headers: getAuthHeaders(creds.username, creds.password),
       signal: controller.signal,
