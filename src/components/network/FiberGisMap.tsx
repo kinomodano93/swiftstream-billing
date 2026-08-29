@@ -316,7 +316,7 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({ onSelectCustomer }) =>
   const activeDropsCount = customers.filter((c) => c.network.napBoxId).length;
 
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto">
+    <div className="w-full px-3 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-4 sm:space-y-6 animate-in fade-in">
       {/* Top Header & GIS Telemetry */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>

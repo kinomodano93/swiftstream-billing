@@ -32,6 +32,8 @@ import {
   Trash2,
   Activity,
   Cloud,
+  Sun,
+  Moon,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import {
@@ -50,6 +52,7 @@ import { sendTelegramStaffAlert, sendDiscordStaffAlert, testWebhookIntegration }
 import { XenditGatewaySettings } from './XenditGatewaySettings';
 import { FirebaseSettingsCard } from './FirebaseSettingsCard';
 import { SsoWhitelistSettingsCard } from './SsoWhitelistSettingsCard';
+import { LAGONOY_BARANGAYS } from '../network/CoverageAreaManager';
 
 export const SettingsModal: React.FC = () => {
   const {
@@ -60,6 +63,8 @@ export const SettingsModal: React.FC = () => {
     exportData,
     importData,
     resetToDefault,
+    theme,
+    setTheme,
   } = useApp();
 
   const [activeTab, setActiveTab] = useState<'profile' | 'payments' | 'firebase' | 'sso' | 'api' | 'audit' | 'backup'>('profile');
@@ -423,16 +428,52 @@ export const SettingsModal: React.FC = () => {
   });
 
   return (
-    <div className="p-6 space-y-6 max-w-5xl mx-auto">
+    <div className="w-full px-3 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-4 sm:space-y-6 animate-in fade-in">
       {/* Header */}
-      <div>
-        <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2">
-          <Settings className="w-5 h-5 text-cyan-400" />
-          <span>Business Profile & ISP System Settings</span>
-        </h2>
-        <p className="text-xs text-slate-400 mt-1">
-          Configure official company information, BIR TIN details, GCash/Maya gateways, SMTP email servers, security audit trails, and backups.
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2">
+            <Settings className="w-5 h-5 text-cyan-400" />
+            <span>Business Profile & ISP System Settings</span>
+          </h2>
+          <p className="text-xs text-slate-400 mt-1">
+            Configure official company information, BIR TIN details, GCash/Maya gateways, SMTP email servers, security audit trails, and backups.
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          {/* Theme Selector Pills */}
+          <div className="flex items-center p-1 bg-slate-950 border border-slate-800 rounded-2xl text-xs">
+            <button
+              type="button"
+              onClick={() => setTheme('dark')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-medium transition-all cursor-pointer ${
+                theme === 'dark'
+                  ? 'bg-cyan-600 text-white font-semibold shadow-md shadow-cyan-600/30'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Moon className="w-3.5 h-3.5" />
+              <span>Dark</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setTheme('light')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-medium transition-all cursor-pointer ${
+                theme === 'light'
+                  ? 'bg-amber-500 text-slate-950 font-bold shadow-md shadow-amber-500/30'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Sun className="w-3.5 h-3.5 text-amber-300" />
+              <span>Light</span>
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-cyan-950/60 border border-cyan-800/40 text-cyan-300 text-xs font-mono">
+            <Sparkles className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
+            <span className="hidden sm:inline">Cloud Sync Active</span>
+          </div>
+        </div>
       </div>
 
       {/* Navigation Tabs */}
@@ -452,9 +493,9 @@ export const SettingsModal: React.FC = () => {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as any)}
-              className={`flex items-center gap-2 py-3 px-4 border-b-2 font-medium whitespace-nowrap transition-all ${
+              className={`flex items-center gap-2 py-3 px-4 border-b-2 font-medium whitespace-nowrap transition-all cursor-pointer ${
                 isActive
-                  ? 'border-cyan-500 text-cyan-300 bg-slate-900/60'
+                  ? 'border-cyan-500 text-cyan-300 bg-slate-900/60 font-semibold'
                   : 'border-transparent text-slate-400 hover:text-slate-200'
               }`}
             >
@@ -467,188 +508,254 @@ export const SettingsModal: React.FC = () => {
 
       {/* Tab 1: Profile & Location */}
       {activeTab === 'profile' && (
-        <form onSubmit={handleSaveProfile} className="p-6 rounded-3xl bg-slate-900/80 border border-slate-800 space-y-6 text-xs shadow-card">
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start">
+          {/* Left Form: 2 cols on XL */}
+          <form onSubmit={handleSaveProfile} className="xl:col-span-2 p-6 rounded-3xl bg-slate-900/80 border border-slate-800 space-y-6 text-xs shadow-card">
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h4 className="font-bold text-slate-200 uppercase tracking-wider text-[11px] text-cyan-400">
+                  Official Business Identity
+                </h4>
+                <span className="text-[10px] text-slate-500 font-mono">BIR Registered</span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-slate-400 mb-1 font-medium">Business Legal Name *</label>
+                  <input
+                    type="text"
+                    value={businessName}
+                    onChange={(e) => setBusinessName(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:border-cyan-500 focus:outline-none"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-400 mb-1 font-medium">Trade Name / Brand</label>
+                  <input
+                    type="text"
+                    value={tradeName}
+                    onChange={(e) => setTradeName(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:border-cyan-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-slate-400 mb-1 font-medium">BIR TIN Number *</label>
+                  <input
+                    type="text"
+                    value={tin}
+                    onChange={(e) => setTin(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-mono focus:border-cyan-500 focus:outline-none"
+                    required
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-4 pt-4 border-t border-slate-800">
+              <h4 className="font-bold text-slate-200 uppercase tracking-wider text-[11px] text-cyan-400">
+                Authorized Representative
+              </h4>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-slate-400 mb-1 font-medium">First Name *</label>
+                  <input
+                    type="text"
+                    value={firstName}
+                    onChange={(e) => setFirstName(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:border-cyan-500 focus:outline-none"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-400 mb-1 font-medium">Middle Name</label>
+                  <input
+                    type="text"
+                    value={middleName}
+                    onChange={(e) => setMiddleName(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:border-cyan-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-400 mb-1 font-medium">Last Name *</label>
+                  <input
+                    type="text"
+                    value={lastName}
+                    onChange={(e) => setLastName(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:border-cyan-500 focus:outline-none"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-slate-400 mb-1 font-medium">Contact Number *</label>
+                  <input
+                    type="text"
+                    value={mobile}
+                    onChange={(e) => setMobile(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:border-cyan-500 focus:outline-none font-mono"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-400 mb-1 font-medium">Official Email Address *</label>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:border-cyan-500 focus:outline-none"
+                    required
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-4 pt-4 border-t border-slate-800">
+              <h4 className="font-bold text-slate-200 uppercase tracking-wider text-[11px] text-cyan-400">
+                Operations & Repair Shop Address
+              </h4>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-slate-400 mb-1 font-medium">Street / Building / Highway *</label>
+                  <input
+                    type="text"
+                    value={street}
+                    onChange={(e) => setStreet(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:border-cyan-500 focus:outline-none"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-400 mb-1 font-medium">Barangay *</label>
+                  <input
+                    type="text"
+                    list="lagonoy-barangays-list"
+                    value={barangay}
+                    onChange={(e) => setBarangay(e.target.value)}
+                    placeholder="Select or type Barangay..."
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:border-cyan-500 focus:outline-none"
+                    required
+                  />
+                  <datalist id="lagonoy-barangays-list">
+                    {LAGONOY_BARANGAYS.map((bg) => (
+                      <option key={bg} value={bg} />
+                    ))}
+                  </datalist>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-slate-400 mb-1 font-medium">City / Municipality *</label>
+                  <input
+                    type="text"
+                    value={city}
+                    onChange={(e) => setCity(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:border-cyan-500 focus:outline-none"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-400 mb-1 font-medium">Province *</label>
+                  <input
+                    type="text"
+                    value={province}
+                    onChange={(e) => setProvince(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:border-cyan-500 focus:outline-none"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-400 mb-1 font-medium">ZIP Code *</label>
+                  <input
+                    type="text"
+                    value={zipCode}
+                    onChange={(e) => setZipCode(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-mono focus:border-cyan-500 focus:outline-none"
+                    required
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-4 border-t border-slate-800 flex items-center justify-between">
+              <p className="text-[11px] text-slate-500">
+                Changes will automatically propagate to all invoices, receipts, and client portal views upon saving.
+              </p>
+              <button
+                type="submit"
+                className="flex items-center gap-2 px-6 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl font-bold shadow-lg shadow-cyan-600/20 transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer shrink-0"
+              >
+                <Check className="w-4 h-4" />
+                <span>Save Company Profile</span>
+              </button>
+            </div>
+          </form>
+
+          {/* Right Live Preview Panel: 1 col on XL */}
           <div className="space-y-4">
-            <h4 className="font-bold text-slate-200 uppercase tracking-wider text-[11px] text-cyan-400">
-              Official Business Identity
-            </h4>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-slate-400 mb-1 font-medium">Business Legal Name *</label>
-                <input
-                  type="text"
-                  value={businessName}
-                  onChange={(e) => setBusinessName(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100"
-                  required
-                />
+            <div className="p-5 rounded-3xl bg-slate-900/90 border border-cyan-800/40 space-y-4 shadow-xl">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-cyan-400 flex items-center gap-1.5">
+                  <Eye className="w-3.5 h-3.5" />
+                  Live Header Preview
+                </span>
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
               </div>
 
-              <div>
-                <label className="block text-slate-400 mb-1 font-medium">Trade Name / Brand</label>
-                <input
-                  type="text"
-                  value={tradeName}
-                  onChange={(e) => setTradeName(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100"
-                />
-              </div>
-            </div>
+              {/* Sample Invoice / Receipt Header Preview */}
+              <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800/80 space-y-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <h3 className="font-bold text-sm text-slate-100">{businessName || 'Business Name'}</h3>
+                    <p className="text-[11px] text-cyan-400 font-medium">{tradeName || 'Trade / Brand Name'}</p>
+                  </div>
+                  <span className="text-[10px] font-mono bg-cyan-950 text-cyan-300 px-1.5 py-0.5 rounded border border-cyan-800">
+                    ISP NODE
+                  </span>
+                </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-slate-400 mb-1 font-medium">BIR TIN Number *</label>
-                <input
-                  type="text"
-                  value={tin}
-                  onChange={(e) => setTin(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-mono"
-                  required
-                />
-              </div>
-            </div>
-          </div>
+                <div className="space-y-1 text-[11px] text-slate-400 border-t border-slate-800/60 pt-2 font-mono">
+                  <div><span className="text-slate-500">TIN:</span> {tin || '000-000-000-000'}</div>
+                  <div><span className="text-slate-500">Node:</span> {street}, Brgy. {barangay}, {city}, {province} {zipCode}</div>
+                  <div><span className="text-slate-500">Tel/SMS:</span> {mobile}</div>
+                  <div><span className="text-slate-500">Email:</span> {email}</div>
+                </div>
 
-          <div className="space-y-4 pt-4 border-t border-slate-800">
-            <h4 className="font-bold text-slate-200 uppercase tracking-wider text-[11px] text-cyan-400">
-              Authorized Representative
-            </h4>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div>
-                <label className="block text-slate-400 mb-1 font-medium">First Name *</label>
-                <input
-                  type="text"
-                  value={firstName}
-                  onChange={(e) => setFirstName(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100"
-                  required
-                />
+                <div className="border-t border-slate-800/60 pt-2 flex items-center justify-between text-[10px] text-slate-500">
+                  <span>Authorized Representative:</span>
+                  <span className="font-medium text-slate-300">
+                    {firstName} {middleName ? middleName + ' ' : ''}{lastName}
+                  </span>
+                </div>
               </div>
 
-              <div>
-                <label className="block text-slate-400 mb-1 font-medium">Middle Name</label>
-                <input
-                  type="text"
-                  value={middleName}
-                  onChange={(e) => setMiddleName(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100"
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-400 mb-1 font-medium">Last Name *</label>
-                <input
-                  type="text"
-                  value={lastName}
-                  onChange={(e) => setLastName(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100"
-                  required
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-slate-400 mb-1 font-medium">Contact Number *</label>
-                <input
-                  type="text"
-                  value={mobile}
-                  onChange={(e) => setMobile(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-400 mb-1 font-medium">Official Email Address *</label>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100"
-                  required
-                />
+              <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 text-[11px] space-y-1 text-slate-400">
+                <div className="flex items-center gap-1.5 text-cyan-300 font-semibold">
+                  <Zap className="w-3.5 h-3.5 text-cyan-400" />
+                  Dynamic Real-Time Propagator
+                </div>
+                <p className="text-[10px] text-slate-500">
+                  Updates directly synchronize with your MikroTik network logs, Field Tech receipts, GCash notifications, and client portal statements.
+                </p>
               </div>
             </div>
           </div>
-
-          <div className="space-y-4 pt-4 border-t border-slate-800">
-            <h4 className="font-bold text-slate-200 uppercase tracking-wider text-[11px] text-cyan-400">
-              Operations & Repair Shop Address
-            </h4>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-slate-400 mb-1 font-medium">Street / Highway *</label>
-                <input
-                  type="text"
-                  value={street}
-                  onChange={(e) => setStreet(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-400 mb-1 font-medium">Barangay *</label>
-                <input
-                  type="text"
-                  value={barangay}
-                  onChange={(e) => setBarangay(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100"
-                  required
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div>
-                <label className="block text-slate-400 mb-1 font-medium">City / Municipality *</label>
-                <input
-                  type="text"
-                  value={city}
-                  onChange={(e) => setCity(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-400 mb-1 font-medium">Province *</label>
-                <input
-                  type="text"
-                  value={province}
-                  onChange={(e) => setProvince(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-400 mb-1 font-medium">ZIP Code *</label>
-                <input
-                  type="text"
-                  value={zipCode}
-                  onChange={(e) => setZipCode(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-mono"
-                  required
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className="pt-4 border-t border-slate-800 flex justify-end">
-            <button
-              type="submit"
-              className="flex items-center gap-2 px-5 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl font-semibold shadow-lg shadow-cyan-600/20 transition-colors"
-            >
-              <Check className="w-4 h-4" />
-              <span>Save Company Profile</span>
-            </button>
-          </div>
-        </form>
+        </div>
       )}
 
       {/* Tab 2: Payment Gateways */}

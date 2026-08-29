@@ -25,6 +25,8 @@ import {
   ReminderLog,
   ReminderType,
   RepairOrder,
+  CoverageArea,
+  CoverageStatus,
 } from '../types';
 import {
   exportAllDataAsJson,
@@ -33,7 +35,7 @@ import {
   saveToStorage,
   STORAGE_KEYS,
 } from '../data/storage';
-import { initialPlans, initialBusinessProfile } from '../data/initialData';
+import { initialPlans, initialBusinessProfile, initialCoverageAreas } from '../data/initialData';
 import { generateId } from '../utils/formatters';
 import { generateReminderMessage, sendMockNotification } from '../utils/smsSender';
 import { generateHtmlInvoiceEmail, sendSmtpEmail } from '../utils/smtpService';
@@ -85,9 +87,17 @@ interface AppContextType {
   auditLogs: AuditLog[];
   dailyRemittances: DailyRemittanceRecord[];
   addonCatalog: AddonCatalogItem[];
+  coverageAreas: CoverageArea[];
   activeTab: string;
   searchTerm: string;
   notifications: ToastNotification[];
+  isMobileMenuOpen: boolean;
+  setIsMobileMenuOpen: (open: boolean) => void;
+  toggleMobileMenu: () => void;
+
+  theme: 'dark' | 'light';
+  setTheme: (theme: 'dark' | 'light') => void;
+  toggleTheme: () => void;
 
   // Navigation & Search
   setActiveTab: (tab: string) => void;
@@ -168,6 +178,13 @@ interface AppContextType {
   updatePlan: (id: string, updates: Partial<Plan>) => void;
   deletePlan: (id: string) => void;
 
+  // Coverage Area Actions
+  addCoverageArea: (area: Omit<CoverageArea, 'id'>) => CoverageArea;
+  updateCoverageArea: (id: string, updates: Partial<CoverageArea>) => void;
+  deleteCoverageArea: (id: string) => void;
+  toggleCoverageVisibility: (id: string) => void;
+  toggleCoverageFiberReady: (id: string) => void;
+
   // NAP Box Actions
   addNapBox: (napBox: Omit<NapBox, 'id'>) => void;
   updateNapBox: (id: string, updates: Partial<NapBox>) => void;
@@ -235,10 +252,46 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [dailyRemittances, setDailyRemittances] = useState<DailyRemittanceRecord[]>(initial.dailyRemittances);
   const [addonCatalog, setAddonCatalog] = useState<AddonCatalogItem[]>(initial.addonCatalog);
   const [paymentSubmissions, setPaymentSubmissions] = useState<PaymentSubmission[]>(initial.paymentSubmissions || []);
+  const [coverageAreas, setCoverageAreas] = useState<CoverageArea[]>(
+    initial.coverageAreas && initial.coverageAreas.length > 0 ? initial.coverageAreas : initialCoverageAreas
+  );
 
   const [activeTab, setActiveTab] = useState<string>('home');
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [notifications, setNotifications] = useState<ToastNotification[]>([]);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
+  const toggleMobileMenu = () => setIsMobileMenuOpen((prev) => !prev);
+
+  // Theme State (Dark / Light Mode)
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    try {
+      const saved = localStorage.getItem('swiftstream_theme');
+      if (saved === 'light' || saved === 'dark') return saved;
+    } catch {}
+    return 'dark';
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('swiftstream_theme', theme);
+    } catch {}
+    const root = document.documentElement;
+    if (theme === 'dark') {
+      root.classList.add('dark');
+      root.classList.remove('light');
+    } else {
+      root.classList.add('light');
+      root.classList.remove('dark');
+    }
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme((prev) => {
+      const next = prev === 'dark' ? 'light' : 'dark';
+      showToast('info', `${next === 'dark' ? '🌙 Dark Mode' : '☀️ Light Mode'} Activated`, `Theme updated to ${next} mode.`);
+      return next;
+    });
+  };
 
   // Firebase Authentication State
   const [currentAuthUser, setCurrentAuthUser] = useState<AppUserProfile | null>(null);
@@ -343,6 +396,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     saveToStorage(STORAGE_KEYS.PAYMENT_SUBMISSIONS, paymentSubmissions);
   }, [paymentSubmissions]);
 
+  useEffect(() => {
+    saveToStorage(STORAGE_KEYS.COVERAGE_AREAS, coverageAreas);
+  }, [coverageAreas]);
+
   // --- Real-time Cloud Firestore Subscriptions ---
   useEffect(() => {
     const unsubCustomers = subscribeToCollection<Customer>(COLLECTIONS.CUSTOMERS, (data) => {
@@ -373,6 +430,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const unsubPlans = subscribeToCollection<Plan>(COLLECTIONS.PLANS, (data) => {
       if (data && data.length > 0) setPlans(data);
     });
+    const unsubCoverage = subscribeToCollection<CoverageArea>(COLLECTIONS.COVERAGE_AREAS, (data) => {
+      if (data && data.length > 0) setCoverageAreas(data);
+    });
     const unsubRepairOrders = subscribeToCollection<RepairOrder>(COLLECTIONS.REPAIR_ORDERS, (data) => {
       setRepairOrders(data || []);
     });
@@ -398,6 +458,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       unsubPayments();
       unsubSubmissions();
       unsubPlans();
+      unsubCoverage();
       unsubRepairOrders();
       unsubNapBoxes();
       unsubFiberCables();
@@ -1407,6 +1468,76 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     showToast('warning', 'Plan Deleted', 'Plan removed from catalog.');
   };
 
+  // --- Coverage Area Operations ---
+  const addCoverageArea = (areaData: Omit<CoverageArea, 'id'>): CoverageArea => {
+    const newArea: CoverageArea = {
+      ...areaData,
+      id: generateId('COV'),
+      updatedAt: new Date().toISOString(),
+    };
+    setCoverageAreas((prev) => [...prev, newArea]);
+    saveFirestoreDoc(COLLECTIONS.COVERAGE_AREAS, newArea);
+    showToast('success', 'Coverage Area Added', `${newArea.name} has been added to coverage list.`);
+    return newArea;
+  };
+
+  const updateCoverageArea = (id: string, updates: Partial<CoverageArea>) => {
+    setCoverageAreas((prev) =>
+      prev.map((a) => {
+        if (a.id === id) {
+          const updated = { ...a, ...updates, updatedAt: new Date().toISOString() };
+          saveFirestoreDoc(COLLECTIONS.COVERAGE_AREAS, updated);
+          return updated;
+        }
+        return a;
+      })
+    );
+    showToast('info', 'Coverage Updated', 'Coverage area details modified.');
+  };
+
+  const deleteCoverageArea = (id: string) => {
+    deleteFirestoreDoc(COLLECTIONS.COVERAGE_AREAS, id);
+    setCoverageAreas((prev) => prev.filter((a) => a.id !== id));
+    showToast('warning', 'Coverage Removed', 'Barangay coverage area removed.');
+  };
+
+  const toggleCoverageVisibility = (id: string) => {
+    setCoverageAreas((prev) =>
+      prev.map((a) => {
+        if (a.id === id) {
+          const updated = { ...a, isPubliclyVisible: !a.isPubliclyVisible, updatedAt: new Date().toISOString() };
+          saveFirestoreDoc(COLLECTIONS.COVERAGE_AREAS, updated);
+          showToast(
+            'info',
+            updated.isPubliclyVisible ? 'Barangay Published' : 'Barangay Hidden',
+            `${a.name} is now ${updated.isPubliclyVisible ? 'visible on website' : 'hidden from website'}.`
+          );
+          return updated;
+        }
+        return a;
+      })
+    );
+  };
+
+  const toggleCoverageFiberReady = (id: string) => {
+    setCoverageAreas((prev) =>
+      prev.map((a) => {
+        if (a.id === id) {
+          const newStatus: CoverageStatus = a.status === 'fiber_ready' ? 'expansion_ongoing' : 'fiber_ready';
+          const updated = { ...a, status: newStatus, updatedAt: new Date().toISOString() };
+          saveFirestoreDoc(COLLECTIONS.COVERAGE_AREAS, updated);
+          showToast(
+            'success',
+            'Fiber Status Updated',
+            `${a.name} is now ${newStatus === 'fiber_ready' ? 'FIBER READY' : 'EXPANSION ONGOING'}.`
+          );
+          return updated;
+        }
+        return a;
+      })
+    );
+  };
+
   // --- NAP Box Operations ---
   const addNapBox = (boxData: Omit<NapBox, 'id'>) => {
     const newBox: NapBox = { ...boxData, id: generateId('NAP') };
@@ -1935,6 +2066,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         activeTab,
         searchTerm,
         notifications,
+        isMobileMenuOpen,
+        setIsMobileMenuOpen,
+        toggleMobileMenu,
         dailyRemittances,
         addonCatalog,
         setActiveTab,
@@ -1968,6 +2102,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addPlan,
         updatePlan,
         deletePlan,
+        coverageAreas,
+        addCoverageArea,
+        updateCoverageArea,
+        deleteCoverageArea,
+        toggleCoverageVisibility,
+        toggleCoverageFiberReady,
         addNapBox,
         updateNapBox,
         deleteNapBox,
@@ -1992,6 +2132,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         deleteExpense,
         logAuditEvent,
         clearAuditLogs,
+        theme,
+        setTheme,
+        toggleTheme,
         updateBusinessProfile,
         exportData,
         importData,

@@ -227,7 +227,7 @@ export const MikrotikDeviceManager: React.FC = () => {
   const overdueCount = customers.filter((c) => c.status === 'overdue' || c.status === 'suspended').length;
 
   return (
-    <div className="space-y-6 pb-12">
+    <div className="w-full px-3 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-4 sm:space-y-6 pb-12 animate-in fade-in">
       {/* 1. TOP HEADER & TELEMETRY BANNER */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-slate-900/80 p-6 rounded-3xl border border-slate-800 backdrop-blur-md">
         <div className="flex items-center gap-4">

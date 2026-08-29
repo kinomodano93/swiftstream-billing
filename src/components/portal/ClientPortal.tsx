@@ -32,6 +32,7 @@ import {
   Globe,
   X,
   Smartphone,
+  CheckCircle,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import confetti from 'canvas-confetti';
@@ -61,7 +62,6 @@ interface ClientPortalProps {
 
 export const ClientPortal: React.FC<ClientPortalProps> = ({
   initialCustomerId,
-  onExitToAdmin,
   onExitToHome,
 }) => {
   const {
@@ -72,7 +72,6 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
     repairOrders,
     plans,
     businessProfile,
-    recordPayment,
     processIncomingPaymentWebhook,
     submitPaymentProof,
     addRepairOrder,
@@ -114,7 +113,6 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
   const [payMethod, setPayMethod] = useState<PaymentMethod>('gcash');
   const [payReference, setPayReference] = useState<string>('');
   const [receiptImageBase64, setReceiptImageBase64] = useState<string | null>(null);
-  const [showFullQrModal, setShowFullQrModal] = useState<boolean>(false);
   const [submittedProofSuccess, setSubmittedProofSuccess] = useState<boolean>(false);
   const [xenditSubChannel, setXenditSubChannel] = useState<string>('7ELEVEN');
   const [copiedField, setCopiedField] = useState<string | null>(null);
@@ -140,6 +138,15 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
   const [uploadSpeed, setUploadSpeed] = useState<number>(0);
   const [pingLatency, setPingLatency] = useState<number>(0);
   const [speedTestDone, setSpeedTestDone] = useState<boolean>(false);
+
+  // Quick Issue Presets for Support Ticket
+  const issuePresets = [
+    { label: '🔴 Red LOS Light Blinking', desc: 'No internet connection, red light on modem.' },
+    { label: '🐢 Slow Internet Speed', desc: 'Speed test is below subscribed bandwidth.' },
+    { label: '⚡ Modem Power / No Lights', desc: 'ONU modem not turning on or power adapter dead.' },
+    { label: '📦 House Cable Relocation', desc: 'Request to move fiber line to another room.' },
+    { label: '📶 Change WiFi Password', desc: 'Need help updating WiFi name or password.' },
+  ];
 
   // Lookup currently logged in customer
   const customer = customers.find((c) => c.id === currentCustomerId);
@@ -193,7 +200,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
       setLoginInput('');
     } else {
       setLoginError(
-        'Subscriber not found. Please check your Account No. (e.g. SWIFT-2026-001) or Mobile Number.'
+        'Subscriber not found. Please enter your Account Number (e.g. SWIFT-2026-001) or Registered Mobile Number.'
       );
     }
   };
@@ -253,7 +260,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
         paymentMethod: payMethod,
         referenceNumber: ref,
         receiptImageUrl: receiptImageBase64 || undefined,
-        notes: `Submitted via Client Portal (${payMethod.toUpperCase()}). Pending admin audit.`,
+        notes: `Submitted via Client Portal (${payMethod.toUpperCase()}). Pending cashier audit.`,
       });
       setSubmittedProofSuccess(true);
       setTimeout(() => setSubmittedProofSuccess(false), 8000);
@@ -261,7 +268,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
 
     try {
       confetti({
-        particleCount: 75,
+        particleCount: 80,
         spread: 70,
         origin: { y: 0.6 },
       });
@@ -291,7 +298,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
       address: `${customer.address.street}, Brgy. ${customer.address.barangay}, ${customer.address.city}`,
       deviceType: ticketDeviceType,
       issueDescription: ticketIssue,
-      diagnosisNotes: 'Submitted online via Customer Self-Service Portal. Pending tech dispatch.',
+      diagnosisNotes: 'Submitted online via Customer Self-Service Portal. Pending technician dispatch.',
       technician: 'Field Dispatch Team (Lagonoy)',
       partsUsed: [],
       laborCost: 0,
@@ -303,6 +310,9 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
 
     setTicketIssue('');
     setTicketSubmitted(true);
+    try {
+      confetti({ particleCount: 50, spread: 60, origin: { y: 0.7 } });
+    } catch {}
     setTimeout(() => setTicketSubmitted(false), 5000);
   };
 
@@ -376,6 +386,9 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
     setWifiSubmitted(true);
     setWifiSsid('');
     setWifiPassword('');
+    try {
+      confetti({ particleCount: 60, spread: 65, origin: { y: 0.6 } });
+    } catch {}
     setTimeout(() => setWifiSubmitted(false), 6000);
   };
 
@@ -398,97 +411,88 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
 
       if (prog <= 50) {
         // Download phase
-        const currentDl = Math.min(
+        const curDown = Math.min(
           targetMax,
-          Math.round((prog / 50) * targetMax * (0.92 + Math.random() * 0.15))
+          Math.floor((prog / 50) * (targetMax * 0.98 + (Math.random() * 4 - 2)))
         );
-        setDownloadSpeed(currentDl);
-        setPingLatency(Math.floor(4 + Math.random() * 6));
-      } else {
+        setDownloadSpeed(Math.max(1, curDown));
+        setPingLatency(Math.floor(Math.random() * 4 + 8)); // 8-12ms ping
+      } else if (prog <= 95) {
         // Upload phase
-        const currentUl = Math.min(
+        const curUp = Math.min(
           targetMax,
-          Math.round(((prog - 50) / 50) * targetMax * (0.88 + Math.random() * 0.18))
+          Math.floor(((prog - 50) / 45) * (targetMax * 0.95 + (Math.random() * 3 - 1)))
         );
-        setUploadSpeed(currentUl);
-      }
-
-      if (prog >= 100) {
+        setUploadSpeed(Math.max(1, curUp));
+      } else {
         clearInterval(interval);
+        setDownloadSpeed(Math.round(targetMax * 0.99));
+        setUploadSpeed(Math.round(targetMax * 0.96));
+        setPingLatency(9);
         setSpeedTestRunning(false);
         setSpeedTestDone(true);
+        try {
+          confetti({ particleCount: 70, spread: 60, origin: { y: 0.6 } });
+        } catch {}
       }
     }, 120);
   };
-
-  // QR Payload for GCash / Maya
-  const qrPaymentPayload = JSON.stringify({
-    isp: businessProfile.name,
-    acct: customer?.accountNo,
-    cust: customer?.fullName,
-    amt: payAmount || customer?.balance,
-    gcash: businessProfile.paymentGateways.gcashNumber,
-    merchant: businessProfile.paymentGateways.gcashName,
-  });
 
   // --- VIEW 1: LOGIN / ACCOUNT LOOKUP VIEW ---
   if (!customer) {
     return (
       <div className="min-h-full flex flex-col bg-slate-950 text-slate-100 selection:bg-cyan-500 selection:text-white">
         {/* Top Navbar */}
-        <header className="h-16 bg-slate-900/80 border-b border-slate-800 px-6 flex items-center justify-between sticky top-0 z-30 backdrop-blur-md">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-600 via-sky-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20">
-              <Radio className="w-5 h-5 text-white animate-pulse" />
+        <header className="h-16 bg-slate-900/90 border-b border-slate-800 px-6 sticky top-0 z-30 backdrop-blur-md">
+          <div className="max-w-5xl mx-auto h-full flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-cyan-600 via-sky-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20">
+                <Radio className="w-5 h-5 text-white animate-pulse" />
+              </div>
+              <div>
+                <h1 className="font-black text-sm text-slate-100 tracking-tight flex items-center gap-1.5">
+                  <span>SwiftStream</span>
+                  <span className="text-[10px] bg-cyan-950 text-cyan-400 font-mono px-2 py-0.5 rounded-full border border-cyan-800/60 font-normal">
+                    PORTAL
+                  </span>
+                </h1>
+                <p className="text-[10px] text-slate-400">
+                  Fiber Subscriber Self-Service Hub
+                </p>
+              </div>
             </div>
-            <div>
-              <h1 className="font-black text-sm text-slate-100 tracking-tight">SwiftStream</h1>
-              <p className="text-[10px] text-cyan-400 font-semibold tracking-wider uppercase">
-                Subscriber Self-Service Portal
-              </p>
-            </div>
-          </div>
 
-          <div className="flex items-center gap-2">
             <button
               onClick={onExitToHome}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-semibold border border-slate-700 transition-colors"
+              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-semibold border border-slate-700 transition-colors cursor-pointer"
             >
               <Globe className="w-3.5 h-3.5 text-emerald-400" />
               <span>Return to Home Page</span>
-            </button>
-
-            <button
-              onClick={onExitToAdmin}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-semibold border border-slate-700 transition-colors"
-            >
-              <span>Admin Console</span>
-              <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
         </header>
 
         {/* Login Hero Section */}
-        <div className="flex-1 flex flex-col items-center justify-center p-6 max-w-4xl mx-auto w-full space-y-8">
-          <div className="text-center space-y-3 max-w-lg">
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-cyan-950 text-cyan-300 border border-cyan-800/60 shadow-sm">
+        <div className="flex-1 flex flex-col items-center justify-center p-6 max-w-xl mx-auto w-full space-y-8 text-center">
+          <div className="space-y-3">
+            <span className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full text-xs font-semibold bg-gradient-to-r from-cyan-950 to-blue-950 text-cyan-300 border border-cyan-800/60 shadow-sm mx-auto">
               <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
               <span>Instant Bill Check & Fast Online GCash / Maya Pay</span>
             </span>
-            <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-100 tracking-tight">
+            <h2 className="text-2xl sm:text-3xl font-black text-slate-100 tracking-tight">
               Welcome to your Fiber Portal
             </h2>
-            <p className="text-xs sm:text-sm text-slate-400">
-              Access your monthly billing statements, view connection details, pay online with instant Official Receipts, and file technical requests.
+            <p className="text-xs sm:text-sm text-slate-400 leading-relaxed max-w-md mx-auto">
+              Access your monthly billing statements, view connection details, pay online with instant Official Receipts, and file technical requests in seconds.
             </p>
           </div>
 
           {/* Login Form Box */}
-          <div className="w-full max-w-md p-6 sm:p-8 rounded-3xl bg-slate-900/90 border border-slate-800 shadow-2xl shadow-cyan-950/20 space-y-6">
+          <div className="w-full p-6 sm:p-8 rounded-3xl bg-slate-900/90 border border-slate-800 shadow-2xl shadow-cyan-950/20 space-y-6 text-left">
             <form onSubmit={handleLogin} className="space-y-4">
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  Enter Account Number or Mobile Number
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5 text-center">
+                  Enter Account Number, Mobile Number, or Name
                 </label>
                 <div className="relative">
                   <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -498,13 +502,13 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                     value={loginInput}
                     onChange={(e) => setLoginInput(e.target.value)}
                     placeholder="e.g. SWIFT-2026-001 or 09624171684"
-                    className="w-full pl-10 pr-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/40"
+                    className="w-full pl-10 pr-4 py-3 bg-slate-950 border border-slate-800 rounded-2xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 transition-all font-mono text-center"
                   />
                 </div>
               </div>
 
               {loginError && (
-                <div className="p-3 rounded-xl bg-rose-950/40 border border-rose-800/60 text-xs text-rose-300 flex items-start gap-2">
+                <div className="p-3.5 rounded-2xl bg-rose-950/40 border border-rose-800/60 text-xs text-rose-300 flex items-start gap-2 animate-in fade-in">
                   <AlertTriangle className="w-4 h-4 text-rose-400 flex-shrink-0 mt-0.5" />
                   <span>{loginError}</span>
                 </div>
@@ -512,56 +516,19 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
 
               <button
                 type="submit"
-                className="w-full flex items-center justify-center gap-2 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-cyan-600/20 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                className="w-full flex items-center justify-center gap-2 py-3 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-2xl text-xs font-bold shadow-lg shadow-cyan-600/30 transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
               >
                 <span>Access My Subscriber Portal</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </form>
-
-            {/* Quick Demo Switcher */}
-            <div className="pt-5 border-t border-slate-800/80 space-y-2.5">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
-                Quick Test with Sample Subscribers:
-              </span>
-              <div className="space-y-1.5">
-                {customers.slice(0, 4).map((c) => (
-                  <button
-                    key={c.id}
-                    onClick={() => handleSelectDemo(c.id)}
-                    className="w-full flex items-center justify-between p-2.5 rounded-xl bg-slate-950/60 border border-slate-800/80 hover:border-cyan-500/60 hover:bg-cyan-950/20 text-left transition-all text-xs group"
-                  >
-                    <div>
-                      <p className="font-semibold text-slate-200 group-hover:text-cyan-300">
-                        {c.fullName}
-                      </p>
-                      <p className="text-[10px] text-slate-500 font-mono">
-                        {c.accountNo} • {c.planName}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <span
-                        className={`font-mono text-xs font-bold ${
-                          c.balance > 0 ? 'text-rose-400' : 'text-emerald-400'
-                        }`}
-                      >
-                        {c.balance > 0 ? formatCurrency(c.balance) : 'PAID'}
-                      </span>
-                      <span className="text-[10px] text-cyan-400 block group-hover:translate-x-0.5 transition-transform">
-                        Open &rarr;
-                      </span>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
           </div>
 
           {/* Help & Support Info */}
           <div className="text-center text-xs text-slate-500 space-y-1">
             <p>Need help finding your Account Number? Check your monthly SMS billing statement.</p>
             <p className="text-slate-400">
-              Helpline: <span className="text-cyan-400 font-mono">{businessProfile.representative.mobile}</span> • Lagonoy Operations Center
+              Helpline: <span className="text-cyan-400 font-mono font-bold">{businessProfile.representative.mobile}</span> • Lagonoy Operations Center
             </p>
           </div>
         </div>
@@ -571,165 +538,198 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
 
   // --- VIEW 2: SUBSCRIBER PORTAL DASHBOARD (LOGGED IN) ---
   const statusBadge = getCustomerStatusBadge(customer.status);
+  const initials = customer.fullName
+    .split(' ')
+    .filter(Boolean)
+    .map((n) => n[0])
+    .slice(0, 2)
+    .join('')
+    .toUpperCase();
 
   return (
     <div className="min-h-full flex flex-col bg-slate-950 text-slate-100 selection:bg-cyan-500 selection:text-white">
       {/* Client Portal Header */}
-      <header className="h-16 bg-slate-900/90 border-b border-slate-800 px-6 flex items-center justify-between sticky top-0 z-30 backdrop-blur-md">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-600 via-sky-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20">
-            <Radio className="w-5 h-5 text-white animate-pulse" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="font-bold text-sm text-slate-100">{customer.fullName}</h1>
-              <span
-                className={`inline-flex items-center gap-1 px-2 py-0.2 rounded-full text-[10px] font-semibold border ${statusBadge.bg} ${statusBadge.textCol} ${statusBadge.border}`}
-              >
-                <span className={`w-1.5 h-1.5 rounded-full ${statusBadge.dot}`} />
-                {statusBadge.text}
-              </span>
+      <header className="h-16 bg-slate-900/90 border-b border-slate-800 px-4 sm:px-6 sticky top-0 z-30 backdrop-blur-md">
+        <div className="max-w-5xl mx-auto h-full flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            {/* Avatar Pill */}
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-cyan-600 via-sky-500 to-blue-600 text-white font-bold flex items-center justify-center shadow-lg shadow-cyan-500/20 text-xs">
+              {initials || <User className="w-4 h-4" />}
             </div>
-            <p className="text-[10px] text-cyan-400 font-mono">
-              Account: {customer.accountNo} • {customer.planName}
-            </p>
+            <div>
+              <div className="flex items-center gap-2">
+                <h1 className="font-bold text-sm text-slate-100">{customer.fullName}</h1>
+                <span
+                  className={`inline-flex items-center gap-1 px-2 py-0.2 rounded-full text-[10px] font-semibold border ${statusBadge.bg} ${statusBadge.textCol} ${statusBadge.border}`}
+                >
+                  <span className={`w-1.5 h-1.5 rounded-full ${statusBadge.dot}`} />
+                  {statusBadge.text}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 mt-0.5">
+                <button
+                  onClick={() => handleCopy(customer.accountNo, 'header_acc')}
+                  className="inline-flex items-center gap-1 text-[10px] font-mono text-cyan-400 bg-cyan-950/60 hover:bg-cyan-900/60 px-1.5 py-0.2 rounded border border-cyan-800/40 transition-colors cursor-pointer"
+                  title="Click to copy Account Number"
+                >
+                  <span>{customer.accountNo}</span>
+                  {copiedField === 'header_acc' ? (
+                    <Check className="w-2.5 h-2.5 text-emerald-400" />
+                  ) : (
+                    <Copy className="w-2.5 h-2.5 text-slate-400" />
+                  )}
+                </button>
+                <span className="text-[10px] text-slate-500">•</span>
+                <span className="text-[10px] text-slate-400">{customer.planName}</span>
+              </div>
+            </div>
           </div>
-        </div>
 
-        <div className="flex items-center gap-2.5">
-          <button
-            onClick={() => {
-              setCurrentCustomerId(null);
-              onExitToHome();
-            }}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/40 rounded-xl text-xs font-semibold transition-colors"
-            title="Sign out of subscriber portal and return to Home Page"
-          >
-            <LogOut className="w-3.5 h-3.5" />
-            <span>Sign Out to Home</span>
-          </button>
-
-          <button
-            onClick={onExitToAdmin}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-cyan-600/20 hover:bg-cyan-600 text-cyan-300 hover:text-white border border-cyan-500/30 rounded-xl text-xs font-semibold transition-colors"
-          >
-            <span>Admin Console</span>
-            <ArrowRight className="w-3.5 h-3.5" />
-          </button>
+          <div className="flex items-center gap-2.5">
+            <button
+              onClick={() => {
+                setCurrentCustomerId(null);
+                logout();
+                onExitToHome();
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/40 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+              title="Sign out of subscriber portal and return to Home Page"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Sign Out</span>
+            </button>
+          </div>
         </div>
       </header>
 
-      {/* Bill Due Notice Ribbon (if balance > 0) */}
-      {customer.balance > 0 && (
-        <div className="bg-gradient-to-r from-rose-950/80 via-amber-950/60 to-rose-950/80 border-b border-rose-800/40 px-6 py-2.5 flex flex-wrap items-center justify-between gap-3 text-xs">
-          <div className="flex items-center gap-2 text-rose-200">
-            <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0" />
-            <span>
-              You have an outstanding balance of{' '}
-              <strong className="font-mono font-bold text-rose-300 text-sm">
-                {formatCurrency(customer.balance)}
-              </strong>
-              . Pay online to keep your fiber internet active and high-speed.
+      {/* Centered Bill Due Notice Ribbon */}
+      {customer.balance > 0 ? (
+        <div className="bg-gradient-to-r from-rose-950/90 via-amber-950/80 to-rose-950/90 border-b border-rose-800/50 px-4 sm:px-6 py-2.5">
+          <div className="max-w-5xl mx-auto flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-2 text-rose-200">
+              <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 animate-bounce" />
+              <span>
+                You have an outstanding balance of{' '}
+                <strong className="font-mono font-bold text-rose-300 text-sm">
+                  {formatCurrency(customer.balance)}
+                </strong>
+                . Pay online to keep your fiber internet active and high-speed.
+              </span>
+            </div>
+            <button
+              onClick={() => setPortalTab('pay')}
+              className="px-3.5 py-1 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-bold shadow-md transition-all hover:scale-105 cursor-pointer"
+            >
+              Pay Bill Now &rarr;
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="bg-gradient-to-r from-emerald-950/60 via-slate-900 to-emerald-950/60 border-b border-emerald-800/30 px-4 sm:px-6 py-2">
+          <div className="max-w-5xl mx-auto flex items-center justify-between text-xs text-emerald-300">
+            <div className="flex items-center gap-2">
+              <CheckCircle className="w-4 h-4 text-emerald-400" />
+              <span>All caught up! Your account is in good standing with zero balance. 🎉</span>
+            </div>
+            <span className="text-[11px] font-mono text-emerald-400 hidden sm:inline">
+              Next Cut-off: Day {customer.billingDay}
             </span>
           </div>
-          <button
-            onClick={() => setPortalTab('pay')}
-            className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold shadow transition-all hover:scale-105"
-          >
-            Pay Bill Now &rarr;
-          </button>
         </div>
       )}
 
-      {/* Portal Navigation Bar */}
-      <div className="border-b border-slate-800 bg-slate-900/60 px-6">
-        <div className="flex space-x-1 sm:space-x-2 text-xs overflow-x-auto">
-          {[
-            { id: 'overview', label: 'Subscription Overview', icon: Wifi },
-            {
-              id: 'bills',
-              label: 'Statement of Accounts (Bills)',
-              icon: FileText,
-              badge: unpaidInvoices.length > 0 ? `${unpaidInvoices.length} Due` : null,
-              badgeColor: 'bg-rose-500/20 text-rose-300',
-            },
-            { id: 'pay', label: 'Pay Online (GCash / Maya)', icon: CreditCard },
-            {
-              id: 'receipts',
-              label: 'Payment Receipts',
-              icon: CheckCircle2,
-              badge: customerPayments.length > 0 ? `${customerPayments.length}` : null,
-              badgeColor: 'bg-emerald-500/20 text-emerald-300',
-            },
-            { id: 'support', label: 'Report Trouble / Request', icon: Wrench },
-            { id: 'upgrade', label: 'Upgrade Plan & WiFi', icon: Sparkles },
-            { id: 'speedtest', label: 'Network Speed Test', icon: Gauge },
-          ].map((tab) => {
-            const Icon = tab.icon;
-            const isActive = portalTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => setPortalTab(tab.id as any)}
-                className={`flex items-center gap-2 py-3 px-3.5 border-b-2 font-semibold transition-all whitespace-nowrap ${
-                  isActive
-                    ? 'border-cyan-500 text-cyan-300 bg-cyan-950/20'
-                    : 'border-transparent text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <Icon className="w-4 h-4" />
-                <span>{tab.label}</span>
-                {tab.badge && (
-                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${tab.badgeColor}`}>
-                    {tab.badge}
-                  </span>
-                )}
-              </button>
-            );
-          })}
+      {/* Centered Segmented Navigation Tabs */}
+      <div className="border-b border-slate-800 bg-slate-900/70 px-4 sm:px-6 sticky top-16 z-20 backdrop-blur-md">
+        <div className="max-w-5xl mx-auto flex justify-center items-center overflow-x-auto py-2 scrollbar-none">
+          <div className="flex space-x-1 sm:space-x-2 text-xs">
+            {[
+              { id: 'overview', label: 'Subscription Overview', icon: Wifi },
+              {
+                id: 'bills',
+                label: 'Statements (Bills)',
+                icon: FileText,
+                badge: unpaidInvoices.length > 0 ? `${unpaidInvoices.length} Due` : null,
+                badgeColor: 'bg-rose-500/20 text-rose-300 border border-rose-500/30',
+              },
+              { id: 'pay', label: 'Pay Online', icon: CreditCard },
+              {
+                id: 'receipts',
+                label: 'Official Receipts',
+                icon: CheckCircle2,
+                badge: customerPayments.length > 0 ? `${customerPayments.length}` : null,
+                badgeColor: 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30',
+              },
+              { id: 'support', label: 'Report Trouble', icon: Wrench },
+              { id: 'upgrade', label: 'WiFi & Upgrade', icon: Sparkles },
+              { id: 'speedtest', label: 'Speed Test', icon: Gauge },
+            ].map((tab) => {
+              const Icon = tab.icon;
+              const isActive = portalTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setPortalTab(tab.id as any)}
+                  className={`flex items-center gap-2 py-2 px-3.5 rounded-xl font-semibold transition-all whitespace-nowrap cursor-pointer ${
+                    isActive
+                      ? 'bg-cyan-600 text-white shadow-lg shadow-cyan-600/30'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                  }`}
+                >
+                  <Icon className="w-3.5 h-3.5" />
+                  <span>{tab.label}</span>
+                  {tab.badge && (
+                    <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${tab.badgeColor}`}>
+                      {tab.badge}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 
-      {/* Main Content Area */}
-      <main className="flex-1 p-6 max-w-6xl mx-auto w-full space-y-6">
+      {/* Centered Main Content Container */}
+      <main className="flex-1 p-4 sm:p-6 max-w-5xl mx-auto w-full space-y-6">
         {/* ================= TAB 1: OVERVIEW ================= */}
         {portalTab === 'overview' && (
           <div className="space-y-6">
             {/* Top Cards Grid */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
               {/* Card 1: Internet Package */}
-              <div className="p-6 rounded-3xl bg-slate-900/80 border border-slate-800 shadow-card space-y-4">
+              <div className="p-6 rounded-3xl bg-slate-900/80 border border-slate-800 shadow-card space-y-4 hover:border-slate-700 transition-all text-center sm:text-left">
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                     My Internet Plan
                   </span>
-                  <span className="px-2.5 py-0.5 rounded-full bg-cyan-950 text-cyan-300 font-mono font-bold text-xs border border-cyan-800/40">
-                    {customerPlan?.speedMbps || 50} Mbps
+                  <span className="px-2.5 py-0.5 rounded-full bg-cyan-950 text-cyan-300 font-mono font-bold text-xs border border-cyan-800/40 flex items-center gap-1">
+                    <Zap className="w-3 h-3 text-cyan-400" />
+                    <span>{customerPlan?.speedMbps || 50} Mbps</span>
                   </span>
                 </div>
 
                 <div>
                   <h3 className="text-lg font-bold text-slate-100">{customer.planName}</h3>
-                  <p className="text-xl font-extrabold text-cyan-400 font-mono mt-1">
+                  <p className="text-2xl font-black text-cyan-400 font-mono mt-1">
                     {formatCurrency(customer.monthlyFee)}
                     <span className="text-xs text-slate-400 font-normal"> / month</span>
                   </p>
                 </div>
 
-                <div className="text-xs text-slate-400 space-y-1.5 pt-2 border-t border-slate-800/80">
+                <div className="text-xs text-slate-400 space-y-1.5 pt-3 border-t border-slate-800/80">
                   <p className="flex items-center justify-between">
                     <span>Monthly Cut-off Day:</span>
                     <span className="font-semibold text-slate-200">Day {customer.billingDay} of month</span>
                   </p>
                   <p className="flex items-center justify-between">
-                    <span>Installed Date:</span>
+                    <span>Installation Date:</span>
                     <span className="font-mono text-slate-200">{formatDate(customer.installationDate)}</span>
                   </p>
                 </div>
               </div>
 
               {/* Card 2: Billing & Outstanding */}
-              <div className="p-6 rounded-3xl bg-slate-900/80 border border-slate-800 shadow-card space-y-4 flex flex-col justify-between">
+              <div className="p-6 rounded-3xl bg-slate-900/80 border border-slate-800 shadow-card space-y-4 flex flex-col justify-between hover:border-slate-700 transition-all text-center sm:text-left">
                 <div>
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
@@ -755,7 +755,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
 
                 <button
                   onClick={() => setPortalTab('pay')}
-                  className="w-full flex items-center justify-center gap-1.5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-600/20 transition-all hover:scale-105"
+                  className="w-full flex items-center justify-center gap-1.5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-2xl text-xs font-bold shadow-lg shadow-emerald-600/20 transition-all hover:scale-[1.02] cursor-pointer"
                 >
                   <CreditCard className="w-4 h-4" />
                   <span>{customer.balance > 0 ? 'Pay Online Now (GCash/Maya)' : 'Make Advance Payment'}</span>
@@ -763,7 +763,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
               </div>
 
               {/* Card 3: Line & Network Status */}
-              <div className="p-6 rounded-3xl bg-slate-900/80 border border-slate-800 shadow-card space-y-4">
+              <div className="p-6 rounded-3xl bg-slate-900/80 border border-slate-800 shadow-card space-y-4 hover:border-slate-700 transition-all text-center sm:text-left">
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                     Network Line Health
@@ -773,32 +773,85 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
 
                 <div className="space-y-2 text-xs">
                   <div className="flex justify-between py-1 border-b border-slate-800/80">
-                    <span className="text-slate-500">Mikrotik Status:</span>
+                    <span className="text-slate-500">Fiber Line Status:</span>
                     <span
                       className={`font-semibold ${
                         customer.network.isMikrotikSynced ? 'text-emerald-400' : 'text-rose-400'
                       }`}
                     >
-                      {customer.network.isMikrotikSynced ? '● Synced & Online' : '● Disconnected'}
+                      {customer.network.isMikrotikSynced ? '● Active & Online' : '● Disconnected'}
                     </span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-slate-800/80">
+                    <span className="text-slate-500">Optical Signal:</span>
+                    <span className="font-mono text-emerald-400 font-semibold">-18.5 dBm (Optimal)</span>
                   </div>
                   <div className="flex justify-between py-1 border-b border-slate-800/80">
                     <span className="text-slate-500">PPPoE User:</span>
                     <span className="font-mono text-cyan-400">{customer.network.pppoeUsername}</span>
                   </div>
-                  <div className="flex justify-between py-1 border-b border-slate-800/80">
+                  <div className="flex justify-between py-1">
                     <span className="text-slate-500">Assigned IP:</span>
                     <span className="font-mono text-slate-300">{customer.network.ipAddress}</span>
-                  </div>
-                  <div className="flex justify-between py-1">
-                    <span className="text-slate-500">Fiber NAP Port:</span>
-                    <span className="font-mono text-slate-300">Port #{customer.network.napPortNumber}</span>
                   </div>
                 </div>
               </div>
             </div>
 
-            {/* Quick Actions & Recent Bills */}
+            {/* Quick Action Matrix */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {[
+                {
+                  id: 'pay',
+                  title: 'Pay Bill Online',
+                  desc: 'GCash / Maya QR',
+                  icon: CreditCard,
+                  color: 'text-emerald-400 bg-emerald-600/20 border-emerald-500/30',
+                },
+                {
+                  id: 'speedtest',
+                  title: 'Speed Test',
+                  desc: 'Check live bandwidth',
+                  icon: Gauge,
+                  color: 'text-cyan-400 bg-cyan-600/20 border-cyan-500/30',
+                },
+                {
+                  id: 'upgrade',
+                  title: 'WiFi & Upgrade',
+                  desc: 'Change SSID & password',
+                  icon: Wifi,
+                  color: 'text-purple-400 bg-purple-600/20 border-purple-500/30',
+                },
+                {
+                  id: 'support',
+                  title: 'Report Trouble',
+                  desc: 'Fast repair dispatch',
+                  icon: Wrench,
+                  color: 'text-amber-400 bg-amber-600/20 border-amber-500/30',
+                },
+              ].map((act) => {
+                const Icon = act.icon;
+                return (
+                  <button
+                    key={act.id}
+                    onClick={() => setPortalTab(act.id as any)}
+                    className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 hover:border-cyan-500/50 hover:bg-cyan-950/20 text-center transition-all group flex flex-col items-center justify-between space-y-2 cursor-pointer shadow-sm"
+                  >
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center border ${act.color}`}>
+                      <Icon className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <p className="font-bold text-xs text-slate-100 group-hover:text-cyan-300 transition-colors">
+                        {act.title}
+                      </p>
+                      <p className="text-[10px] text-slate-400 mt-0.5">{act.desc}</p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Quick Statements & Support Info */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {/* Left 2 Cols: Recent Statements */}
               <div className="lg:col-span-2 p-6 rounded-3xl bg-slate-900/80 border border-slate-800 shadow-card space-y-4">
@@ -809,9 +862,9 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                   </h3>
                   <button
                     onClick={() => setPortalTab('bills')}
-                    className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1"
+                    className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1 font-semibold cursor-pointer"
                   >
-                    <span>All Invoices</span>
+                    <span>View All</span>
                     <ChevronRight className="w-3.5 h-3.5" />
                   </button>
                 </div>
@@ -858,7 +911,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                                 const pdf = generateInvoicePDF(inv, businessProfile);
                                 pdf.save(`${inv.invoiceNumber}.pdf`);
                               }}
-                              className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-cyan-300 rounded-xl text-xs font-semibold flex items-center gap-1 transition-colors"
+                              className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-cyan-300 rounded-xl text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
                               title="Download Official PDF Statement"
                             >
                               <Download className="w-3.5 h-3.5" />
@@ -871,7 +924,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                                   setPayInvoiceId(inv.id);
                                   setPortalTab('pay');
                                 }}
-                                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold shadow-sm transition-colors"
+                                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold shadow-sm transition-colors cursor-pointer"
                               >
                                 Pay
                               </button>
@@ -884,73 +937,39 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                 )}
               </div>
 
-              {/* Right Col: Quick Self-Service Shortcuts */}
-              <div className="p-6 rounded-3xl bg-slate-900/80 border border-slate-800 shadow-card space-y-4">
-                <h3 className="font-bold text-sm text-slate-100">Subscriber Quick Tools</h3>
+              {/* Right Col: Support Center Info */}
+              <div className="p-6 rounded-3xl bg-slate-900/80 border border-slate-800 shadow-card space-y-4 text-center sm:text-left">
+                <h3 className="font-bold text-sm text-slate-100 flex items-center justify-center sm:justify-start gap-2">
+                  <HelpCircle className="w-4 h-4 text-emerald-400" />
+                  <span>Support Center</span>
+                </h3>
 
-                <div className="space-y-2.5">
-                  <button
-                    onClick={() => setPortalTab('pay')}
-                    className="w-full p-3.5 rounded-2xl bg-slate-950/60 border border-slate-800/80 hover:border-emerald-500/60 hover:bg-emerald-950/20 text-left transition-all text-xs flex items-center justify-between group"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 rounded-xl bg-emerald-600/20 text-emerald-400">
-                        <CreditCard className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <p className="font-semibold text-slate-200 group-hover:text-emerald-300">
-                          Pay Bill via GCash / Maya
-                        </p>
-                        <p className="text-[11px] text-slate-500">Instant OR receipt generation</p>
-                      </div>
-                    </div>
-                    <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-emerald-400" />
-                  </button>
-
-                  <button
-                    onClick={() => setPortalTab('speedtest')}
-                    className="w-full p-3.5 rounded-2xl bg-slate-950/60 border border-slate-800/80 hover:border-cyan-500/60 hover:bg-cyan-950/20 text-left transition-all text-xs flex items-center justify-between group"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 rounded-xl bg-cyan-600/20 text-cyan-400">
-                        <Gauge className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <p className="font-semibold text-slate-200 group-hover:text-cyan-300">
-                          Speed & Latency Test
-                        </p>
-                        <p className="text-[11px] text-slate-500">Verify your live fiber speeds</p>
-                      </div>
-                    </div>
-                    <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-cyan-400" />
-                  </button>
-
-                  <button
-                    onClick={() => setPortalTab('support')}
-                    className="w-full p-3.5 rounded-2xl bg-slate-950/60 border border-slate-800/80 hover:border-purple-500/60 hover:bg-purple-950/20 text-left transition-all text-xs flex items-center justify-between group"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 rounded-xl bg-purple-600/20 text-purple-400">
-                        <Wrench className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <p className="font-semibold text-slate-200 group-hover:text-purple-300">
-                          Request Technical Support
-                        </p>
-                        <p className="text-[11px] text-slate-500">Report line trouble or repair</p>
-                      </div>
-                    </div>
-                    <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-purple-400" />
-                  </button>
+                <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800/80 space-y-3 text-xs text-center sm:text-left">
+                  <div>
+                    <span className="text-[10px] text-slate-500 uppercase font-bold block">Helpline Number</span>
+                    <span className="font-mono font-bold text-cyan-400 text-sm">
+                      {businessProfile.representative.mobile}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-500 uppercase font-bold block">Office Address</span>
+                    <p className="text-slate-300 mt-0.5">
+                      {businessProfile.address.building}, Brgy. {businessProfile.address.barangay}, {businessProfile.address.city}, {businessProfile.address.province}
+                    </p>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-500 uppercase font-bold block">Support Hours</span>
+                    <p className="text-slate-300 mt-0.5">Monday to Saturday: 8:00 AM - 6:00 PM</p>
+                  </div>
                 </div>
 
-                <div className="p-3.5 rounded-2xl bg-slate-950/40 border border-slate-800/60 text-[11px] text-slate-400 space-y-1">
-                  <p className="font-semibold text-slate-300">Operations Hub Location:</p>
-                  <p>
-                    {businessProfile.address.building}, Brgy. {businessProfile.address.barangay}, {businessProfile.address.city}, {businessProfile.address.province}
-                  </p>
-                  <p className="text-amber-400/80">Landmark: {businessProfile.address.landmark}</p>
-                </div>
+                <button
+                  onClick={() => setPortalTab('support')}
+                  className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-cyan-300 rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Wrench className="w-3.5 h-3.5" />
+                  <span>Submit Service Ticket</span>
+                </button>
               </div>
             </div>
           </div>
@@ -959,16 +978,14 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
         {/* ================= TAB 2: BILLS & SOA ================= */}
         {portalTab === 'bills' && (
           <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
-                  <FileText className="w-5 h-5 text-cyan-400" />
-                  <span>Statements of Account (SOA)</span>
-                </h2>
-                <p className="text-xs text-slate-400 mt-1">
-                  View itemized breakdown of monthly recurring subscription and download official PDF bills.
-                </p>
-              </div>
+            <div className="text-center space-y-1">
+              <h2 className="text-xl font-bold text-slate-100 flex items-center justify-center gap-2">
+                <FileText className="w-5 h-5 text-cyan-400" />
+                <span>Statements of Account (SOA)</span>
+              </h2>
+              <p className="text-xs text-slate-400">
+                View itemized breakdown of monthly recurring subscription and download official PDF bills.
+              </p>
             </div>
 
             {customerInvoices.length === 0 ? (
@@ -1007,7 +1024,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                               const pdf = generateInvoicePDF(inv, businessProfile);
                               pdf.save(`${inv.invoiceNumber}_${customer.accountNo}.pdf`);
                             }}
-                            className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-cyan-500/30 rounded-xl text-xs font-semibold transition-colors"
+                            className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-cyan-500/30 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
                           >
                             <Download className="w-3.5 h-3.5" />
                             <span>Download PDF Bill</span>
@@ -1019,7 +1036,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                                 setPayInvoiceId(inv.id);
                                 setPortalTab('pay');
                               }}
-                              className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-600/20 transition-all hover:scale-105"
+                              className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-600/20 transition-all hover:scale-105 cursor-pointer"
                             >
                               <CreditCard className="w-3.5 h-3.5" />
                               <span>Pay {formatCurrency(inv.balanceDue)}</span>
@@ -1090,25 +1107,25 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
 
         {/* ================= TAB 3: PAY ONLINE (GCASH / MAYA) ================= */}
         {portalTab === 'pay' && (
-          <div className="space-y-6 max-w-3xl mx-auto">
-            <div>
-              <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
+          <div className="space-y-6 max-w-2xl mx-auto">
+            <div className="text-center space-y-1">
+              <h2 className="text-xl font-bold text-slate-100 flex items-center justify-center gap-2">
                 <CreditCard className="w-5 h-5 text-emerald-400" />
                 <span>Pay Online via GCash, Maya, or Bank Transfer</span>
               </h2>
-              <p className="text-xs text-slate-400 mt-1">
+              <p className="text-xs text-slate-400">
                 Scan the official merchant QR code using your e-wallet app, enter your reference number, and receive your Official Receipt (OR) instantly.
               </p>
             </div>
 
             {/* Payment Success Banner */}
             {justPaidPaymentId && (
-              <div className="p-5 rounded-3xl bg-emerald-950/60 border border-emerald-500/60 shadow-lg space-y-3 animate-in fade-in zoom-in-95">
-                <div className="flex items-center gap-3">
+              <div className="p-5 rounded-3xl bg-emerald-950/60 border border-emerald-500/60 shadow-lg space-y-3 animate-in fade-in zoom-in-95 text-center">
+                <div className="flex items-center justify-center gap-3">
                   <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold">
                     <CheckCircle2 className="w-6 h-6" />
                   </div>
-                  <div>
+                  <div className="text-left">
                     <h3 className="font-bold text-emerald-300 text-sm">
                       Payment Successfully Acknowledged!
                     </h3>
@@ -1118,7 +1135,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                   </div>
                 </div>
 
-                <div className="flex items-center gap-3 pt-2">
+                <div className="flex items-center justify-center gap-3 pt-2">
                   <button
                     onClick={() => {
                       const pay = payments.find((p) => p.id === justPaidPaymentId);
@@ -1127,7 +1144,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                         pdf.save(`${pay.receiptNumber}.pdf`);
                       }
                     }}
-                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow transition-all"
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow transition-all cursor-pointer"
                   >
                     <Download className="w-4 h-4" />
                     <span>Download Official Receipt PDF</span>
@@ -1138,7 +1155,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                       setJustPaidPaymentId(null);
                       setPortalTab('receipts');
                     }}
-                    className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition-colors"
+                    className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
                   >
                     View in Receipts Tab &rarr;
                   </button>
@@ -1149,21 +1166,21 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
             <div className="p-6 rounded-3xl bg-slate-900/90 border border-slate-800 shadow-2xl space-y-6">
               {/* Step 1: Choose Channel */}
               <div className="space-y-3">
-                <span className="text-xs font-bold text-slate-300 uppercase tracking-wider block">
+                <span className="text-xs font-bold text-slate-300 uppercase tracking-wider block text-center">
                   1. Select Payment Channel
                 </span>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   {[
-                    { id: 'gcash', label: 'GCash App', icon: '📱', desc: 'Scan to pay or mobile' },
-                    { id: 'maya', label: 'Maya (PayMaya)', icon: '💳', desc: 'Maya wallet & QR Ph' },
-                    { id: 'xendit', label: 'Xendit Gateway', icon: '⚡', desc: 'Cards, 7-Eleven, BPI, QR Ph' },
+                    { id: 'gcash', label: 'GCash App', icon: '📱', desc: 'Scan to pay' },
+                    { id: 'maya', label: 'Maya (PayMaya)', icon: '💳', desc: 'Maya QR Ph' },
+                    { id: 'xendit', label: 'Xendit Gateway', icon: '⚡', desc: 'Cards & 7-Eleven' },
                     { id: 'bank_transfer', label: 'Bank Transfer', icon: '🏦', desc: 'BDO / Landbank' },
                   ].map((m) => (
                     <button
                       type="button"
                       key={m.id}
                       onClick={() => setPayMethod(m.id as PaymentMethod)}
-                      className={`p-3.5 rounded-2xl border flex flex-col items-center text-center gap-1 transition-all ${
+                      className={`p-3.5 rounded-2xl border flex flex-col items-center text-center gap-1 transition-all cursor-pointer ${
                         payMethod === m.id
                           ? 'bg-emerald-600/20 border-emerald-500 text-emerald-300 shadow-glow-emerald'
                           : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:border-slate-700'
@@ -1195,7 +1212,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
 
                   {/* Subchannel Selector */}
                   <div>
-                    <label className="block text-slate-400 mb-2 font-medium">
+                    <label className="block text-slate-400 mb-2 font-medium text-center">
                       Select Xendit Payment Method:
                     </label>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -1204,7 +1221,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                           type="button"
                           key={ch.id}
                           onClick={() => setXenditSubChannel(ch.id)}
-                          className={`p-2.5 rounded-xl border text-left transition-all ${
+                          className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
                             xenditSubChannel === ch.id
                               ? 'bg-cyan-950/50 border-cyan-500 text-cyan-200 shadow-sm'
                               : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:border-slate-700'
@@ -1218,10 +1235,10 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                     </div>
                   </div>
 
-                  {/* Selected Subchannel Instructions & Live Mockup */}
+                  {/* Selected Subchannel Instructions */}
                   <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 text-xs space-y-3">
                     {xenditSubChannel === '7ELEVEN' && (
-                      <div className="space-y-2">
+                      <div className="space-y-2 text-center">
                         <div className="flex items-center justify-between">
                           <span className="font-bold text-slate-200 flex items-center gap-1.5">
                             <span>🏪</span>
@@ -1238,7 +1255,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                     )}
 
                     {xenditSubChannel === 'CREDIT_CARD' && (
-                      <div className="space-y-2">
+                      <div className="space-y-2 text-center">
                         <div className="flex items-center justify-between">
                           <span className="font-bold text-slate-200 flex items-center gap-1.5">
                             <span>💳</span>
@@ -1253,7 +1270,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                     )}
 
                     {xenditSubChannel === 'QRPH' && (
-                      <div className="flex items-center gap-4">
+                      <div className="flex flex-col sm:flex-row items-center justify-center gap-4 text-center sm:text-left">
                         <div className="bg-white p-2 rounded-xl">
                           <QRCodeSVG value={`https://checkout.xendit.co/qrph/${customer.accountNo}`} size={85} />
                         </div>
@@ -1265,31 +1282,13 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                         </div>
                       </div>
                     )}
-
-                    {(xenditSubChannel === 'BPI_DIRECT' || xenditSubChannel === 'UNIONBANK_DIRECT') && (
-                      <div className="space-y-1">
-                        <span className="font-bold text-slate-200">Direct Online Banking Debit</span>
-                        <p className="text-[11px] text-slate-400">
-                          Login with your bank credentials to authorize instant account debit.
-                        </p>
-                      </div>
-                    )}
-
-                    {(xenditSubChannel === 'GRABPAY' || xenditSubChannel === 'SHOPEEPAY') && (
-                      <div className="space-y-1">
-                        <span className="font-bold text-slate-200">E-Wallet Instant Authorization</span>
-                        <p className="text-[11px] text-slate-400">
-                          Authorize payment seamlessly via mobile app prompt.
-                        </p>
-                      </div>
-                    )}
                   </div>
                 </div>
               ) : (
                 /* Dynamic QR Ph / GCash / Maya Interoperable QR Gateway */
                 <div className="p-5 rounded-3xl bg-slate-950 border border-slate-800 space-y-4">
-                  <div className="flex flex-col md:flex-row items-center gap-6">
-                    {/* QR Code Container with QR Ph Official Header */}
+                  <div className="flex flex-col md:flex-row items-center justify-center gap-6">
+                    {/* QR Code Container */}
                     <div className="bg-white p-4 rounded-3xl border-2 border-slate-700 flex-shrink-0 shadow-2xl flex flex-col items-center gap-2">
                       <div className="flex items-center gap-1.5 text-slate-900 font-bold text-[11px] tracking-wider uppercase border-b border-slate-200 pb-1 w-full justify-center">
                         <QrCode className="w-4 h-4 text-rose-600" />
@@ -1317,25 +1316,25 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                       </div>
                     </div>
 
-                    <div className="space-y-3 text-xs flex-1">
-                      <div className="flex items-center justify-between">
+                    <div className="space-y-3 text-xs flex-1 text-center md:text-left">
+                      <div className="flex items-center justify-center md:justify-between">
                         <span className="font-bold text-slate-100 flex items-center gap-1.5">
                           <ShieldCheck className="w-4 h-4 text-emerald-400" />
                           <span>QR Ph Interoperable National Gateway</span>
                         </span>
-                        <span className="text-[10px] text-cyan-400 bg-cyan-950 border border-cyan-800/40 px-2 py-0.5 rounded-full font-mono font-bold">
-                          Dynamic Amount Embedded
+                        <span className="text-[10px] text-cyan-400 bg-cyan-950 border border-cyan-800/40 px-2 py-0.5 rounded-full font-mono font-bold hidden md:inline">
+                          Dynamic Amount
                         </span>
                       </div>
 
                       <p className="text-slate-400 text-[11px] leading-relaxed">
-                        Open your <strong>GCash</strong>, <strong>Maya</strong>, <strong>BDO Pay</strong>, <strong>BPI</strong>, <strong>GoTyme</strong>, or <strong>SeaBank</strong> app and scan this dynamic QR code. The exact bill amount and your subscriber Account No. (<strong>{customer.accountNo}</strong>) are automatically filled in.
+                        Open your <strong>GCash</strong>, <strong>Maya</strong>, <strong>BDO</strong>, <strong>BPI</strong>, <strong>GoTyme</strong>, or <strong>SeaBank</strong> app and scan this QR code. The exact bill amount and Account No. (<strong>{customer.accountNo}</strong>) are automatically embedded.
                       </p>
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
                         <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between">
-                          <div>
-                            <span className="text-[10px] text-slate-500 block">Registered Account:</span>
+                          <div className="text-left">
+                            <span className="text-[10px] text-slate-500 block">Registered Number:</span>
                             <span className="font-mono font-bold text-slate-200">
                               {payMethod === 'gcash'
                                 ? businessProfile.paymentGateways.gcashNumber
@@ -1356,15 +1355,15 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                                 'acct'
                               )
                             }
-                            className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg"
-                            title="Copy Account Number"
+                            className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg cursor-pointer"
+                            title="Copy Number"
                           >
                             {copiedField === 'acct' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                           </button>
                         </div>
 
                         <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between">
-                          <div>
+                          <div className="text-left">
                             <span className="text-[10px] text-slate-500 block">Merchant Name:</span>
                             <span className="font-bold text-slate-200 truncate block max-w-[140px]">
                               {payMethod === 'gcash'
@@ -1388,7 +1387,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                   <span className="font-bold text-slate-200 uppercase tracking-wider block">
                     2. Submit Proof of Payment & Reference No.
                   </span>
-                  <span className="text-[11px] text-cyan-400 font-medium">Admin Verification Required</span>
+                  <span className="text-[11px] text-cyan-400 font-medium">Cashier Audit Queue</span>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1401,7 +1400,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                       value={payAmount}
                       onChange={(e) => setPayAmount(e.target.value)}
                       placeholder="1299.00"
-                      className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-mono font-bold text-base focus:outline-none focus:border-cyan-500"
+                      className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-mono font-bold text-base focus:outline-none focus:border-cyan-500 text-center"
                     />
                   </div>
 
@@ -1418,8 +1417,8 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                       required
                       value={payReference}
                       onChange={(e) => setPayReference(e.target.value)}
-                      placeholder="Enter 8-12 digit ref number..."
-                      className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-mono text-xs focus:outline-none focus:border-cyan-500"
+                      placeholder="Enter transaction ref number..."
+                      className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-mono text-xs focus:outline-none focus:border-cyan-500 text-center"
                     />
                   </div>
                 </div>
@@ -1427,7 +1426,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                 {/* Screenshot Uploader Dropzone */}
                 {payMethod !== 'xendit' && (
                   <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-2">
-                    <label className="block text-slate-300 font-semibold">
+                    <label className="block text-slate-300 font-semibold text-center">
                       Upload Payment Screenshot / Transfer Receipt (Optional):
                     </label>
 
@@ -1438,14 +1437,14 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                           alt="Receipt Preview"
                           className="w-12 h-12 object-cover rounded-lg border border-slate-600"
                         />
-                        <div className="flex-1">
+                        <div className="flex-1 text-left">
                           <span className="font-bold text-slate-200 block text-xs">Payment Screenshot Attached</span>
-                          <span className="text-[10px] text-emerald-400">Ready for admin review</span>
+                          <span className="text-[10px] text-emerald-400">Ready for cashier review</span>
                         </div>
                         <button
                           type="button"
                           onClick={() => setReceiptImageBase64(null)}
-                          className="p-1.5 text-rose-400 hover:text-rose-300 hover:bg-rose-950/40 rounded-lg"
+                          className="p-1.5 text-rose-400 hover:text-rose-300 hover:bg-rose-950/40 rounded-lg cursor-pointer"
                         >
                           <X className="w-4 h-4" />
                         </button>
@@ -1481,13 +1480,13 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                   <button
                     type="submit"
                     disabled={isSubmittingPayment}
-                    className="w-full flex items-center justify-center gap-2 py-3.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-2xl text-sm font-bold shadow-lg shadow-emerald-600/20 transition-all hover:scale-[1.01] active:scale-[0.98] disabled:opacity-50"
+                    className="w-full flex items-center justify-center gap-2 py-3.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-2xl text-sm font-bold shadow-lg shadow-emerald-600/20 transition-all hover:scale-[1.01] active:scale-[0.98] disabled:opacity-50 cursor-pointer"
                   >
                     <Check className="w-4 h-4" />
                     <span>
                       {payMethod === 'xendit'
                         ? 'Confirm & Pay via Xendit'
-                        : 'Submit Payment Proof for Admin Verification'}
+                        : 'Submit Payment Proof for Cashier Verification'}
                     </span>
                   </button>
                 </div>
@@ -1498,14 +1497,14 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                     <div>
                       <h4 className="font-bold text-xs">Payment Proof Submitted Successfully!</h4>
                       <p className="text-[11px] text-slate-300 mt-0.5">
-                        Our admin team has received your transaction reference. Once verified against our bank terminal, your invoice will be marked as paid and you will receive an SMS confirmation.
+                        Our cashier team has received your transaction reference. Once verified, your invoice will be marked as paid and you will receive an SMS confirmation.
                       </p>
                     </div>
                   </div>
                 )}
               </form>
 
-              {/* Subscriber's Recent Payment Proof Submissions Tracker */}
+              {/* Payment Verification History Tracker */}
               {customer && paymentSubmissions.filter((s) => s.customerId === customer.id).length > 0 && (
                 <div className="p-5 rounded-3xl bg-slate-900 border border-slate-800 space-y-3">
                   <div className="flex items-center justify-between border-b border-slate-800 pb-2">
@@ -1536,7 +1535,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                           <div>
                             {sub.status === 'pending_review' && (
                               <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase bg-amber-950 text-amber-300 border border-amber-800/40">
-                                Pending Cashier Review
+                                Pending Review
                               </span>
                             )}
                             {sub.status === 'approved' && (
@@ -1562,12 +1561,12 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
         {/* ================= TAB 4: PAYMENT RECEIPTS ================= */}
         {portalTab === 'receipts' && (
           <div className="space-y-6">
-            <div>
-              <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
+            <div className="text-center space-y-1">
+              <h2 className="text-xl font-bold text-slate-100 flex items-center justify-center gap-2">
                 <CheckCircle2 className="w-5 h-5 text-emerald-400" />
                 <span>Official Billing Receipts (OR)</span>
               </h2>
-              <p className="text-xs text-slate-400 mt-1">
+              <p className="text-xs text-slate-400">
                 Download verified 80mm thermal PDF official receipts for your business or personal records.
               </p>
             </div>
@@ -1583,7 +1582,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                   return (
                     <div
                       key={p.id}
-                      className="p-5 rounded-3xl bg-slate-900/80 border border-slate-800 shadow-card flex flex-col justify-between space-y-4"
+                      className="p-5 rounded-3xl bg-slate-900/80 border border-slate-800 shadow-card flex flex-col justify-between space-y-4 hover:border-slate-700 transition-all text-center sm:text-left"
                     >
                       <div className="space-y-2 text-xs">
                         <div className="flex items-center justify-between">
@@ -1629,7 +1628,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                             const pdf = generateOfficialReceiptPDF(p, businessProfile);
                             pdf.save(`${p.receiptNumber}.pdf`);
                           }}
-                          className="px-3.5 py-1.5 bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600 hover:text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                          className="px-3.5 py-1.5 bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600 hover:text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
                         >
                           <Download className="w-3.5 h-3.5" />
                           <span>Thermal PDF</span>
@@ -1645,120 +1644,154 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
 
         {/* ================= TAB 5: SUPPORT & TICKETS ================= */}
         {portalTab === 'support' && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Left Col: Request Ticket Form */}
-            <div className="lg:col-span-1 p-6 rounded-3xl bg-slate-900/80 border border-slate-800 shadow-card space-y-4">
-              <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
-                <Wrench className="w-4 h-4 text-cyan-400" />
-                <h3 className="font-bold text-sm text-slate-100">Submit Service Request</h3>
-              </div>
-
-              {ticketSubmitted && (
-                <div className="p-3.5 rounded-2xl bg-emerald-950/60 border border-emerald-500/60 text-xs text-emerald-300 space-y-1">
-                  <p className="font-bold flex items-center gap-1.5">
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span>Ticket Dispatched!</span>
-                  </p>
-                  <p className="text-[11px] text-emerald-200/80">
-                    Our field technician team in Lagonoy has received your report.
-                  </p>
-                </div>
-              )}
-
-              <form onSubmit={handleCreateTicket} className="space-y-4 text-xs">
-                <div>
-                  <label className="block text-slate-400 mb-1 font-medium">Issue Category *</label>
-                  <select
-                    value={ticketDeviceType}
-                    onChange={(e) => setTicketDeviceType(e.target.value as any)}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500"
-                  >
-                    <option value="ONU/Router">ONU / Modem (No Internet / Red LOS)</option>
-                    <option value="Fiber Line Cut">Fiber Drop Cable / Physical Wire Issue</option>
-                    <option value="Desktop/Laptop">Device / PC Repair Service</option>
-                    <option value="Switch/AP">WiFi Router / Access Point Setting</option>
-                    <option value="Power Adapter">Power Supply / Adapter Replacement</option>
-                    <option value="Other">Other ISP or Shop Request</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-slate-400 mb-1 font-medium">Describe your issue / problem *</label>
-                  <textarea
-                    rows={4}
-                    required
-                    value={ticketIssue}
-                    onChange={(e) => setTicketIssue(e.target.value)}
-                    placeholder="e.g. Red LOS blinking on Huawei modem after storm; no internet access since 8am..."
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500"
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  className="w-full flex items-center justify-center gap-2 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl font-bold shadow-lg shadow-cyan-600/20 transition-all"
-                >
-                  <Send className="w-4 h-4" />
-                  <span>Send Ticket to Tech Desk</span>
-                </button>
-              </form>
+          <div className="space-y-6">
+            <div className="text-center space-y-1">
+              <h2 className="text-xl font-bold text-slate-100 flex items-center justify-center gap-2">
+                <Wrench className="w-5 h-5 text-cyan-400" />
+                <span>Customer Support & Trouble Desk</span>
+              </h2>
+              <p className="text-xs text-slate-400">
+                Report technical connection issues, request fiber line checks, or track active maintenance tickets.
+              </p>
             </div>
 
-            {/* Right 2 Cols: My Active Tickets */}
-            <div className="lg:col-span-2 p-6 rounded-3xl bg-slate-900/80 border border-slate-800 shadow-card space-y-4">
-              <h3 className="font-bold text-sm text-slate-100">My Support & Repair Tickets</h3>
-
-              {customerTickets.length === 0 ? (
-                <div className="text-center py-12 text-slate-500 text-xs">
-                  You have no pending support tickets. All lines are operational.
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* Left Col: Request Ticket Form */}
+              <div className="lg:col-span-1 p-6 rounded-3xl bg-slate-900/80 border border-slate-800 shadow-card space-y-4">
+                <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
+                  <Wrench className="w-4 h-4 text-cyan-400" />
+                  <h3 className="font-bold text-sm text-slate-100">Submit Service Request</h3>
                 </div>
-              ) : (
-                <div className="space-y-3">
-                  {customerTickets.map((t) => {
-                    const badge = getRepairStatusBadge(t.status);
-                    return (
-                      <div
-                        key={t.id}
-                        className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 text-xs space-y-2"
+
+                {ticketSubmitted && (
+                  <div className="p-3.5 rounded-2xl bg-emerald-950/60 border border-emerald-500/60 text-xs text-emerald-300 space-y-1 animate-in fade-in text-center">
+                    <p className="font-bold flex items-center justify-center gap-1.5">
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>Ticket Dispatched!</span>
+                    </p>
+                    <p className="text-[11px] text-emerald-200/80">
+                      Our field technician team in Lagonoy has received your report.
+                    </p>
+                  </div>
+                )}
+
+                {/* Quick Preset Buttons */}
+                <div className="space-y-1.5">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                    Quick Issue Selection:
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {issuePresets.map((preset, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => setTicketIssue(preset.desc)}
+                        className="px-2.5 py-1 rounded-xl bg-slate-950 border border-slate-800 hover:border-cyan-500 hover:text-cyan-300 text-[11px] text-slate-300 transition-colors text-left cursor-pointer"
                       >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <span className="font-mono font-bold text-cyan-400">{t.orderNumber}</span>
-                            <span className="text-slate-300 font-semibold">• {t.deviceType}</span>
-                          </div>
-                          <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-semibold ${badge.bg} ${badge.textCol}`}>
-                            {badge.text}
-                          </span>
-                        </div>
-
-                        <p className="text-slate-300 bg-slate-900/60 p-2.5 rounded-xl border border-slate-800">
-                          {t.issueDescription}
-                        </p>
-
-                        {t.diagnosisNotes && (
-                          <p className="text-[11px] text-slate-400 italic">
-                            Tech Remarks: {t.diagnosisNotes}
-                          </p>
-                        )}
-
-                        <div className="flex items-center justify-between pt-1 border-t border-slate-800/80 text-[11px] text-slate-400">
-                          <span>Filed on: {formatDate(t.dateReceived)}</span>
-                          <span className="text-slate-300">Tech: {t.technician}</span>
-                        </div>
-                      </div>
-                    );
-                  })}
+                        {preset.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              )}
+
+                <form onSubmit={handleCreateTicket} className="space-y-4 text-xs pt-1">
+                  <div>
+                    <label className="block text-slate-400 mb-1 font-medium">Issue Category *</label>
+                    <select
+                      value={ticketDeviceType}
+                      onChange={(e) => setTicketDeviceType(e.target.value as any)}
+                      className="w-full px-3 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500"
+                    >
+                      <option value="ONU/Router">ONU / Modem (No Internet / Red LOS)</option>
+                      <option value="Fiber Line Cut">Fiber Drop Cable / Physical Wire Issue</option>
+                      <option value="Desktop/Laptop">Device / PC Repair Service</option>
+                      <option value="Switch/AP">WiFi Router / Access Point Setting</option>
+                      <option value="Power Adapter">Power Supply / Adapter Replacement</option>
+                      <option value="Other">Other ISP or Shop Request</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-400 mb-1 font-medium">Describe your issue / problem *</label>
+                    <textarea
+                      rows={4}
+                      required
+                      value={ticketIssue}
+                      onChange={(e) => setTicketIssue(e.target.value)}
+                      placeholder="e.g. Red LOS blinking on Huawei modem after storm; no internet access since 8am..."
+                      className="w-full px-3 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="w-full flex items-center justify-center gap-2 py-3 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-2xl font-bold shadow-lg shadow-cyan-600/20 transition-all cursor-pointer"
+                  >
+                    <Send className="w-4 h-4" />
+                    <span>Send Ticket to Tech Desk</span>
+                  </button>
+                </form>
+              </div>
+
+              {/* Right 2 Cols: My Active Tickets */}
+              <div className="lg:col-span-2 p-6 rounded-3xl bg-slate-900/80 border border-slate-800 shadow-card space-y-4">
+                <h3 className="font-bold text-sm text-slate-100 flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-cyan-400" />
+                  <span>My Support & Repair Tickets</span>
+                </h3>
+
+                {customerTickets.length === 0 ? (
+                  <div className="text-center py-12 text-slate-500 text-xs bg-slate-950/40 rounded-2xl border border-slate-800/60">
+                    You have no pending support tickets. All fiber lines are operational.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {customerTickets.map((t) => {
+                      const badge = getRepairStatusBadge(t.status);
+                      return (
+                        <div
+                          key={t.id}
+                          className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 text-xs space-y-2"
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono font-bold text-cyan-400">{t.orderNumber}</span>
+                              <span className="text-slate-300 font-semibold">• {t.deviceType}</span>
+                            </div>
+                            <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-semibold ${badge.bg} ${badge.textCol}`}>
+                              {badge.text}
+                            </span>
+                          </div>
+
+                          <p className="text-slate-300 bg-slate-900/60 p-3 rounded-xl border border-slate-800">
+                            {t.issueDescription}
+                          </p>
+
+                          {t.diagnosisNotes && (
+                            <p className="text-[11px] text-slate-400 italic">
+                              Tech Remarks: {t.diagnosisNotes}
+                            </p>
+                          )}
+
+                          <div className="flex items-center justify-between pt-1 border-t border-slate-800/80 text-[11px] text-slate-400">
+                            <span>Filed on: {formatDate(t.dateReceived)}</span>
+                            <span className="text-slate-300">Tech: {t.technician}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}
 
         {/* ================= TAB 6: SPEED TEST ================= */}
         {portalTab === 'speedtest' && (
-          <div className="max-w-2xl mx-auto p-8 rounded-3xl bg-slate-900/90 border border-slate-800 shadow-2xl text-center space-y-8">
+          <div className="max-w-xl mx-auto p-8 rounded-3xl bg-slate-900/90 border border-slate-800 shadow-2xl text-center space-y-8">
             <div>
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-cyan-950 text-cyan-300 border border-cyan-800/60">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-cyan-950 text-cyan-300 border border-cyan-800/60 mx-auto">
                 <Gauge className="w-3.5 h-3.5 text-cyan-400" />
                 <span>SwiftStream Fast Fiber Speed Diagnostics</span>
               </span>
@@ -1806,14 +1839,14 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
             {/* Progress indicator */}
             {speedTestRunning && (
               <div className="space-y-2">
-                <div className="h-2 w-full bg-slate-950 rounded-full overflow-hidden border border-slate-800">
+                <div className="h-2.5 w-full bg-slate-950 rounded-full overflow-hidden border border-slate-800">
                   <div
-                    className="h-full bg-gradient-to-r from-cyan-500 to-emerald-400 transition-all duration-150"
+                    className="h-full bg-gradient-to-r from-cyan-500 via-sky-400 to-emerald-400 transition-all duration-150"
                     style={{ width: `${speedProgress}%` }}
                   />
                 </div>
-                <span className="text-xs font-mono text-cyan-400 animate-pulse">
-                  Testing fiber connection to Lagonoy Node... ({speedProgress}%)
+                <span className="text-xs font-mono text-cyan-400 animate-pulse block">
+                  Testing optical connection to Lagonoy Core Node... ({speedProgress}%)
                 </span>
               </div>
             )}
@@ -1821,14 +1854,14 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
             {speedTestDone && (
               <div className="p-4 rounded-2xl bg-emerald-950/40 border border-emerald-500/40 text-xs text-emerald-300 flex items-center justify-center gap-2">
                 <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                <span>Your fiber line is performing at peak efficiency! (Zero packet loss)</span>
+                <span>Your fiber line is performing at peak efficiency with zero packet loss!</span>
               </div>
             )}
 
             <button
               onClick={startSpeedTest}
               disabled={speedTestRunning}
-              className="px-8 py-3 bg-cyan-600 hover:bg-cyan-500 text-white rounded-2xl text-sm font-bold shadow-lg shadow-cyan-600/30 transition-all hover:scale-105 active:scale-95 disabled:opacity-50"
+              className="px-8 py-3.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-2xl text-sm font-bold shadow-lg shadow-cyan-600/30 transition-all hover:scale-105 active:scale-95 disabled:opacity-50 cursor-pointer"
             >
               {speedTestRunning ? 'Testing Connection...' : 'Start Speed Test'}
             </button>
@@ -1838,12 +1871,12 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
         {/* ================= TAB 7: PLAN UPGRADE & WIFI SETTINGS ================= */}
         {portalTab === 'upgrade' && (
           <div className="space-y-6 max-w-4xl mx-auto">
-            <div>
-              <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
+            <div className="text-center space-y-1">
+              <h2 className="text-xl font-bold text-slate-100 flex items-center justify-center gap-2">
                 <Sparkles className="w-5 h-5 text-cyan-400" />
                 <span>Subscription Plan Upgrades & WiFi Controls</span>
               </h2>
-              <p className="text-xs text-slate-400 mt-1">
+              <p className="text-xs text-slate-400">
                 Boost your fiber connection speed or submit a remote router WiFi credential update.
               </p>
             </div>
@@ -1857,8 +1890,8 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                 </div>
 
                 {upgradeSubmitted && (
-                  <div className="p-3.5 rounded-2xl bg-emerald-950/60 border border-emerald-500/60 text-xs text-emerald-300 space-y-1 animate-in fade-in">
-                    <p className="font-bold flex items-center gap-1.5">
+                  <div className="p-3.5 rounded-2xl bg-emerald-950/60 border border-emerald-500/60 text-xs text-emerald-300 space-y-1 animate-in fade-in text-center">
+                    <p className="font-bold flex items-center justify-center gap-1.5">
                       <CheckCircle2 className="w-4 h-4" />
                       <span>Upgrade Request Logged!</span>
                     </p>
@@ -1896,13 +1929,13 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
 
                   <div className="p-3 rounded-2xl bg-cyan-950/30 border border-cyan-800/40 text-slate-300 space-y-1">
                     <p className="text-[11px]">
-                      Upgrading takes effect on the next billing cut-off (Day {customer.billingDay}). No physical modem replacement needed for fiber lines!
+                      Upgrading takes effect on your next cut-off (Day {customer.billingDay}). No physical modem replacement needed for existing fiber lines!
                     </p>
                   </div>
 
                   <button
                     type="submit"
-                    className="w-full py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl font-bold shadow-lg shadow-cyan-600/20 transition-all hover:scale-105"
+                    className="w-full py-3 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-2xl font-bold shadow-lg shadow-cyan-600/20 transition-all hover:scale-105 cursor-pointer"
                   >
                     Submit Plan Upgrade Request
                   </button>
@@ -1917,8 +1950,8 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                 </div>
 
                 {wifiSubmitted && (
-                  <div className="p-3.5 rounded-2xl bg-emerald-950/60 border border-emerald-500/60 text-xs text-emerald-300 space-y-1 animate-in fade-in">
-                    <p className="font-bold flex items-center gap-1.5">
+                  <div className="p-3.5 rounded-2xl bg-emerald-950/60 border border-emerald-500/60 text-xs text-emerald-300 space-y-1 animate-in fade-in text-center">
+                    <p className="font-bold flex items-center justify-center gap-1.5">
                       <CheckCircle2 className="w-4 h-4" />
                       <span>WiFi Change Request Sent!</span>
                     </p>
@@ -1947,7 +1980,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                       value={wifiSsid}
                       onChange={(e) => setWifiSsid(e.target.value)}
                       placeholder="e.g. SwiftStream_Flojo_5G"
-                      className="w-full px-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500"
+                      className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500 font-mono"
                     />
                   </div>
 
@@ -1959,13 +1992,13 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                       value={wifiPassword}
                       onChange={(e) => setWifiPassword(e.target.value)}
                       placeholder="Minimum 8 characters..."
-                      className="w-full px-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500"
+                      className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500 font-mono"
                     />
                   </div>
 
                   <button
                     type="submit"
-                    className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold shadow-lg shadow-emerald-600/20 transition-all hover:scale-105"
+                    className="w-full py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-2xl font-bold shadow-lg shadow-emerald-600/20 transition-all hover:scale-105 cursor-pointer"
                   >
                     Submit WiFi Update Request
                   </button>
@@ -1981,4 +2014,3 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
     </div>
   );
 };
-

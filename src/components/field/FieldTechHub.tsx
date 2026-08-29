@@ -131,7 +131,7 @@ export const FieldTechHub: React.FC = () => {
   };
 
   return (
-    <div className={`p-4 md:p-6 space-y-6 max-w-7xl mx-auto transition-all ${isMobileMode ? 'max-w-md border-x-4 border-slate-700 my-4 rounded-3xl bg-slate-950 p-4 shadow-2xl' : ''}`}>
+    <div className={`w-full px-3 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-4 sm:space-y-6 transition-all animate-in fade-in ${isMobileMode ? 'max-w-md mx-auto border-x-4 border-slate-700 my-4 rounded-3xl bg-slate-950 p-4 shadow-2xl' : ''}`}>
       {/* Top Banner & PWA Mode Switcher */}
       <div className="p-6 rounded-3xl bg-slate-900 border border-slate-800 shadow-card flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-center gap-3.5">

@@ -68,7 +68,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const pendingRepairs = repairOrders.filter((r) => r.status !== 'completed' && r.status !== 'cancelled');
 
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto">
+    <div className="w-full px-3 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-4 sm:space-y-6 animate-in fade-in">
       {/* Top Banner / Quick Welcome */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-5 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-900 to-cyan-950/40 border border-slate-800 shadow-card">
         <div>

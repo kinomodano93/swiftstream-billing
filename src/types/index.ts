@@ -744,3 +744,20 @@ export interface PaymentSubmission {
   rejectionReason?: string;
   notes?: string;
 }
+
+export type CoverageStatus = 'fiber_ready' | 'expansion_ongoing' | 'planned';
+
+export interface CoverageArea {
+  id: string;
+  name: string;
+  barangay: string;
+  city: string;
+  province: string;
+  description?: string;
+  status: CoverageStatus;
+  isPubliclyVisible: boolean;
+  napBoxCount?: number;
+  activeSubscribersCount?: number;
+  notes?: string;
+  updatedAt?: string;
+}

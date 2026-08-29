@@ -18,15 +18,16 @@ import {
 import { useApp } from '../../context/AppContext';
 import { NapBox, NapPort } from '../../types';
 import { FiberGisMap } from './FiberGisMap';
+import { CoverageAreaManager } from './CoverageAreaManager';
 
 interface NapBoxManagerProps {
   onSelectCustomer: (customerId: string) => void;
 }
 
 export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }) => {
-  const { napBoxes, customers, addNapBox, updateNapBox, setActiveTab } = useApp();
+  const { napBoxes, customers, addNapBox, updateNapBox, setActiveTab, coverageAreas } = useApp();
 
-  const [viewMode, setViewMode] = useState<'gis_map' | 'hardware_matrix'>('gis_map');
+  const [viewMode, setViewMode] = useState<'gis_map' | 'hardware_matrix' | 'coverage_areas'>('gis_map');
   const [selectedBoxId, setSelectedBoxId] = useState<string>(napBoxes[0]?.id || '');
   const [showAddBoxModal, setShowAddBoxModal] = useState<boolean>(false);
 
@@ -101,7 +102,7 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
   };
 
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto">
+    <div className="w-full px-3 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-4 sm:space-y-6 animate-in fade-in">
       {/* Top Header & View Switcher */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>
@@ -158,7 +159,24 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
           <Layers className="w-4 h-4" />
           <span>📦 NAP Box Hardware & Port Matrix ({napBoxes.length} Boxes)</span>
         </button>
+
+        <button
+          onClick={() => setViewMode('coverage_areas')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-bold transition-all ${
+            viewMode === 'coverage_areas'
+              ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/50 shadow-glow-cyan'
+              : 'bg-slate-900/60 text-slate-400 border border-slate-800 hover:text-slate-200 hover:bg-slate-800/60'
+          }`}
+        >
+          <MapPin className="w-4 h-4 text-rose-400" />
+          <span>📍 Barangay Coverage & Fiber Readiness ({coverageAreas.length} Areas)</span>
+        </button>
       </div>
+
+      {/* View: Coverage Area & Fiber Readiness Manager */}
+      {viewMode === 'coverage_areas' && (
+        <CoverageAreaManager />
+      )}
 
       {/* Primary View: Fiber GIS Map */}
       {viewMode === 'gis_map' && (

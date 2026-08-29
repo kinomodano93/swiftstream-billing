@@ -14,6 +14,7 @@ import { PaymentList } from './components/payments/PaymentList';
 import { PaymentTerminalModal } from './components/payments/PaymentTerminalModal';
 import { OfficialReceiptModal } from './components/payments/OfficialReceiptModal';
 import { PlanManager } from './components/plans/PlanManager';
+import { CoverageAreaManager } from './components/network/CoverageAreaManager';
 import { NapBoxManager } from './components/network/NapBoxManager';
 import { MikrotikDeviceManager } from './components/network/MikrotikDeviceManager';
 import { RepairOrderList } from './components/repairs/RepairOrderList';
@@ -166,6 +167,8 @@ const MainLayout: React.FC = () => {
           )}
 
           {activeTab === 'plans' && <PlanManager />}
+
+          {activeTab === 'coverage' && <CoverageAreaManager />}
 
           {activeTab === 'network' && (
             <NapBoxManager onSelectCustomer={(id) => setSelectedCustomerId(id)} />

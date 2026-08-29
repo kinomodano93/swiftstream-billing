@@ -16,6 +16,7 @@ import {
   DailyRemittanceRecord,
   AddonCatalogItem,
   PaymentSubmission,
+  CoverageArea,
 } from '../types';
 import {
   initialAuditLogs,
@@ -35,6 +36,7 @@ import {
   initialDailyRemittances,
   initialAddonCatalog,
   initialPaymentSubmissions,
+  initialCoverageAreas,
 } from './initialData';
 
 const STORAGE_KEYS = {
@@ -55,6 +57,7 @@ const STORAGE_KEYS = {
   DAILY_REMITTANCES: 'swiftstream_daily_remittances_v2',
   ADDON_CATALOG: 'swiftstream_addon_catalog_v2',
   PAYMENT_SUBMISSIONS: 'swiftstream_payment_submissions_v2',
+  COVERAGE_AREAS: 'swiftstream_coverage_areas_v2',
 };
 
 // Automatic one-time cleanup of legacy v1 mock keys
@@ -153,6 +156,10 @@ export const loadStoredData = () => {
       localStorage.getItem(STORAGE_KEYS.PAYMENT_SUBMISSIONS) || JSON.stringify(initialPaymentSubmissions)
     ) as PaymentSubmission[];
 
+    const coverageAreas = JSON.parse(
+      localStorage.getItem(STORAGE_KEYS.COVERAGE_AREAS) || JSON.stringify(initialCoverageAreas)
+    ) as CoverageArea[];
+
     return {
       businessProfile,
       customers,
@@ -171,6 +178,7 @@ export const loadStoredData = () => {
       dailyRemittances,
       addonCatalog,
       paymentSubmissions,
+      coverageAreas,
     };
   } catch (error) {
     console.error('Failed to load data from localStorage, falling back to defaults:', error);
@@ -192,6 +200,7 @@ export const loadStoredData = () => {
       dailyRemittances: initialDailyRemittances,
       addonCatalog: initialAddonCatalog,
       paymentSubmissions: initialPaymentSubmissions,
+      coverageAreas: initialCoverageAreas,
     };
   }
 };

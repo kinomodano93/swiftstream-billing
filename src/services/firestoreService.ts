@@ -46,6 +46,7 @@ export const COLLECTIONS = {
   DAILY_REMITTANCES: 'daily_remittances',
   ADDON_CATALOG: 'addon_catalog',
   BUSINESS_PROFILE: 'business_profile',
+  COVERAGE_AREAS: 'coverage_areas',
 } as const;
 
 /**
