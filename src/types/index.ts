@@ -1,4 +1,4 @@
-export type CustomerStatus = 'active' | 'overdue' | 'suspended' | 'disconnected' | 'pending_install';
+export type CustomerStatus = 'active' | 'overdue' | 'suspended' | 'disconnected' | 'pending_install' | 'pending_approval';
 
 export type InvoiceStatus = 'unpaid' | 'paid' | 'partially_paid' | 'overdue' | 'cancelled';
 

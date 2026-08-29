@@ -75,6 +75,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
     submitPaymentProof,
     addRepairOrder,
     logout,
+    currentAuthUser,
   } = useApp();
 
   // Selected Subscriber State (Session)
@@ -83,6 +84,22 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
   );
   const [loginInput, setLoginInput] = useState<string>('');
   const [loginError, setLoginError] = useState<string>('');
+
+  useEffect(() => {
+    if (initialCustomerId) {
+      setCurrentCustomerId(initialCustomerId);
+    } else if (currentAuthUser) {
+      const match = customers.find(
+        (c) =>
+          c.id === currentAuthUser.uid ||
+          (currentAuthUser.email && c.email.toLowerCase() === currentAuthUser.email.toLowerCase()) ||
+          (currentAuthUser.accountNo && c.accountNo === currentAuthUser.accountNo)
+      );
+      if (match) {
+        setCurrentCustomerId(match.id);
+      }
+    }
+  }, [initialCustomerId, currentAuthUser, customers]);
 
   // Portal Navigation Tabs
   const [portalTab, setPortalTab] = useState<

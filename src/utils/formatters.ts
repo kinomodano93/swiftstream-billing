@@ -62,6 +62,8 @@ export const getCustomerStatusBadge = (status: CustomerStatus): { text: string; 
       return { text: 'Disconnected', bg: 'bg-slate-500/10', textCol: 'text-slate-400', border: 'border-slate-500/30', dot: 'bg-slate-400' };
     case 'pending_install':
       return { text: 'Pending Install', bg: 'bg-cyan-500/10', textCol: 'text-cyan-400', border: 'border-cyan-500/30', dot: 'bg-cyan-400' };
+    case 'pending_approval':
+      return { text: 'Pending Review', bg: 'bg-amber-500/10', textCol: 'text-amber-300', border: 'border-amber-500/40', dot: 'bg-amber-400 animate-pulse' };
     default:
       return { text: status, bg: 'bg-slate-500/10', textCol: 'text-slate-400', border: 'border-slate-500/30', dot: 'bg-slate-400' };
   }

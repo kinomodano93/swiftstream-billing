@@ -574,7 +574,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setCustomers((prev) =>
       prev.map((c) => {
         if (c.id === customerId) {
-          return {
+          const updated = {
             ...c,
             status: 'active' as const,
             installationDate: todayStr,
@@ -594,6 +594,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               surveyNotes: options.surveyNotes,
             },
           };
+          saveFirestoreDoc(COLLECTIONS.CUSTOMERS, updated);
+          return updated;
         }
         return c;
       })

@@ -21,6 +21,16 @@ export interface AppUserProfile {
   role: UserRole;
   photoURL?: string | null;
   accountNo?: string;
+  isApproved?: boolean;
+  status?: 'active' | 'pending_approval' | 'suspended';
+  planId?: string;
+  planName?: string;
+  mobile?: string;
+  address?: {
+    street: string;
+    barangay: string;
+    landmark?: string;
+  };
   createdAt: string;
   lastLoginAt: string;
 }
@@ -32,23 +42,45 @@ const googleProvider = new GoogleAuthProvider();
  */
 export const signInWithEmail = async (email: string, password: string): Promise<AppUserProfile> => {
   const cred = await signInWithEmailAndPassword(auth, email, password);
-  return await fetchOrCreateUserProfile(cred.user);
+  const profile = await fetchOrCreateUserProfile(cred.user);
+
+  // Check if subscriber application is still pending admin approval
+  if (profile.role === 'subscriber' && (profile.status === 'pending_approval' || profile.isApproved === false)) {
+    await signOut(auth);
+    throw new Error('Your subscriber registration is currently under review by our Admin team. You will receive an SMS when your connection is approved.');
+  }
+
+  return profile;
 };
 
 /**
- * Sign Up / Register with Email, Password, Full Name and Role
+ * Sign Up / Register with Email, Password, Full Name, Role and Internet Plan
  */
 export const signUpWithEmail = async (
   email: string,
   password: string,
   fullName: string,
   role: UserRole = 'admin',
-  accountNo?: string
-): Promise<AppUserProfile> => {
+  options?: {
+    accountNo?: string;
+    planId?: string;
+    planName?: string;
+    monthlyFee?: number;
+    mobile?: string;
+    address?: {
+      street: string;
+      barangay: string;
+      landmark?: string;
+    };
+  }
+): Promise<{ profile: AppUserProfile; isPendingApproval: boolean }> => {
   const cred = await createUserWithEmailAndPassword(auth, email, password);
   
   // Update display name in Firebase Auth
   await updateProfile(cred.user, { displayName: fullName });
+
+  const isSubscriber = role === 'subscriber';
+  const isApproved = !isSubscriber;
 
   // Store user role and metadata in Firestore
   const profile: AppUserProfile = {
@@ -57,7 +89,13 @@ export const signUpWithEmail = async (
     displayName: fullName,
     role,
     photoURL: cred.user.photoURL,
-    accountNo,
+    accountNo: options?.accountNo,
+    isApproved,
+    status: isApproved ? 'active' : 'pending_approval',
+    planId: options?.planId,
+    planName: options?.planName,
+    mobile: options?.mobile,
+    address: options?.address,
     createdAt: new Date().toISOString(),
     lastLoginAt: new Date().toISOString(),
   };
@@ -65,11 +103,58 @@ export const signUpWithEmail = async (
   try {
     const userDocRef = doc(db, 'system_users', cred.user.uid);
     await setDoc(userDocRef, profile, { merge: true });
+
+    // If subscriber, also create customer record in customers collection with status 'pending_approval'
+    if (isSubscriber) {
+      const generatedAccountNo = options?.accountNo || `SWIFT-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`;
+      const customerDocRef = doc(db, 'customers', cred.user.uid);
+      await setDoc(customerDocRef, {
+        id: cred.user.uid,
+        accountNo: generatedAccountNo,
+        fullName,
+        email,
+        mobile: options?.mobile || '',
+        address: {
+          street: options?.address?.street || '',
+          barangay: options?.address?.barangay || 'Binauahan',
+          city: 'Lagonoy',
+          province: 'Camarines Sur',
+          landmark: options?.address?.landmark || '',
+        },
+        planId: options?.planId || 'plan-fib-35',
+        planName: options?.planName || 'Fiber Power 35 Mbps',
+        monthlyFee: options?.monthlyFee || 1299,
+        billingDay: 15,
+        status: 'pending_approval',
+        installationDate: '',
+        balance: 0,
+        walletBalance: 0,
+        advanceDeposit: 0,
+        network: {
+          pppoeUsername: email.split('@')[0],
+          ipAddress: '192.168.10.1',
+          napBoxId: '',
+          napPortNumber: 0,
+          isMikrotikSynced: false,
+        },
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }, { merge: true });
+    }
   } catch (error) {
     console.warn('Firestore user profile write warning:', error);
   }
 
-  return profile;
+  // If subscriber, immediately sign out so they do not auto-login
+  if (isSubscriber) {
+    try {
+      await signOut(auth);
+    } catch {
+      // ignore
+    }
+  }
+
+  return { profile, isPendingApproval: isSubscriber };
 };
 
 /**
@@ -77,7 +162,14 @@ export const signUpWithEmail = async (
  */
 export const signInWithGoogle = async (): Promise<AppUserProfile> => {
   const cred = await signInWithPopup(auth, googleProvider);
-  return await fetchOrCreateUserProfile(cred.user);
+  const profile = await fetchOrCreateUserProfile(cred.user);
+
+  if (profile.role === 'subscriber' && (profile.status === 'pending_approval' || profile.isApproved === false)) {
+    await signOut(auth);
+    throw new Error('Your subscriber registration is currently under review by our Admin team. Please wait for approval.');
+  }
+
+  return profile;
 };
 
 /**
@@ -104,18 +196,18 @@ export const fetchOrCreateUserProfile = async (user: User): Promise<AppUserProfi
 
     if (snap.exists()) {
       const data = snap.data() as AppUserProfile;
-      // Update last login
       await setDoc(userDocRef, { lastLoginAt: new Date().toISOString() }, { merge: true });
       return data;
     }
 
-    // Default admin if first user or email matches admin pattern
     const isOwner = user.email?.includes('admin') || user.email?.includes('swiftstream') || false;
     const defaultProfile: AppUserProfile = {
       uid: user.uid,
       email: user.email,
       displayName: user.displayName || user.email?.split('@')[0] || 'SwiftStream Staff',
       role: isOwner ? 'admin' : 'cashier',
+      isApproved: true,
+      status: 'active',
       photoURL: user.photoURL,
       createdAt: new Date().toISOString(),
       lastLoginAt: new Date().toISOString(),
@@ -130,6 +222,8 @@ export const fetchOrCreateUserProfile = async (user: User): Promise<AppUserProfi
       email: user.email,
       displayName: user.displayName || user.email?.split('@')[0] || 'Staff User',
       role: 'admin',
+      isApproved: true,
+      status: 'active',
       photoURL: user.photoURL,
       createdAt: new Date().toISOString(),
       lastLoginAt: new Date().toISOString(),
@@ -146,10 +240,13 @@ export const subscribeToAuth = (
   return onAuthStateChanged(auth, async (user) => {
     if (user) {
       const profile = await fetchOrCreateUserProfile(user);
-      onUserChanged(profile);
+      if (profile.role === 'subscriber' && (profile.status === 'pending_approval' || profile.isApproved === false)) {
+        onUserChanged(null);
+      } else {
+        onUserChanged(profile);
+      }
     } else {
       onUserChanged(null);
     }
   });
 };
-

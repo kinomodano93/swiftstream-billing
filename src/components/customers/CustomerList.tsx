@@ -156,6 +156,7 @@ export const CustomerList: React.FC<CustomerListProps> = ({
         <div className="flex flex-wrap items-center gap-1.5 border-b border-slate-800/80 pb-3">
           {[
             { id: 'all', label: 'All Subscribers', count: customers.length },
+            { id: 'pending_approval', label: 'Pending Review', count: customers.filter((c) => c.status === 'pending_approval').length },
             { id: 'active', label: 'Active', count: customers.filter((c) => c.status === 'active').length },
             { id: 'overdue', label: 'Overdue', count: customers.filter((c) => c.status === 'overdue').length },
             { id: 'suspended', label: 'Suspended (Cut)', count: customers.filter((c) => c.status === 'suspended').length },
@@ -334,11 +335,11 @@ export const CustomerList: React.FC<CustomerListProps> = ({
                       {/* Actions */}
                       <td className="py-3 px-4 text-right">
                         <div className="flex items-center justify-end gap-1">
-                          {customer.status === 'pending_install' && (
+                          {(customer.status === 'pending_install' || customer.status === 'pending_approval') && (
                             <button
                               onClick={() => setSelectedCustomerForProvision(customer)}
-                              className="p-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg shadow-md transition-all animate-pulse"
-                              title="Provision & Activate Fiber Line"
+                              className="p-1.5 bg-gradient-to-r from-cyan-600 to-emerald-600 hover:from-cyan-500 hover:to-emerald-500 text-white rounded-lg shadow-md transition-all animate-pulse"
+                              title="Review, Provision & Convert to Active Subscriber"
                             >
                               <Zap className="w-3.5 h-3.5" />
                             </button>
