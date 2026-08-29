@@ -43,6 +43,7 @@ import {
   saveFirestoreDoc,
   deleteFirestoreDoc,
 } from '../services/firestoreService';
+import { AppUserProfile, subscribeToAuth, signOutUser } from '../services/authService';
 
 export interface ToastNotification {
   id: string;
@@ -52,6 +53,14 @@ export interface ToastNotification {
 }
 
 interface AppContextType {
+  // Auth state & actions
+  currentAuthUser: AppUserProfile | null;
+  setCurrentAuthUser: (user: AppUserProfile | null) => void;
+  isAuthModalOpen: boolean;
+  authModalMode: 'signin' | 'signup' | 'forgot';
+  openAuthModal: (mode?: 'signin' | 'signup' | 'forgot') => void;
+  closeAuthModal: () => void;
+
   // State
   businessProfile: BusinessProfile;
   customers: Customer[];
@@ -223,10 +232,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [notifications, setNotifications] = useState<ToastNotification[]>([]);
 
-  const logout = () => {
+  // Firebase Authentication State
+  const [currentAuthUser, setCurrentAuthUser] = useState<AppUserProfile | null>(null);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
+  const [authModalMode, setAuthModalMode] = useState<'signin' | 'signup' | 'forgot'>('signin');
+
+  const openAuthModal = (mode: 'signin' | 'signup' | 'forgot' = 'signin') => {
+    setAuthModalMode(mode);
+    setIsAuthModalOpen(true);
+  };
+
+  const closeAuthModal = () => {
+    setIsAuthModalOpen(false);
+  };
+
+  // Subscribe to Firebase Auth changes
+  useEffect(() => {
+    const unsubAuth = subscribeToAuth((profile) => {
+      setCurrentAuthUser(profile);
+    });
+    return () => unsubAuth();
+  }, []);
+
+  const logout = async () => {
+    try {
+      await signOutUser();
+    } catch (err) {
+      console.warn('Sign out error:', err);
+    }
+    setCurrentAuthUser(null);
     setActiveTab('home');
     setSearchTerm('');
-    showToast('info', 'Signed Out', 'You have been signed out. Returning to the Home Page.');
+    showToast('info', 'Signed Out', 'You have been signed out of SwiftStream.');
   };
 
   // Sync state changes to storage
@@ -1725,6 +1762,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   return (
     <AppContext.Provider
       value={{
+        currentAuthUser,
+        setCurrentAuthUser,
+        isAuthModalOpen,
+        authModalMode,
+        openAuthModal,
+        closeAuthModal,
         businessProfile,
         customers,
         invoices,

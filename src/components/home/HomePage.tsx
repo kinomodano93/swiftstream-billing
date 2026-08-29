@@ -42,7 +42,7 @@ export const HomePage: React.FC<HomePageProps> = ({
   onOpenClientPortal,
   onOpenAdminDashboard,
 }) => {
-  const { plans, napBoxes, businessProfile, addCustomer, customers } = useApp();
+  const { plans, napBoxes, businessProfile, addCustomer, customers, currentAuthUser, openAuthModal, logout } = useApp();
 
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
 
@@ -236,36 +236,59 @@ export const HomePage: React.FC<HomePageProps> = ({
 
         {/* Right CTA Actions */}
         <div className="flex items-center gap-2 sm:gap-3">
-          <button
-            type="button"
-            onClick={() => {
-              setSignInTab('subscriber');
-              setShowSignInModal(true);
-            }}
-            className="flex items-center gap-1.5 px-3 sm:px-4 py-2 bg-slate-900 hover:bg-slate-800 text-slate-200 hover:text-cyan-300 border border-slate-700 rounded-xl text-xs font-bold transition-all"
-          >
-            <Users className="w-3.5 h-3.5 text-cyan-400" />
-            <span>Sign In / Pay Bill</span>
-          </button>
+          {currentAuthUser ? (
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-xl">
+                <div className="w-6 h-6 rounded-lg bg-gradient-to-tr from-cyan-600 to-blue-600 text-white flex items-center justify-center font-bold text-[10px] uppercase">
+                  {currentAuthUser.displayName?.slice(0, 2) || 'US'}
+                </div>
+                <span className="text-xs font-bold text-slate-200 hidden sm:inline">
+                  {currentAuthUser.displayName?.split(' ')[0] || currentAuthUser.email}
+                </span>
+                <span className="text-[9px] font-mono text-cyan-400 font-bold uppercase">
+                  {currentAuthUser.role}
+                </span>
+              </div>
 
-          <button
-            type="button"
-            onClick={() => handleOpenSignUp()}
-            className="hidden sm:flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-cyan-600/25 transition-all hover:scale-105 active:scale-95"
-          >
-            <Zap className="w-3.5 h-3.5" />
-            <span>Apply for Fiber</span>
-          </button>
+              <button
+                type="button"
+                onClick={onOpenAdminDashboard}
+                className="flex items-center gap-1.5 px-3 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-cyan-600/20"
+              >
+                <span>Console</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
 
-          <button
-            type="button"
-            onClick={onOpenAdminDashboard}
-            className="flex items-center gap-1.5 px-3 py-2 bg-purple-950/60 hover:bg-purple-900 text-purple-300 border border-purple-800/50 rounded-xl text-xs font-bold transition-all hover:scale-105"
-            title="Open Admin ERP Operations Console"
-          >
-            <Lock className="w-3.5 h-3.5 text-purple-400" />
-            <span className="hidden md:inline">Admin Console</span>
-          </button>
+              <button
+                type="button"
+                onClick={logout}
+                className="p-2 text-rose-400 hover:text-rose-200 hover:bg-rose-950/40 rounded-xl transition-all"
+                title="Sign Out"
+              >
+                <Lock className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => openAuthModal('signin')}
+                className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-slate-200 hover:text-cyan-300 border border-slate-700 rounded-xl text-xs font-bold transition-all"
+              >
+                <Lock className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Sign In</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => openAuthModal('signup')}
+                className="flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-cyan-600/25 transition-all hover:scale-105 active:scale-95"
+              >
+                <Zap className="w-3.5 h-3.5" />
+                <span>Sign Up</span>
+              </button>
+            </div>
+          )}
         </div>
       </header>
 

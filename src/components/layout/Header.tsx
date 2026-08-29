@@ -12,6 +12,10 @@ import {
   Globe,
   LogOut,
   Server,
+  LogIn,
+  UserPlus,
+  Shield,
+  User,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 
@@ -26,7 +30,18 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenCustomerModal,
   onOpenBatchBillingModal,
 }) => {
-  const { searchTerm, setSearchTerm, businessProfile, exportData, resetToDefault, setActiveTab, mikrotikDevices, logout } = useApp();
+  const {
+    searchTerm,
+    setSearchTerm,
+    businessProfile,
+    exportData,
+    resetToDefault,
+    setActiveTab,
+    mikrotikDevices,
+    logout,
+    currentAuthUser,
+    openAuthModal,
+  } = useApp();
 
   const currentDateStr = new Intl.DateTimeFormat('en-US', {
     weekday: 'short',
@@ -85,16 +100,7 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       {/* Action Buttons */}
-      <div className="flex items-center gap-2.5">
-        <button
-          onClick={() => setActiveTab('mikrotik')}
-          className="hidden xl:flex items-center gap-1.5 px-3 py-2 bg-slate-950 hover:bg-slate-800 text-cyan-300 border border-cyan-800/40 rounded-xl text-xs font-bold shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98]"
-          title="Open MikroTik Router Fleet"
-        >
-          <Server className="w-3.5 h-3.5 text-cyan-400" />
-          <span>MikroTik Hub</span>
-        </button>
-
+      <div className="flex items-center gap-2">
         <button
           onClick={() => setActiveTab('home')}
           className="flex items-center gap-1.5 px-3 py-2 bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-500/40 rounded-xl text-xs font-bold shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98]"
@@ -110,12 +116,12 @@ export const Header: React.FC<HeaderProps> = ({
           title="Open Customer Self-Service Client Portal"
         >
           <Radio className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
-          <span>Client Portal</span>
+          <span>Portal</span>
         </button>
 
         <button
           onClick={onOpenPaymentModal}
-          className="flex items-center gap-2 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-emerald-600/20 transition-all hover:scale-[1.02] active:scale-[0.98]"
+          className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-emerald-600/20 transition-all hover:scale-[1.02] active:scale-[0.98]"
         >
           <CreditCard className="w-3.5 h-3.5" />
           <span>Collect (POS)</span>
@@ -123,53 +129,64 @@ export const Header: React.FC<HeaderProps> = ({
 
         <button
           onClick={onOpenCustomerModal}
-          className="flex items-center gap-1.5 px-3.5 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-cyan-600/20 transition-all hover:scale-[1.02] active:scale-[0.98]"
+          className="flex items-center gap-1.5 px-3 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-cyan-600/20 transition-all hover:scale-[1.02] active:scale-[0.98]"
         >
           <Plus className="w-3.5 h-3.5" />
           <span>New Client</span>
         </button>
 
-        <button
-          onClick={onOpenBatchBillingModal}
-          className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-cyan-500/30 rounded-xl text-xs font-semibold transition-all hover:border-cyan-400"
-          title="Run automated batch billing for the current month"
-        >
-          <Zap className="w-3.5 h-3.5 text-cyan-400" />
-          <span className="hidden sm:inline">Batch Bill</span>
-        </button>
-
         <div className="h-6 w-px bg-slate-800 mx-1 hidden sm:block" />
 
-        <button
-          onClick={exportData}
-          className="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 rounded-xl transition-colors"
-          title="Export Database Backup (JSON)"
-        >
-          <Download className="w-4 h-4" />
-        </button>
+        {/* Firebase Authentication Buttons / User Profile */}
+        {currentAuthUser ? (
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-2xl">
+              <div className="w-7 h-7 rounded-xl bg-gradient-to-tr from-cyan-600 to-blue-600 text-white flex items-center justify-center font-bold text-xs uppercase shadow-sm">
+                {currentAuthUser.photoURL ? (
+                  <img src={currentAuthUser.photoURL} alt="Avatar" className="w-full h-full rounded-xl object-cover" />
+                ) : (
+                  currentAuthUser.displayName?.slice(0, 2) || currentAuthUser.email?.slice(0, 2) || 'US'
+                )}
+              </div>
+              <div className="hidden md:block text-left">
+                <span className="block text-[11px] font-bold text-slate-200 truncate max-w-[120px]">
+                  {currentAuthUser.displayName || currentAuthUser.email}
+                </span>
+                <span className="block text-[9px] font-mono font-semibold uppercase text-cyan-400">
+                  {currentAuthUser.role}
+                </span>
+              </div>
+            </div>
 
-        <button
-          onClick={() => {
-            if (window.confirm('Reset all demo data to initial SwiftStream defaults?')) {
-              resetToDefault();
-            }
-          }}
-          className="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 rounded-xl transition-colors"
-          title="Reset to Initial Data"
-        >
-          <RefreshCw className="w-4 h-4" />
-        </button>
+            <button
+              onClick={logout}
+              className="p-2 text-rose-400 hover:text-rose-200 hover:bg-rose-950/40 border border-transparent hover:border-rose-800/40 rounded-xl transition-all"
+              title="Sign Out of Firebase Session"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => openAuthModal('signin')}
+              className="flex items-center gap-1.5 px-3 py-2 bg-slate-950 hover:bg-slate-800 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold transition-all hover:scale-[1.02] active:scale-[0.98]"
+              title="Sign in with Firebase"
+            >
+              <LogIn className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Sign In</span>
+            </button>
 
-        <div className="h-6 w-px bg-slate-800 mx-1 hidden sm:block" />
-
-        <button
-          onClick={logout}
-          className="flex items-center gap-1.5 px-3 py-2 bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/40 rounded-xl text-xs font-semibold transition-all hover:scale-[1.02] active:scale-[0.98]"
-          title="Sign out of Admin Session and return to Home Page"
-        >
-          <LogOut className="w-3.5 h-3.5" />
-          <span className="hidden sm:inline">Sign Out</span>
-        </button>
+            <button
+              onClick={() => openAuthModal('signup')}
+              className="flex items-center gap-1.5 px-3 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl text-xs font-bold shadow-md shadow-cyan-600/25 transition-all hover:scale-[1.02] active:scale-[0.98]"
+              title="Register new account in Firebase"
+            >
+              <UserPlus className="w-3.5 h-3.5" />
+              <span>Sign Up</span>
+            </button>
+          </div>
+        )}
       </div>
     </header>
   );

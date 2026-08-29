@@ -25,10 +25,11 @@ import { ClientPortal } from './components/portal/ClientPortal';
 import { HomePage } from './components/home/HomePage';
 import { FieldTechHub } from './components/field/FieldTechHub';
 import { GeminiAiAssistant } from './components/ai/GeminiAiAssistant';
+import { AuthModal } from './components/auth/AuthModal';
 import { Customer, RepairOrder } from './types';
 
 const MainLayout: React.FC = () => {
-  const { activeTab, setActiveTab, customers } = useApp();
+  const { activeTab, setActiveTab, customers, isAuthModalOpen, authModalMode, closeAuthModal } = useApp();
   // Modal States
   const [showPaymentModal, setShowPaymentModal] = useState<boolean>(false);
   const [paymentCustomerId, setPaymentCustomerId] = useState<string | undefined>();
@@ -75,6 +76,11 @@ const MainLayout: React.FC = () => {
           }}
           onOpenAdminDashboard={() => setActiveTab('dashboard')}
         />
+        <AuthModal
+          isOpen={isAuthModalOpen}
+          onClose={closeAuthModal}
+          initialMode={authModalMode}
+        />
         <NotificationToast />
       </div>
     );
@@ -94,6 +100,11 @@ const MainLayout: React.FC = () => {
             setActiveTab('home');
             setPortalCustomerId(null);
           }}
+        />
+        <AuthModal
+          isOpen={isAuthModalOpen}
+          onClose={closeAuthModal}
+          initialMode={authModalMode}
         />
         <NotificationToast />
       </div>
@@ -245,6 +256,13 @@ const MainLayout: React.FC = () => {
       {activeTab !== 'home' && activeTab !== 'portal' && (
         <GeminiAiAssistant mode="admin" />
       )}
+
+      {/* Firebase Auth Modal */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={closeAuthModal}
+        initialMode={authModalMode}
+      />
 
       {/* Toast Notification Container */}
       <NotificationToast />
