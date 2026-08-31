@@ -28,41 +28,40 @@ import {
   ArrowUpCircle,
   Clock,
   Key,
+  RefreshCw,
+  ShieldAlert,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { Customer, Plan, PppoeActiveSession, PppoeProfile, PppoeIpPool } from '../../types';
+import { Customer, Plan, PppoeActiveSession, PppoeProfile, PppoeIpPool, MikrotikDevice } from '../../types';
 import { generateId, formatCurrency } from '../../utils/formatters';
+import { kickActivePppoeSession, syncPppoeSecretToRouter } from '../../services/mikrotikApiService';
 
 interface PppoeManagerProps {
   onSelectCustomer?: (customerId: string) => void;
+  selectedDeviceId?: string;
 }
 
-export const PppoeManager: React.FC<PppoeManagerProps> = ({ onSelectCustomer }) => {
-  const { customers, plans, updateCustomer, showToast, logAuditEvent, syncCustomerMikrotik } = useApp();
+export const PppoeManager: React.FC<PppoeManagerProps> = ({ onSelectCustomer, selectedDeviceId }) => {
+  const { customers, plans, mikrotikDevices, updateCustomer, showToast, logAuditEvent, syncCustomerMikrotik, syncAllSubscribersToMikrotik } = useApp();
+
+  const [targetDeviceId, setTargetDeviceId] = useState<string>(
+    selectedDeviceId || mikrotikDevices[0]?.id || 'mtk-core-01'
+  );
+  const activeDevice = mikrotikDevices.find((d) => d.id === targetDeviceId) || mikrotikDevices[0];
 
   const [activeTab, setActiveTab] = useState<'sessions' | 'secrets' | 'profiles' | 'ippool' | 'isolation'>('sessions');
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [selectedPlanFilter, setSelectedPlanFilter] = useState<string>('all');
   const [copiedScript, setCopiedScript] = useState<boolean>(false);
+  const [isSyncingAll, setIsSyncingAll] = useState<boolean>(false);
+  const [syncingSecretId, setSyncingSecretId] = useState<string | null>(null);
+  const [kickingSessionId, setKickingSessionId] = useState<string | null>(null);
 
-  // Kicked sessions state to simulate termination
+  // Kicked sessions state
   const [kickedSessionIds, setKickedSessionIds] = useState<Set<string>>(new Set());
 
-  // Add/Edit Secret Modal State
-  const [showSecretModal, setShowSecretModal] = useState<boolean>(false);
-  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
-  const [secretForm, setSecretForm] = useState({
-    username: '',
-    password: '',
-    planId: plans[0]?.id || '',
-    ipAddress: '',
-    macAddress: '',
-    vlanId: '100',
-  });
-
-  // Add/Edit Profile Modal State
-  const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
-  const [customProfiles, setCustomProfiles] = useState<PppoeProfile[]>([
+  // Custom Profiles
+  const [customProfiles] = useState<PppoeProfile[]>([
     {
       id: 'prof-25m',
       name: 'Plan-25M',
@@ -145,7 +144,7 @@ export const PppoeManager: React.FC<PppoeManagerProps> = ({ onSelectCustomer }) 
 
   // IP Pool Statistics
   const ipPoolData: PppoeIpPool = useMemo(() => {
-    const totalIps = 241; // 192.168.10.10 - 192.168.10.250
+    const totalIps = 241;
     const usedIps = customers.length;
     return {
       id: 'pool-01',
@@ -158,9 +157,31 @@ export const PppoeManager: React.FC<PppoeManagerProps> = ({ onSelectCustomer }) 
     };
   }, [customers]);
 
+  // Overdue / Isolated customers
+  const overdueCustomers = useMemo(() => {
+    return customers.filter((c) => c.status === 'overdue' || c.status === 'suspended');
+  }, [customers]);
+
   // Kick / Terminate Active Session
-  const handleKickSession = (session: PppoeActiveSession) => {
+  const handleKickSession = async (session: PppoeActiveSession) => {
+    setKickingSessionId(session.id);
     setKickedSessionIds((prev) => new Set([...prev, session.customerId || '']));
+
+    if (activeDevice) {
+      await kickActivePppoeSession(
+        {
+          id: activeDevice.id,
+          name: activeDevice.name,
+          ipAddress: activeDevice.ipAddress || activeDevice.remoteAddress || '',
+          port: activeDevice.port || activeDevice.webfigPort || 80,
+          username: activeDevice.username || 'admin',
+          password: activeDevice.password || '',
+          useHttps: activeDevice.port === 443 || activeDevice.webfigPort === 443,
+        },
+        { username: session.username, sessionId: session.id }
+      );
+    }
+
     logAuditEvent({
       userName: 'Admin Leonardo Flojo',
       action: 'PPPOE_SESSION_TERMINATED',
@@ -170,15 +191,50 @@ export const PppoeManager: React.FC<PppoeManagerProps> = ({ onSelectCustomer }) 
       status: 'success',
     });
     showToast('warning', 'PPPoE Session Terminated', `Kicked tunnel for ${session.username}. Client will re-authenticate.`);
+    setKickingSessionId(null);
 
-    // Auto reconnect after 6 seconds
+    // Auto reconnect simulation
     setTimeout(() => {
       setKickedSessionIds((prev) => {
         const next = new Set(prev);
         if (session.customerId) next.delete(session.customerId);
         return next;
       });
-    }, 6000);
+    }, 8000);
+  };
+
+  // Sync Single Secret to Router
+  const handleSyncSecret = async (cust: Customer) => {
+    if (!activeDevice) return;
+    setSyncingSecretId(cust.id);
+    const plan = plans.find((p) => p.id === cust.planId);
+
+    const res = await syncPppoeSecretToRouter(
+      {
+        id: activeDevice.id,
+        name: activeDevice.name,
+        ipAddress: activeDevice.ipAddress || activeDevice.remoteAddress || '',
+        port: activeDevice.port || activeDevice.webfigPort || 80,
+        username: activeDevice.username || 'admin',
+        password: activeDevice.password || '',
+        useHttps: activeDevice.port === 443 || activeDevice.webfigPort === 443,
+      },
+      {
+        name: cust.network.pppoeUsername || cust.accountNo.toLowerCase().replace(/[^a-z0-9]/g, '_'),
+        password: cust.network.pppoePassword || 'swift1234',
+        profile: `Plan-${plan?.speedMbps || 25}M`,
+        remoteAddress: cust.network.ipAddress,
+        disabled: cust.status === 'suspended' || cust.status === 'disconnected',
+        comment: `${cust.fullName} - ${cust.accountNo}`,
+      }
+    );
+
+    setSyncingSecretId(null);
+    if (res.success) {
+      showToast('success', 'Secret Synchronized', `PPPoE secret for ${cust.fullName} pushed to ${activeDevice.name}`);
+    } else {
+      showToast('error', 'Sync Failed', res.message);
+    }
   };
 
   // Toggle Enable / Disable PPPoE Secret
@@ -196,11 +252,18 @@ export const PppoeManager: React.FC<PppoeManagerProps> = ({ onSelectCustomer }) 
     });
   };
 
+  // Batch Sync All
+  const handleBatchSync = async () => {
+    setIsSyncingAll(true);
+    await syncAllSubscribersToMikrotik();
+    setIsSyncingAll(false);
+  };
+
   // Generate RouterOS Script for PPPoE
   const fullPppoeScript = useMemo(() => {
     let script = `# ====================================================================\n`;
     script += `# SwiftStream Telecommunication - PPPoE Server Full Configuration\n`;
-    script += `# Node: Lagonoy BNG Core | Total Subscribers: ${customers.length}\n`;
+    script += `# Router: ${activeDevice?.name || 'Core'} | Total Subscribers: ${customers.length}\n`;
     script += `# ====================================================================\n\n`;
 
     script += `# 1. IP Pools\n/ip pool add name="${ipPoolData.name}" ranges=${ipPoolData.rangeStart}-${ipPoolData.rangeEnd}\n\n`;
@@ -211,7 +274,7 @@ export const PppoeManager: React.FC<PppoeManagerProps> = ({ onSelectCustomer }) 
     });
 
     script += `\n# 3. PPPoE Server Binding\n/interface pppoe-server server\n`;
-    script += `add service-name="SwiftStream-Fiber-Lagonoy" interface=ether3-pppoe max-mtu=1492 max-mru=1492 default-profile=Plan-25M authentication=pap,chap,mschap2 one-session-per-host=yes disabled=no\n\n`;
+    script += `add service-name="SwiftStream-Fiber-Core" interface=ether3-pppoe max-mtu=1492 max-mru=1492 default-profile=Plan-25M authentication=pap,chap,mschap2 one-session-per-host=yes disabled=no\n\n`;
 
     script += `# 4. PPPoE Secrets Credentials Vault\n/ppp secret\n`;
     customers.forEach((c) => {
@@ -224,7 +287,7 @@ export const PppoeManager: React.FC<PppoeManagerProps> = ({ onSelectCustomer }) 
     });
 
     return script;
-  }, [customers, plans, ipPoolData, customProfiles]);
+  }, [customers, plans, ipPoolData, customProfiles, activeDevice]);
 
   const handleCopyScript = () => {
     navigator.clipboard.writeText(fullPppoeScript);
@@ -235,49 +298,58 @@ export const PppoeManager: React.FC<PppoeManagerProps> = ({ onSelectCustomer }) 
 
   return (
     <div className="space-y-6">
-      {/* Top Banner KPI Header */}
-      <div className="p-6 rounded-3xl bg-slate-900 border border-slate-800 shadow-card flex flex-col md:flex-row md:items-center justify-between gap-4">
+      {/* Top Banner KPI Header & Router Target Selector */}
+      <div className="p-6 rounded-3xl bg-slate-900 border border-slate-800 shadow-card flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div className="flex items-center gap-3.5">
           <div className="p-3 rounded-2xl bg-cyan-950 text-cyan-400 border border-cyan-800/50 shadow-inner">
             <Radio className="w-6 h-6" />
           </div>
           <div>
-            <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
-              <span>PPPoE Server Concentrator & Subscriber Sessions Hub</span>
-            </h3>
+            <div className="flex items-center gap-2.5">
+              <h3 className="text-base font-bold text-slate-100">
+                PPPoE Server Concentrator & Subscriber Sessions Hub
+              </h3>
+              <span className="px-2.5 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-[10px] font-bold font-mono">
+                {activeSessions.length} TUNNELS ONLINE
+              </span>
+            </div>
             <p className="text-xs text-slate-400 mt-0.5">
-              MikroTik RouterOS PPPoE Server BNG management, active tunnel monitoring, secret vault, and bandwidth profiles.
+              Target Router: <strong className="text-slate-200">{activeDevice?.name}</strong> ({activeDevice?.ipAddress || activeDevice?.remoteAddress}:{activeDevice?.port || activeDevice?.webfigPort || 80})
             </p>
           </div>
         </div>
 
-        {/* Action Buttons */}
-        <div className="flex items-center gap-2.5 text-xs">
+        {/* Router Target Selector & Action Buttons */}
+        <div className="flex flex-wrap items-center gap-2.5 text-xs">
+          {mikrotikDevices.length > 1 && (
+            <select
+              value={targetDeviceId}
+              onChange={(e) => setTargetDeviceId(e.target.value)}
+              className="bg-slate-950 border border-slate-800 text-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-cyan-500"
+            >
+              {mikrotikDevices.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name} ({d.ipAddress || d.remoteAddress})
+                </option>
+              ))}
+            </select>
+          )}
+
+          <button
+            onClick={handleBatchSync}
+            disabled={isSyncingAll}
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl font-bold shadow-lg shadow-emerald-600/20 transition-all hover:scale-105 disabled:opacity-50"
+          >
+            <Zap className={`w-4 h-4 ${isSyncingAll ? 'animate-spin' : ''}`} />
+            <span>{isSyncingAll ? 'Syncing...' : `Sync All (${customers.length})`}</span>
+          </button>
+
           <button
             onClick={handleCopyScript}
             className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl font-semibold transition-all hover:scale-105"
           >
             {copiedScript ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4 text-cyan-400" />}
-            <span>{copiedScript ? 'Copied to Clipboard!' : 'Export RouterOS Script'}</span>
-          </button>
-
-          <button
-            onClick={() => {
-              setEditingCustomer(null);
-              setSecretForm({
-                username: `swift_sub_${customers.length + 1}`,
-                password: 'swift' + Math.floor(1000 + Math.random() * 9000),
-                planId: plans[0]?.id || '',
-                ipAddress: `192.168.10.${customers.length + 20}`,
-                macAddress: 'BC:24:11:' + Math.floor(10 + Math.random() * 89) + ':AF:01',
-                vlanId: '100',
-              });
-              setShowSecretModal(true);
-            }}
-            className="flex items-center gap-1.5 px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl font-semibold shadow-lg shadow-cyan-600/20 transition-all hover:scale-105"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Add PPPoE Secret</span>
+            <span>{copiedScript ? 'Copied!' : 'Export Script'}</span>
           </button>
         </div>
       </div>
@@ -286,7 +358,7 @@ export const PppoeManager: React.FC<PppoeManagerProps> = ({ onSelectCustomer }) 
       <div className="flex flex-wrap items-center gap-2 border-b border-slate-800 pb-3 text-xs">
         <button
           onClick={() => setActiveTab('sessions')}
-          className={`flex items-center gap-2 px-3.5 py-2 rounded-xl font-bold transition-all ${
+          className={`flex items-center gap-2 px-3.5 py-2 rounded-xl font-bold transition-all cursor-pointer ${
             activeTab === 'sessions'
               ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/50 shadow-glow-cyan'
               : 'bg-slate-900/60 text-slate-400 border border-slate-800 hover:text-slate-200'
@@ -298,7 +370,7 @@ export const PppoeManager: React.FC<PppoeManagerProps> = ({ onSelectCustomer }) 
 
         <button
           onClick={() => setActiveTab('secrets')}
-          className={`flex items-center gap-2 px-3.5 py-2 rounded-xl font-bold transition-all ${
+          className={`flex items-center gap-2 px-3.5 py-2 rounded-xl font-bold transition-all cursor-pointer ${
             activeTab === 'secrets'
               ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/50 shadow-glow-cyan'
               : 'bg-slate-900/60 text-slate-400 border border-slate-800 hover:text-slate-200'
@@ -310,7 +382,7 @@ export const PppoeManager: React.FC<PppoeManagerProps> = ({ onSelectCustomer }) 
 
         <button
           onClick={() => setActiveTab('profiles')}
-          className={`flex items-center gap-2 px-3.5 py-2 rounded-xl font-bold transition-all ${
+          className={`flex items-center gap-2 px-3.5 py-2 rounded-xl font-bold transition-all cursor-pointer ${
             activeTab === 'profiles'
               ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/50 shadow-glow-cyan'
               : 'bg-slate-900/60 text-slate-400 border border-slate-800 hover:text-slate-200'
@@ -322,7 +394,7 @@ export const PppoeManager: React.FC<PppoeManagerProps> = ({ onSelectCustomer }) 
 
         <button
           onClick={() => setActiveTab('ippool')}
-          className={`flex items-center gap-2 px-3.5 py-2 rounded-xl font-bold transition-all ${
+          className={`flex items-center gap-2 px-3.5 py-2 rounded-xl font-bold transition-all cursor-pointer ${
             activeTab === 'ippool'
               ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/50 shadow-glow-cyan'
               : 'bg-slate-900/60 text-slate-400 border border-slate-800 hover:text-slate-200'
@@ -330,6 +402,18 @@ export const PppoeManager: React.FC<PppoeManagerProps> = ({ onSelectCustomer }) 
         >
           <Globe className="w-4 h-4" />
           <span>🌐 IP Pool & Subnet Manager</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('isolation')}
+          className={`flex items-center gap-2 px-3.5 py-2 rounded-xl font-bold transition-all cursor-pointer ${
+            activeTab === 'isolation'
+              ? 'bg-rose-500/20 text-rose-300 border border-rose-500/50 shadow-glow-rose'
+              : 'bg-slate-900/60 text-slate-400 border border-slate-800 hover:text-slate-200'
+          }`}
+        >
+          <ShieldAlert className="w-4 h-4 text-rose-400" />
+          <span>🛡️ Walled Garden & Isolation ({overdueCustomers.length})</span>
         </button>
       </div>
 
@@ -379,6 +463,7 @@ export const PppoeManager: React.FC<PppoeManagerProps> = ({ onSelectCustomer }) 
                   .map((session) => {
                     const rxMbps = (session.rxBps / 1000000).toFixed(1);
                     const txMbps = (session.txBps / 1000000).toFixed(1);
+                    const isKicking = kickingSessionId === session.id;
 
                     return (
                       <tr key={session.id} className="hover:bg-slate-800/40 transition-colors">
@@ -410,16 +495,17 @@ export const PppoeManager: React.FC<PppoeManagerProps> = ({ onSelectCustomer }) 
                           <div className="flex items-center justify-center gap-1.5">
                             <button
                               onClick={() => handleKickSession(session)}
-                              className="px-2.5 py-1 bg-rose-600/20 hover:bg-rose-600/40 text-rose-300 border border-rose-500/40 rounded-lg text-[10px] font-bold font-sans transition-colors"
+                              disabled={isKicking}
+                              className="px-2.5 py-1 bg-rose-600/20 hover:bg-rose-600/40 text-rose-300 border border-rose-500/40 rounded-lg text-[10px] font-bold font-sans transition-colors cursor-pointer disabled:opacity-50"
                               title="Terminate PPPoE session / Force Re-auth"
                             >
-                              Kick Tunnel
+                              {isKicking ? 'Kicking...' : 'Kick Tunnel'}
                             </button>
 
                             {onSelectCustomer && session.customerId && (
                               <button
                                 onClick={() => onSelectCustomer(session.customerId!)}
-                                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-[10px] font-bold font-sans transition-colors"
+                                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-[10px] font-bold font-sans transition-colors cursor-pointer"
                               >
                                 View
                               </button>
@@ -492,6 +578,7 @@ export const PppoeManager: React.FC<PppoeManagerProps> = ({ onSelectCustomer }) 
                   .map((cust) => {
                     const plan = plans.find((p) => p.id === cust.planId);
                     const isActive = cust.status === 'active';
+                    const isSyncingThis = syncingSecretId === cust.id;
 
                     return (
                       <tr key={cust.id} className="hover:bg-slate-800/40 transition-colors">
@@ -526,8 +613,18 @@ export const PppoeManager: React.FC<PppoeManagerProps> = ({ onSelectCustomer }) 
                         <td className="py-3 px-4 text-right font-sans">
                           <div className="flex items-center justify-end gap-1.5">
                             <button
+                              onClick={() => handleSyncSecret(cust)}
+                              disabled={isSyncingThis}
+                              className="px-2.5 py-1 bg-cyan-950 hover:bg-cyan-900 text-cyan-300 border border-cyan-800/50 rounded-lg text-[10px] font-bold transition-all cursor-pointer disabled:opacity-50"
+                              title="Sync secret to router"
+                            >
+                              <RefreshCw className={`w-3 h-3 inline mr-1 ${isSyncingThis ? 'animate-spin' : ''}`} />
+                              Sync
+                            </button>
+
+                            <button
                               onClick={() => handleToggleSecretStatus(cust)}
-                              className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all ${
+                              className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
                                 isActive
                                   ? 'bg-rose-600/20 hover:bg-rose-600/40 text-rose-300 border border-rose-500/40'
                                   : 'bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-300 border border-emerald-500/40'
@@ -540,7 +637,7 @@ export const PppoeManager: React.FC<PppoeManagerProps> = ({ onSelectCustomer }) 
                             {onSelectCustomer && (
                               <button
                                 onClick={() => onSelectCustomer(cust.id)}
-                                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-[10px] font-bold transition-colors"
+                                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-[10px] font-bold transition-colors cursor-pointer"
                               >
                                 Edit
                               </button>
@@ -650,6 +747,81 @@ export const PppoeManager: React.FC<PppoeManagerProps> = ({ onSelectCustomer }) 
               ))}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* TAB 5: WALLED GARDEN & OVERDUE ISOLATION */}
+      {activeTab === 'isolation' && (
+        <div className="p-6 rounded-3xl bg-slate-900 border border-slate-800 shadow-card space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-800">
+            <div>
+              <h4 className="text-base font-bold text-slate-100 flex items-center gap-2">
+                <ShieldAlert className="w-5 h-5 text-rose-400" />
+                <span>Walled Garden & Overdue Account Isolation Center</span>
+              </h4>
+              <p className="text-xs text-slate-400 mt-1">
+                Automated non-payment portal redirect & 256kbps throttle shaper for delinquent subscribers.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2 text-xs">
+              <span className="px-3 py-1 rounded-xl bg-rose-950 text-rose-300 border border-rose-800/50 font-bold">
+                {overdueCustomers.length} Overdue Accounts
+              </span>
+            </div>
+          </div>
+
+          {overdueCustomers.length === 0 ? (
+            <div className="p-8 text-center bg-slate-950 rounded-2xl border border-slate-800 text-slate-400">
+              <CheckCircle2 className="w-8 h-8 text-emerald-400 mx-auto mb-2" />
+              <p className="font-bold text-slate-200">All Subscriber Accounts Current!</p>
+              <p className="text-xs text-slate-500 mt-1">No overdue or isolated accounts found in this billing period.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-2xl border border-slate-800">
+              <table className="w-full text-left text-xs border-collapse font-mono">
+                <thead>
+                  <tr className="bg-slate-950 text-slate-400 border-b border-slate-800">
+                    <th className="py-3 px-4">Account / Name</th>
+                    <th className="py-3 px-3">PPPoE User</th>
+                    <th className="py-3 px-3">IP Address</th>
+                    <th className="py-3 px-3">Isolation Profile</th>
+                    <th className="py-3 px-3">Status</th>
+                    <th className="py-3 px-4 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800 bg-slate-900/60">
+                  {overdueCustomers.map((c) => (
+                    <tr key={c.id} className="hover:bg-slate-800/40">
+                      <td className="py-3 px-4 font-sans font-bold text-slate-200">
+                        {c.fullName}
+                        <span className="text-[10px] text-slate-500 font-mono block">{c.accountNo}</span>
+                      </td>
+                      <td className="py-3 px-3 text-cyan-300">{c.network.pppoeUsername}</td>
+                      <td className="py-3 px-3 text-slate-300">{c.network.ipAddress}</td>
+                      <td className="py-3 px-3 text-amber-400">ISOLATED-PROFILE (256k)</td>
+                      <td className="py-3 px-3">
+                        <span className="px-2 py-0.5 rounded bg-rose-950 text-rose-300 border border-rose-800/50 uppercase text-[10px] font-bold">
+                          {c.status}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-right font-sans">
+                        <button
+                          onClick={() => {
+                            updateCustomer(c.id, { status: 'active' });
+                            showToast('success', 'Account Restored', `Restored ${c.fullName} to active tier.`);
+                          }}
+                          className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[10px] font-bold cursor-pointer"
+                        >
+                          Restore Tier
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
     </div>

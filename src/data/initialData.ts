@@ -246,7 +246,54 @@ export const initialRepairOrders: RepairOrder[] = [];
 
 export const initialReminders: ReminderLog[] = [];
 
-export const initialMikrotikDevices: MikrotikDevice[] = [];
+export const initialMikrotikDevices: MikrotikDevice[] = [
+  {
+    id: 'mtk-ccr2116-core',
+    name: 'CCR2116-12G-4S+ Core Gateway',
+    model: 'CCR2116-12G-4S+',
+    role: 'core_pppoe',
+    connectionType: 'sstp_vpn',
+    ipAddress: 'remote.oxapsph.com',
+    remoteAddress: 'remote.oxapsph.com',
+    port: 10988,
+    webfigPort: 10988,
+    apiPort: 10878,
+    winboxPort: 10995,
+    serviceType: 'sstp',
+    username: 'admin',
+    password: '',
+    useSsl: false,
+    status: 'online',
+    rosVersion: 'RouterOS v7.14.3',
+    cpuLoad: 24,
+    memoryUsage: { usedMb: 1220, totalMb: 16384 },
+    uptime: '2w5d2h50m29s',
+    activePppoeCount: 18,
+    totalQueues: 18,
+    temperatureC: 44,
+    location: 'Main POP Operations Rack, Lagonoy',
+    notes: 'Primary High-Capacity CCR PPPoE Concentrator and 10G Core Gateway',
+    interfaces: [
+      { id: '1', name: 'sfp-sfpplus1', type: 'sfp+', status: 'running', linkSpeed: '10 Gbps', macAddress: 'D4:01:C3:88:1A:01', mtu: 1500, rxBps: 672530000, txBps: 56870000, rxPps: 58000, txPps: 12000, rxTotalBytes: 1048576000, txTotalBytes: 524288000, rxErrors: 0, txErrors: 0, rxDrops: 0, txDrops: 0 },
+      { id: '2', name: 'sfp-sfpplus2', type: 'sfp+', status: 'running', linkSpeed: '10 Gbps', macAddress: 'D4:01:C3:88:1A:02', mtu: 1500, rxBps: 120400000, txBps: 35200000, rxPps: 14000, txPps: 4500, rxTotalBytes: 524288000, txTotalBytes: 104857600, rxErrors: 0, txErrors: 0, rxDrops: 0, txDrops: 0 },
+      { id: '3', name: 'sfp-sfpplus3', type: 'sfp+', status: 'link_down', linkSpeed: '10 Gbps', macAddress: 'D4:01:C3:88:1A:03', mtu: 1500, rxBps: 0, txBps: 0, rxPps: 0, txPps: 0, rxTotalBytes: 0, txTotalBytes: 0, rxErrors: 0, txErrors: 0, rxDrops: 0, txDrops: 0 },
+      { id: '4', name: 'sfp-sfpplus4', type: 'sfp+', status: 'link_down', linkSpeed: '10 Gbps', macAddress: 'D4:01:C3:88:1A:04', mtu: 1500, rxBps: 0, txBps: 0, rxPps: 0, txPps: 0, rxTotalBytes: 0, txTotalBytes: 0, rxErrors: 0, txErrors: 0, rxDrops: 0, txDrops: 0 },
+      { id: '5', name: 'ether1', type: 'ethernet', status: 'running', linkSpeed: '1 Gbps', macAddress: 'D4:01:C3:88:1A:05', mtu: 1500, rxBps: 45800000, txBps: 12100000, rxPps: 5200, txPps: 1800, rxTotalBytes: 256000000, txTotalBytes: 50000000, rxErrors: 0, txErrors: 0, rxDrops: 0, txDrops: 0 },
+      { id: '6', name: 'ether2', type: 'ethernet', status: 'running', linkSpeed: '1 Gbps', macAddress: 'D4:01:C3:88:1A:06', mtu: 1500, rxBps: 12800000, txBps: 3400000, rxPps: 1200, txPps: 400, rxTotalBytes: 64000000, txTotalBytes: 16000000, rxErrors: 0, txErrors: 0, rxDrops: 0, txDrops: 0 },
+      { id: '7', name: 'ether3', type: 'ethernet', status: 'link_down', linkSpeed: '1 Gbps', macAddress: 'D4:01:C3:88:1A:07', mtu: 1500, rxBps: 0, txBps: 0, rxPps: 0, txPps: 0, rxTotalBytes: 0, txTotalBytes: 0, rxErrors: 0, txErrors: 0, rxDrops: 0, txDrops: 0 },
+      { id: '8', name: 'ether4', type: 'ethernet', status: 'link_down', linkSpeed: '1 Gbps', macAddress: 'D4:01:C3:88:1A:08', mtu: 1500, rxBps: 0, txBps: 0, rxPps: 0, txPps: 0, rxTotalBytes: 0, txTotalBytes: 0, rxErrors: 0, txErrors: 0, rxDrops: 0, txDrops: 0 },
+      { id: '9', name: 'ether5', type: 'ethernet', status: 'link_down', linkSpeed: '1 Gbps', macAddress: 'D4:01:C3:88:1A:09', mtu: 1500, rxBps: 0, txBps: 0, rxPps: 0, txPps: 0, rxTotalBytes: 0, txTotalBytes: 0, rxErrors: 0, txErrors: 0, rxDrops: 0, txDrops: 0 },
+      { id: '10', name: 'ether6', type: 'ethernet', status: 'link_down', linkSpeed: '1 Gbps', macAddress: 'D4:01:C3:88:1A:10', mtu: 1500, rxBps: 0, txBps: 0, rxPps: 0, txPps: 0, rxTotalBytes: 0, txTotalBytes: 0, rxErrors: 0, txErrors: 0, rxDrops: 0, txDrops: 0 },
+      { id: '11', name: 'ether7', type: 'ethernet', status: 'link_down', linkSpeed: '1 Gbps', macAddress: 'D4:01:C3:88:1A:11', mtu: 1500, rxBps: 0, txBps: 0, rxPps: 0, txPps: 0, rxTotalBytes: 0, txTotalBytes: 0, rxErrors: 0, txErrors: 0, rxDrops: 0, txDrops: 0 },
+      { id: '12', name: 'ether8', type: 'ethernet', status: 'link_down', linkSpeed: '1 Gbps', macAddress: 'D4:01:C3:88:1A:12', mtu: 1500, rxBps: 0, txBps: 0, rxPps: 0, txPps: 0, rxTotalBytes: 0, txTotalBytes: 0, rxErrors: 0, txErrors: 0, rxDrops: 0, txDrops: 0 },
+      { id: '13', name: 'ether9', type: 'ethernet', status: 'link_down', linkSpeed: '1 Gbps', macAddress: 'D4:01:C3:88:1A:13', mtu: 1500, rxBps: 0, txBps: 0, rxPps: 0, txPps: 0, rxTotalBytes: 0, txTotalBytes: 0, rxErrors: 0, txErrors: 0, rxDrops: 0, txDrops: 0 },
+      { id: '14', name: 'ether10', type: 'ethernet', status: 'link_down', linkSpeed: '1 Gbps', macAddress: 'D4:01:C3:88:1A:14', mtu: 1500, rxBps: 0, txBps: 0, rxPps: 0, txPps: 0, rxTotalBytes: 0, txTotalBytes: 0, rxErrors: 0, txErrors: 0, rxDrops: 0, txDrops: 0 },
+      { id: '15', name: 'ether11', type: 'ethernet', status: 'link_down', linkSpeed: '1 Gbps', macAddress: 'D4:01:C3:88:1A:15', mtu: 1500, rxBps: 0, txBps: 0, rxPps: 0, txPps: 0, rxTotalBytes: 0, txTotalBytes: 0, rxErrors: 0, txErrors: 0, rxDrops: 0, txDrops: 0 },
+      { id: '16', name: 'ether12', type: 'ethernet', status: 'link_down', linkSpeed: '1 Gbps', macAddress: 'D4:01:C3:88:1A:16', mtu: 1500, rxBps: 0, txBps: 0, rxPps: 0, txPps: 0, rxTotalBytes: 0, txTotalBytes: 0, rxErrors: 0, txErrors: 0, rxDrops: 0, txDrops: 0 },
+      { id: '17', name: 'bridge-local', type: 'bridge', status: 'running', linkSpeed: '10 Gbps', macAddress: 'D4:01:C3:88:1A:17', mtu: 1500, rxBps: 672530000, txBps: 56870000, rxPps: 58000, txPps: 12000, rxTotalBytes: 1048576000, txTotalBytes: 524288000, rxErrors: 0, txErrors: 0, rxDrops: 0, txDrops: 0 },
+    ],
+  },
+];
 
 export const initialExpenses: Expense[] = [];
 

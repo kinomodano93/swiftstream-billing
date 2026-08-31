@@ -50,6 +50,34 @@
         }
       },
       {
+        "source": "/api/mikrotikTelemetry",
+        "function": {
+          "functionId": "mikrotikTelemetry",
+          "region": "asia-southeast1"
+        }
+      },
+      {
+        "source": "/api/mikrotikStream",
+        "function": {
+          "functionId": "mikrotikStream",
+          "region": "asia-southeast1"
+        }
+      },
+      {
+        "source": "/api/mikrotikKickSession",
+        "function": {
+          "functionId": "mikrotikKickSession",
+          "region": "asia-southeast1"
+        }
+      },
+      {
+        "source": "/api/mikrotikPppoeSync",
+        "function": {
+          "functionId": "mikrotikPppoeSync",
+          "region": "asia-southeast1"
+        }
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }

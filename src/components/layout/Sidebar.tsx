@@ -22,6 +22,10 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   ChevronLeft,
+  FileCheck2,
+  ShieldCheck,
+  Router,
+  Cable,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 
@@ -72,6 +76,13 @@ export const Sidebar: React.FC = () => {
       badge: null,
     },
     {
+      id: 'applications',
+      label: 'Online Applications',
+      icon: FileCheck2,
+      badge: 'New',
+      badgeColor: 'bg-cyan-500/20 text-cyan-300 font-bold font-mono',
+    },
+    {
       id: 'customers',
       label: 'Subscribers CRM',
       icon: Users,
@@ -91,6 +102,26 @@ export const Sidebar: React.FC = () => {
       icon: Server,
       badge: 'Online',
       badgeColor: 'bg-emerald-500/20 text-emerald-300 font-bold font-mono',
+    },
+    {
+      id: 'radius',
+      label: 'RADIUS / AAA',
+      icon: ShieldCheck,
+      badge: 'FreeRADIUS',
+      badgeColor: 'bg-amber-500/20 text-amber-300 font-bold font-mono',
+    },
+    {
+      id: 'genieacs',
+      label: 'GenieACS (TR-069)',
+      icon: Router,
+      badge: 'ACS',
+      badgeColor: 'bg-teal-500/20 text-teal-300 font-bold font-mono',
+    },
+    {
+      id: 'ipoe_dhcp',
+      label: 'IPoE / DHCP Leases',
+      icon: Cable,
+      badge: null,
     },
     {
       id: 'billing',

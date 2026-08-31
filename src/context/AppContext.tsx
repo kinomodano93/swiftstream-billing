@@ -38,6 +38,7 @@ import {
 import { initialPlans, initialBusinessProfile, initialCoverageAreas } from '../data/initialData';
 import { generateId } from '../utils/formatters';
 import { generateReminderMessage, sendMockNotification } from '../utils/smsSender';
+import { fetchFullRouterTelemetry } from '../services/mikrotikApiService';
 import { generateHtmlInvoiceEmail, sendSmtpEmail } from '../utils/smtpService';
 import { sendTelegramStaffAlert, sendDiscordStaffAlert } from '../utils/webhookService';
 import {
@@ -201,8 +202,10 @@ interface AppContextType {
 
   // MikroTik Device Actions
   addMikrotikDevice: (device: Omit<MikrotikDevice, 'id'>) => MikrotikDevice;
-  updateMikrotikDevice: (id: string, updates: Partial<MikrotikDevice>) => void;
+  updateMikrotikDevice: (id: string, updates: Partial<MikrotikDevice>, notify?: boolean) => void;
   deleteMikrotikDevice: (id: string) => void;
+  lastGlobalRouterPolledAt: Date | null;
+  pollAllRoutersNow: () => Promise<void>;
 
   // Repair Order Actions
   addRepairOrder: (order: Omit<RepairOrder, 'id' | 'createdAt'>) => RepairOrder;
@@ -1850,7 +1853,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return newDevice;
   };
 
-  const updateMikrotikDevice = (id: string, updates: Partial<MikrotikDevice>) => {
+  const updateMikrotikDevice = (id: string, updates: Partial<MikrotikDevice>, notify: boolean = false) => {
     setMikrotikDevices((prev) =>
       prev.map((d) => {
         if (d.id === id) {
@@ -1861,7 +1864,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return d;
       })
     );
-    showToast('info', 'Router Updated', 'MikroTik configuration saved.');
+    if (notify) {
+      showToast('info', 'Router Updated', 'MikroTik configuration saved.');
+    }
   };
 
   const deleteMikrotikDevice = (id: string) => {
@@ -1903,6 +1908,68 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       `Synchronized PPPoE secrets and Simple Queues for all ${customers.length} subscribers.`
     );
   };
+
+  // --- Fleet Router Operations (On-Demand) ---
+  const [lastGlobalRouterPolledAt, setLastGlobalRouterPolledAt] = useState<Date | null>(null);
+  const isGlobalPollingInProgressRef = React.useRef<boolean>(false);
+  const mikrotikDevicesRef = React.useRef<MikrotikDevice[]>(mikrotikDevices);
+  mikrotikDevicesRef.current = mikrotikDevices;
+
+  const pollAllRoutersNow = React.useCallback(async () => {
+    if (isGlobalPollingInProgressRef.current) return;
+    const currentList = mikrotikDevicesRef.current;
+    if (!currentList || currentList.length === 0) return;
+
+    isGlobalPollingInProgressRef.current = true;
+    try {
+      for (const dev of currentList) {
+        if (!dev.ipAddress && !dev.remoteAddress) continue;
+        try {
+          const res = await fetchFullRouterTelemetry({
+            id: dev.id,
+            name: dev.name,
+            ipAddress: dev.ipAddress || dev.remoteAddress || '',
+            port: dev.port || dev.webfigPort || 80,
+            username: dev.username || 'admin',
+            password: dev.password || '',
+          });
+
+          if (res.status === 'connected') {
+            setMikrotikDevices((prev) =>
+              prev.map((d) => {
+                if (d.id === dev.id) {
+                  return {
+                    ...d,
+                    status: 'online',
+                    cpuLoad: res.cpuLoad,
+                    uptime: res.uptime || d.uptime,
+                    rosVersion: res.version || d.rosVersion,
+                    model: res.boardName || d.model,
+                    memoryUsage: {
+                      usedMb: (res.totalMemoryMb && res.freeMemoryMb) ? (res.totalMemoryMb - res.freeMemoryMb) : d.memoryUsage.usedMb,
+                      totalMb: res.totalMemoryMb || d.memoryUsage.totalMb,
+                    },
+                    temperatureC: res.temperatureC || d.temperatureC,
+                    activePppoeCount: res.activePppoeCount || d.activePppoeCount,
+                  };
+                }
+                return d;
+              })
+            );
+          } else if (res.status === 'unreachable') {
+            setMikrotikDevices((prev) =>
+              prev.map((d) => (d.id === dev.id ? { ...d, status: 'offline' } : d))
+            );
+          }
+        } catch (_) {
+          // Silent catch
+        }
+      }
+      setLastGlobalRouterPolledAt(new Date());
+    } finally {
+      isGlobalPollingInProgressRef.current = false;
+    }
+  }, []);
 
   // --- Expense Operations ---
   const addExpense = (expenseData: Omit<Expense, 'id'>): Expense => {
@@ -2121,6 +2188,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addMikrotikDevice,
         updateMikrotikDevice,
         deleteMikrotikDevice,
+        lastGlobalRouterPolledAt,
+        pollAllRoutersNow,
         addRepairOrder,
         updateRepairOrder,
         deleteRepairOrder,

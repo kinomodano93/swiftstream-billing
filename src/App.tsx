@@ -27,6 +27,10 @@ import { HomePage } from './components/home/HomePage';
 import { FieldTechHub } from './components/field/FieldTechHub';
 import { GeminiAiAssistant } from './components/ai/GeminiAiAssistant';
 import { AuthModal } from './components/auth/AuthModal';
+import { ClientApplicationManager } from './components/portal/ClientApplicationManager';
+import { RadiusAaaManager } from './components/network/RadiusAaaManager';
+import { GenieAcsManager } from './components/network/GenieAcsManager';
+import { IpoeDhcpManager } from './components/network/IpoeDhcpManager';
 import { Customer, RepairOrder } from './types';
 
 const MainLayout: React.FC = () => {
@@ -137,6 +141,8 @@ const MainLayout: React.FC = () => {
             />
           )}
 
+          {activeTab === 'applications' && <ClientApplicationManager />}
+
           {activeTab === 'field_ops' && <FieldTechHub />}
 
           {activeTab === 'customers' && (
@@ -148,6 +154,12 @@ const MainLayout: React.FC = () => {
           )}
 
           {activeTab === 'mikrotik' && <MikrotikDeviceManager />}
+
+          {activeTab === 'radius' && <RadiusAaaManager />}
+
+          {activeTab === 'genieacs' && <GenieAcsManager />}
+
+          {activeTab === 'ipoe_dhcp' && <IpoeDhcpManager />}
 
           {activeTab === 'billing' && (
             <InvoiceList

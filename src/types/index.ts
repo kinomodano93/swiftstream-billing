@@ -452,6 +452,31 @@ export interface TrafficHistoryPoint {
   timestamp: string;
   rxMbps: number;
   txMbps: number;
+  wan2RxMbps?: number;
+  wan2TxMbps?: number;
+  bridgeRxMbps?: number;
+  bridgeTxMbps?: number;
+}
+
+export interface SimpleQueueTelemetryItem {
+  id: string;
+  name: string;
+  target: string;
+  maxLimit: string;
+  maxLimitRxMbps: number;
+  maxLimitTxMbps: number;
+  rate: string;
+  rateRxMbps: number;
+  rateTxMbps: number;
+  packetRate: string;
+  bytes: string;
+  packets: string;
+  dropped: string;
+  droppedCount: number;
+  usagePercent: number;
+  dynamic: boolean;
+  disabled: boolean;
+  comment?: string;
 }
 
 export interface MikrotikDevice {
@@ -768,3 +793,149 @@ export interface CoverageArea {
   notes?: string;
   updatedAt?: string;
 }
+
+// -------------------------------------------------------------
+// 9. Client Online Applications
+// -------------------------------------------------------------
+export type OnlineApplicationStatus =
+  | 'pending'
+  | 'survey_scheduled'
+  | 'approved'
+  | 'rejected'
+  | 'installed';
+
+export interface OnlineApplication {
+  id: string;
+  applicationNumber: string;
+  applicantName: string;
+  email: string;
+  phone: string;
+  address: string;
+  barangay: string;
+  city: string;
+  province: string;
+  landmark?: string;
+  coordinates?: {
+    lat: number;
+    lng: number;
+  };
+  preferredPlanId: string;
+  preferredPlanName: string;
+  preferredSpeedMbps: number;
+  monthlyFee: number;
+  validIdUrl?: string;
+  proofOfBillingUrl?: string;
+  status: OnlineApplicationStatus;
+  notes?: string;
+  surveyDate?: string;
+  technicianNotes?: string;
+  assignedTechnician?: string;
+  rejectionReason?: string;
+  createdAt: string;
+  updatedAt?: string;
+  approvedAt?: string;
+}
+
+// -------------------------------------------------------------
+// 10. RADIUS / AAA Server
+// -------------------------------------------------------------
+export interface RadiusServerConfig {
+  id: string;
+  name: string;
+  serverIp: string;
+  authPort: number;
+  acctPort: number;
+  secret: string;
+  coaPort?: number;
+  nasIdentifier?: string;
+  isActive: boolean;
+  isDefault?: boolean;
+  description?: string;
+  createdAt: string;
+}
+
+export interface RadiusUser {
+  id: string;
+  username: string;
+  value: string; // cleartext password or hash
+  attribute: string; // 'Cleartext-Password'
+  op: string; // ':='
+  planName?: string;
+  rateLimit?: string; // '50M/50M'
+  framedIp?: string;
+  framedPool?: string;
+  simultaneousUse: number;
+  groupName?: string;
+  status: 'active' | 'disabled' | 'expired';
+  expiryDate?: string;
+  customerId?: string;
+}
+
+export interface RadiusSession {
+  id: string;
+  username: string;
+  nasIpAddress: string;
+  framedIpAddress: string;
+  callingStationId: string; // MAC address
+  acctSessionId: string;
+  acctSessionTime: number; // in seconds
+  acctInputOctets: number; // Bytes Downloaded
+  acctOutputOctets: number; // Bytes Uploaded
+  acctStartTime: string;
+  acctStopTime?: string;
+  nasPortType?: string;
+  status: 'active' | 'stopped';
+}
+
+// -------------------------------------------------------------
+// 11. GenieACS (TR-069 CPE Management)
+// -------------------------------------------------------------
+export interface GenieAcsDevice {
+  id: string;
+  serialNumber: string;
+  manufacturer: string;
+  productClass: string;
+  hardwareVersion: string;
+  softwareVersion: string;
+  ipAddress: string;
+  macAddress: string;
+  connectionRequestUrl?: string;
+  lastInform: string;
+  isOnline: boolean;
+  subscriberName?: string;
+  pppoeUsername?: string;
+  opticalRxPowerDbm?: number;
+  opticalTxPowerDbm?: number;
+  opticalTemperature?: number;
+  opticalVoltage?: number;
+  wifiSsid?: string;
+  wifiChannel?: number;
+  wanMode?: 'PPPoE' | 'DHCP' | 'Static';
+  uptimeSeconds?: number;
+}
+
+// -------------------------------------------------------------
+// 12. IPoE / DHCP Management
+// -------------------------------------------------------------
+export interface DhcpLease {
+  id: string;
+  address: string;
+  macAddress: string;
+  server: string;
+  clientHostname?: string;
+  activeAddress?: string;
+  activeMacAddress?: string;
+  activeClientHostname?: string;
+  status: 'bound' | 'waiting' | 'static' | 'quarantined';
+  dynamic: boolean;
+  disabled: boolean;
+  expiresAfter?: string;
+  lastSeen?: string;
+  comment?: string;
+  rateLimit?: string;
+  circuitId?: string; // Option 82
+  remoteId?: string;
+  customerId?: string;
+  customerName?: string;
+}
+
