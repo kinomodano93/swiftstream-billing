@@ -66,6 +66,14 @@ interface MikrotikTelemetryViewerProps {
   initialTab?: 'traffic' | 'ddm' | 'queues';
 }
 
+const isPppoeSessionIface = (i: any): boolean => {
+  if (!i) return false;
+  const typeStr = String(i.type || '').toLowerCase();
+  if (typeStr.includes('pppoe')) return true;
+  const name = String(i.name || '');
+  return name.startsWith('<pppoe') || (name.includes('@') && (i.dynamic === true || i.dynamic === 'true'));
+};
+
 export const MikrotikTelemetryViewer: React.FC<MikrotikTelemetryViewerProps> = ({
   selectedDeviceId,
   onSelectDevice,
@@ -103,6 +111,10 @@ export const MikrotikTelemetryViewer: React.FC<MikrotikTelemetryViewerProps> = (
     rxBytes?: number;
     txBytes?: number;
     macAddress?: string;
+    mtu?: number;
+    rate?: string;
+    duplex?: string;
+    autoNeg?: string;
   }>>(() => {
     if (device?.interfaces && device.interfaces.length > 0) {
       return device.interfaces.map((i: any) => ({
@@ -168,7 +180,7 @@ export const MikrotikTelemetryViewer: React.FC<MikrotikTelemetryViewerProps> = (
         });
 
         if (!isCancelled && Array.isArray(ifaces) && ifaces.length > 0) {
-          const mapped = ifaces.map((i: any) => ({
+          const mapped = ifaces.filter((i: any) => !isPppoeSessionIface(i)).map((i: any) => ({
             name: i.name,
             type: i.type || 'ether',
             running: i.running === 'true' || i.running === true,
@@ -262,6 +274,8 @@ export const MikrotikTelemetryViewer: React.FC<MikrotikTelemetryViewerProps> = (
     rxBytes: number;
     txBytes: number;
     linkSpeed: string;
+    duplex: string;
+    autoNeg: string;
     status: string;
     mtu: number;
     mac: string;
@@ -273,6 +287,8 @@ export const MikrotikTelemetryViewer: React.FC<MikrotikTelemetryViewerProps> = (
     rxBytes: 0,
     txBytes: 0,
     linkSpeed: '---',
+    duplex: '---',
+    autoNeg: '---',
     status: 'detecting',
     mtu: 1500,
     mac: '---',
@@ -358,11 +374,26 @@ export const MikrotikTelemetryViewer: React.FC<MikrotikTelemetryViewerProps> = (
       );
       if (ddmRes) {
         applySfpDiagnostics(ddmRes, portName);
+        const ifaceObj = availableInterfaces.find((i) => i.name === portName);
+        const isSfpType = (ifaceObj?.type || '').toLowerCase().includes('sfp') || portName.toLowerCase().includes('sfp') || portName.toLowerCase().includes('wan3');
+        const rate = ddmRes.rate || (isSfpType ? '10 Gbps' : '1 Gbps');
+        const duplex = ddmRes['full-duplex'] === 'false' || ddmRes['full-duplex'] === false ? 'Half Duplex' : 'Full Duplex';
+        const autoNeg = ddmRes['auto-negotiation'] || (ddmRes.status === 'link-ok' || ifaceObj?.running ? 'done' : 'disabled');
+        const isUp = ddmRes.status === 'link-ok' || ifaceObj?.running;
+
+        setSfpTraffic((prev) => ({
+          ...prev,
+          linkSpeed: isUp ? (rate.endsWith('bps') ? rate : `${rate}`) : '---',
+          duplex: isUp ? duplex : '---',
+          autoNeg,
+          status: isUp ? 'running' : 'link_down',
+          mac: ifaceObj?.macAddress || prev.mac,
+        }));
       }
     } catch (err: any) {
       console.warn('[SFP DDM] Fetch error:', err);
     }
-  }, [applySfpDiagnostics]);
+  }, [applySfpDiagnostics, availableInterfaces]);
 
   // Multi-Interface Comparison Mode
   const [isCompareMode, setIsCompareMode] = useState<boolean>(false);
@@ -544,7 +575,7 @@ export const MikrotikTelemetryViewer: React.FC<MikrotikTelemetryViewerProps> = (
         let totalPortTxBytes = 0;
 
         if (Array.isArray(res.interfaces) && res.interfaces.length > 0) {
-          const ifaceList = res.interfaces.map((i: any) => ({
+          const ifaceList = res.interfaces.filter((i: any) => !isPppoeSessionIface(i)).map((i: any) => ({
             name: i.name || 'eth',
             type: i.type || 'ether',
             running: i.running === 'true' || i.running === true,
@@ -607,6 +638,11 @@ export const MikrotikTelemetryViewer: React.FC<MikrotikTelemetryViewerProps> = (
               sfpRxSpeed = calculatedRxMbps;
               sfpTxSpeed = calculatedTxMbps;
             }
+            const isSfpType = (sfpIface.type || '').toLowerCase().includes('sfp') || sfpIface.name.toLowerCase().includes('sfp');
+            const negotiatedRate = res.sfpDiagnostics?.rate || (isSfpType ? '10 Gbps' : '1 Gbps');
+            const negotiatedDuplex = res.sfpDiagnostics?.['full-duplex'] === 'false' || res.sfpDiagnostics?.['full-duplex'] === false ? 'Half Duplex' : 'Full Duplex';
+            const autoNegState = res.sfpDiagnostics?.['auto-negotiation'] || (sfpIface.running ? 'done' : 'disabled');
+
             setSfpTraffic({
               rxMbps: sfpRxSpeed,
               txMbps: sfpTxSpeed,
@@ -614,10 +650,12 @@ export const MikrotikTelemetryViewer: React.FC<MikrotikTelemetryViewerProps> = (
               txPps: Math.round((sfpTxSpeed * 1000000) / (1500 * 8)),
               rxBytes: sfpIface.rxBytes,
               txBytes: sfpIface.txBytes,
-              linkSpeed: sfpIface.name.toLowerCase().includes('sfp') ? (sfpIface.name.includes('plus') || sfpIface.name.includes('10g') ? '10 Gbps' : '1 Gbps / 10 Gbps') : '1 Gbps',
+              linkSpeed: sfpIface.running ? (negotiatedRate.endsWith('bps') ? negotiatedRate : `${negotiatedRate}`) : '---',
+              duplex: sfpIface.running ? negotiatedDuplex : '---',
+              autoNeg: autoNegState,
               status: sfpIface.running ? 'running' : 'link_down',
               mtu: 1500,
-              mac: '---',
+              mac: (sfpIface as any).macAddress || '---',
             });
           }
         }
@@ -1715,7 +1753,9 @@ export const MikrotikTelemetryViewer: React.FC<MikrotikTelemetryViewerProps> = (
                 </div>
                 <div className="flex items-baseline justify-between">
                   <span className="text-2xl font-black font-mono text-slate-100">{sfpTraffic.linkSpeed}</span>
-                  <span className="text-xs font-mono text-emerald-400">Full Duplex</span>
+                  <span className={`text-xs font-mono ${sfpTraffic.status === 'running' ? 'text-emerald-400' : 'text-slate-500'}`}>
+                    {sfpTraffic.duplex} {sfpTraffic.autoNeg === 'done' ? '(Auto)' : ''}
+                  </span>
                 </div>
                 <div className="h-1.5 w-full bg-slate-900 rounded-full overflow-hidden">
                   <div className="h-full bg-emerald-500 w-full" />

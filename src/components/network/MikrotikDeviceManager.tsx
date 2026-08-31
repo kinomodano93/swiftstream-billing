@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Server,
   Plus,
@@ -42,11 +42,21 @@ import {
   testRouterConnection,
   fetchInterfaces,
   fetchInterfaceTraffic,
+  fetchSfpOpticalDiagnostics,
   fetchSimpleQueues,
   MikrotikCredentials,
   RouterHealthInfo,
 } from '../../services/mikrotikApiService';
 import { PppoeManager } from './PppoeManager';
+
+// Detect dynamic PPPoE session interfaces in a raw RouterOS interface entry
+const isPppoeSessionIface = (i: any): boolean => {
+  if (!i) return false;
+  const typeStr = String(i.type || '').toLowerCase();
+  if (typeStr.includes('pppoe')) return true;
+  const name = String(i.name || '');
+  return name.startsWith('<pppoe') || name.includes('@') && (i.dynamic === true || i.dynamic === 'true');
+};
 
 export const MikrotikDeviceManager: React.FC = () => {
   const {
@@ -92,7 +102,7 @@ export const MikrotikDeviceManager: React.FC = () => {
     };
 
   // 4 Primary Streamlined Tabs
-  const [activeTab, setActiveTab] = useState<'overview' | 'interfaces' | 'pppoe' | 'queues' | 'fleet'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'interfaces' | 'pppoe' | 'pppoe_sessions' | 'queues' | 'fleet'>('overview');
 
   // Live Telemetry & Polling State
   const [isLiveStreaming, setIsLiveStreaming] = useState<boolean>(true);
@@ -134,7 +144,25 @@ export const MikrotikDeviceManager: React.FC = () => {
     ];
   };
 
-  const [liveInterfaces, setLiveInterfaces] = useState<any[]>(getInitialInterfaces);
+  const [liveInterfaces, setLiveInterfaces] = useState<any[]>(() => getInitialInterfaces().filter((i) => !isPppoeSessionIface(i)));
+  const liveInterfacesRef = useRef<any[]>(liveInterfaces);
+  liveInterfacesRef.current = liveInterfaces;
+
+  // Dynamic PPPoE subscriber session interfaces (type pppoe-in) — kept separate from hardware ports
+  const [livePppoeSessions, setLivePppoeSessions] = useState<any[]>([]);
+
+  // Split a raw RouterOS /interface payload into hardware ports vs PPPoE session interfaces
+  const splitInterfaces = useCallback((rawList: any[]) => {
+    const hardware: any[] = [];
+    const sessions: any[] = [];
+    for (const i of rawList) {
+      const typeStr = String(i.type || '').toLowerCase();
+      const isPppoe = typeStr.includes('pppoe') || (i.dynamic === true || i.dynamic === 'true') && typeStr !== 'bridge';
+      if (isPppoe) sessions.push(i);
+      else hardware.push(i);
+    }
+    return { hardware, sessions };
+  }, []);
 
   // Password quick-update state
   const [quickPassword, setQuickPassword] = useState<string>(selectedDevice.password || '');
@@ -153,6 +181,53 @@ export const MikrotikDeviceManager: React.FC = () => {
     rxPps: 48500,
     txPps: 12400,
   });
+
+  // Negotiated physical link state for the selected port (from /interface/ethernet/monitor)
+  const [portLink, setPortLink] = useState<{
+    rate: string;
+    duplex: string;
+    autoNeg: string;
+    status: string;
+    mtu: number;
+    mac: string;
+  }>({
+    rate: '---',
+    duplex: '---',
+    autoNeg: '---',
+    status: 'detecting',
+    mtu: 1500,
+    mac: '',
+  });
+
+  // Normalize RouterOS rates ("10Gbps", "1Gbps", "100Mbps") into a readable label
+  const formatNegotiatedRate = (raw: any): string => {
+    if (raw === undefined || raw === null || raw === '') return '';
+    const str = String(raw).trim();
+    const m = str.match(/^([0-9.]+)\s*([GMK]?)b?p?s?$/i);
+    if (!m) return str;
+    const value = m[1];
+    const unit = (m[2] || 'M').toUpperCase();
+    return `${value} ${unit}bps`;
+  };
+
+  // Apply the router's own auto-negotiation result for a port; never guess from the port name
+  const applyPortLink = useCallback((mon: any, portName: string) => {
+    if (!mon) return;
+    const iface = liveInterfacesRef.current.find((i: any) => i.name === portName);
+    const isUp = mon.status === 'link-ok' || mon.status === 'running' || iface?.running === true;
+    const negotiated = formatNegotiatedRate(mon.rate);
+    const isFull = mon['full-duplex'] === 'true' || mon['full-duplex'] === true;
+    const hasDuplexField = mon['full-duplex'] !== undefined && mon['full-duplex'] !== null && mon['full-duplex'] !== '';
+
+    setPortLink({
+      rate: isUp ? (negotiated || '---') : '---',
+      duplex: isUp && hasDuplexField ? (isFull ? 'Full' : 'Half') : '---',
+      autoNeg: mon['auto-negotiation'] || (isUp ? 'done' : 'disabled'),
+      status: isUp ? 'running' : 'link_down',
+      mtu: parseInt(iface?.mtu || mon['actual-mtu'] || mon.mtu || '1500', 10) || 1500,
+      mac: iface?.macAddress || mon['mac-address'] || '',
+    });
+  }, []);
 
   // Bandwidth History for Chart (last 20 points)
   const [trafficHistory, setTrafficHistory] = useState<Array<{ time: string; rx: number; tx: number }>>(() => {
@@ -263,12 +338,18 @@ export const MikrotikDeviceManager: React.FC = () => {
         const creds = getDeviceCreds(selectedDevice);
         
         // Single unified call (Same as CPU & RAM approach)
-        const [health, traffic] = await Promise.allSettled([
+        const [health, traffic, monitor] = await Promise.allSettled([
           testRouterConnection(creds),
           fetchInterfaceTraffic(selectedPort, creds),
+          fetchSfpOpticalDiagnostics(creds, selectedPort),
         ]);
 
         if (!isMounted) return;
+
+        // Apply real negotiated link state (rate / duplex / auto-negotiation) for the selected port
+        if (monitor.status === 'fulfilled' && monitor.value) {
+          applyPortLink(monitor.value, selectedPort);
+        }
 
         let curRx = portTraffic.rxMbps;
         let curTx = portTraffic.txMbps;
@@ -299,9 +380,10 @@ export const MikrotikDeviceManager: React.FC = () => {
           const res = health.value;
           setLiveHealth(res);
 
-          // If real interfaces returned in health, update live list
+          // If real interfaces returned in health, update live list (hardware only; PPPoE sessions go to their own tab)
           if (Array.isArray(res.interfaces) && res.interfaces.length > 0) {
-            const mapped = res.interfaces.map((i: any) => ({
+            const { hardware, sessions } = splitInterfaces(res.interfaces);
+            setLiveInterfaces(hardware.map((i: any) => ({
               name: i.name || 'eth',
               type: i.type || 'ether',
               running: i.running === 'true' || i.running === true || i.status === 'running',
@@ -310,8 +392,17 @@ export const MikrotikDeviceManager: React.FC = () => {
               macAddress: i['mac-address'] || i.macAddress || '',
               rxBytes: parseInt(i['rx-byte'] || i['rx-bytes'] || '0', 10) || 0,
               txBytes: parseInt(i['tx-byte'] || i['tx-bytes'] || '0', 10) || 0,
-            }));
-            setLiveInterfaces(mapped);
+            })));
+            setLivePppoeSessions(sessions.map((i: any) => ({
+              name: i.name || 'pppoe-in',
+              type: i.type || 'pppoe-in',
+              running: i.running === 'true' || i.running === true || i.status === 'running',
+              disabled: i.disabled === 'true' || i.disabled === true,
+              comment: i.comment || '',
+              macAddress: i['mac-address'] || i.macAddress || '',
+              rxBytes: parseInt(i['rx-byte'] || i['rx-bytes'] || '0', 10) || 0,
+              txBytes: parseInt(i['tx-byte'] || i['tx-bytes'] || '0', 10) || 0,
+            })));
           }
         }
 
@@ -679,6 +770,18 @@ export const MikrotikDeviceManager: React.FC = () => {
         </button>
 
         <button
+          onClick={() => setActiveTab('pppoe_sessions')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+            activeTab === 'pppoe_sessions'
+              ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/20'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+          }`}
+        >
+          <Wifi className="w-4 h-4" />
+          <span>PPPoE Sessions ({livePppoeSessions.length})</span>
+        </button>
+
+        <button
           onClick={() => setActiveTab('pppoe')}
           className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
             activeTab === 'pppoe'
@@ -791,19 +894,33 @@ export const MikrotikDeviceManager: React.FC = () => {
 
               <div>
                 <span className="text-[11px] text-slate-400 font-medium">Link Speed / Duplex</span>
-                <div className="text-base font-bold text-slate-200 mt-1 font-mono">
-                  {selectedPort.includes('sfp') ? '10 Gbps Full' : '1 Gbps Full'}
+                <div className={`text-base font-bold mt-1 font-mono ${
+                  portLink.status === 'running' ? 'text-slate-200' : 'text-slate-500'
+                }`}>
+                  {portLink.rate === '---' ? '---' : `${portLink.rate}${portLink.duplex !== '---' ? ` ${portLink.duplex}` : ''}`}
                 </div>
-                <span className="text-[10px] text-emerald-400 font-mono">Auto-Negotiated</span>
+                <span className={`text-[10px] font-mono ${
+                  portLink.autoNeg === 'done'
+                    ? 'text-emerald-400'
+                    : portLink.status === 'running'
+                    ? 'text-amber-400'
+                    : 'text-slate-500'
+                }`}>
+                  {portLink.status !== 'running'
+                    ? 'Link Down'
+                    : portLink.autoNeg === 'done'
+                    ? 'Auto-Negotiated'
+                    : `Auto-Neg: ${portLink.autoNeg}`}
+                </span>
               </div>
 
               <div>
                 <span className="text-[11px] text-slate-400 font-medium">Port MTU / MAC</span>
                 <div className="text-xs font-mono text-slate-300 mt-1">
-                  MTU: 1500
+                  MTU: {portLink.mtu}
                 </div>
                 <span className="text-[10px] text-slate-500 font-mono truncate block">
-                  {liveInterfaces.find((i) => i.name === selectedPort)?.macAddress || 'D4:01:C3:48:F1:02'}
+                  {portLink.mac || liveInterfaces.find((i) => i.name === selectedPort)?.macAddress || '---'}
                 </span>
               </div>
             </div>
@@ -986,7 +1103,8 @@ export const MikrotikDeviceManager: React.FC = () => {
                     }
 
                     if (Array.isArray(ifaces) && ifaces.length > 0) {
-                      const mapped = ifaces.map((i: any) => ({
+                      const { hardware, sessions } = splitInterfaces(ifaces);
+                      const mapped = hardware.map((i: any) => ({
                         name: i.name || i['default-name'] || 'eth',
                         type: i.type || (i.name?.startsWith('sfp') ? 'sfp-plus' : 'ether'),
                         running: i.running === 'true' || i.running === true || i.status === 'running',
@@ -997,6 +1115,16 @@ export const MikrotikDeviceManager: React.FC = () => {
                         txBytes: parseInt(i['tx-byte'] || i['tx-bytes'] || '0', 10) || 0,
                       }));
                       setLiveInterfaces(mapped);
+                      setLivePppoeSessions(sessions.map((i: any) => ({
+                        name: i.name || i['default-name'] || 'pppoe-in',
+                        type: i.type || 'pppoe-in',
+                        running: i.running === 'true' || i.running === true || i.status === 'running',
+                        disabled: i.disabled === 'true' || i.disabled === true,
+                        comment: i.comment || '',
+                        macAddress: i['mac-address'] || i.macAddress || '',
+                        rxBytes: parseInt(i['rx-byte'] || i['rx-bytes'] || '0', 10) || 0,
+                        txBytes: parseInt(i['tx-byte'] || i['tx-bytes'] || '0', 10) || 0,
+                      })));
                       updateMikrotikDevice(selectedDevice.id, {
                         password: quickPassword,
                         interfaces: mapped.map((m: any, idx: number) => ({
@@ -1004,7 +1132,7 @@ export const MikrotikDeviceManager: React.FC = () => {
                           name: m.name,
                           type: m.type,
                           status: m.running ? 'running' : 'link_down',
-                          linkSpeed: m.name.startsWith('sfp') ? '10 Gbps' : '1 Gbps',
+                          linkSpeed: (m.type?.includes('sfp') || m.name.toLowerCase().includes('sfp') || m.name.toLowerCase().includes('wan3')) ? '10 Gbps' : '1 Gbps',
                           macAddress: m.macAddress,
                           mtu: 1500,
                           rxBps: 0,
@@ -1096,6 +1224,95 @@ export const MikrotikDeviceManager: React.FC = () => {
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {/* TAB: LIVE PPPoE SESSION INTERFACES (separated from hardware ports) */}
+      {activeTab === 'pppoe_sessions' && (
+        <div className="p-6 rounded-3xl bg-slate-900/90 border border-slate-800 shadow-2xl space-y-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2">
+                <Wifi className="w-5 h-5 text-cyan-400" />
+                Live PPPoE Session Interfaces ({livePppoeSessions.length} Active)
+              </h2>
+              <p className="text-xs text-slate-400">
+                Dynamic <code className="text-cyan-300 font-mono">pppoe-in</code> interfaces created per subscriber session on <strong>{selectedDevice.name}</strong>
+              </p>
+            </div>
+            <button
+              onClick={async () => {
+                if (!selectedDevice) return;
+                showToast('info', 'Refreshing Sessions', 'Querying live PPPoE session interfaces...');
+                const creds = getDeviceCreds(selectedDevice);
+                const health = await testRouterConnection(creds);
+                if (Array.isArray(health.interfaces) && health.interfaces.length > 0) {
+                  const { sessions } = splitInterfaces(health.interfaces);
+                  setLivePppoeSessions(sessions.map((i: any) => ({
+                    name: i.name || 'pppoe-in',
+                    type: i.type || 'pppoe-in',
+                    running: i.running === 'true' || i.running === true || i.status === 'running',
+                    disabled: i.disabled === 'true' || i.disabled === true,
+                    comment: i.comment || '',
+                    macAddress: i['mac-address'] || i.macAddress || '',
+                    rxBytes: parseInt(i['rx-byte'] || i['rx-bytes'] || '0', 10) || 0,
+                    txBytes: parseInt(i['tx-byte'] || i['tx-bytes'] || '0', 10) || 0,
+                  })));
+                  showToast('success', 'Sessions Synced', `${sessions.length} PPPoE session interfaces detected`);
+                } else {
+                  showToast('warning', 'No Sessions', 'No active PPPoE session interfaces found on this router');
+                }
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-950/60 hover:bg-cyan-900/80 text-cyan-300 border border-cyan-800/60 rounded-xl transition-all cursor-pointer font-bold text-xs"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Refresh Sessions</span>
+            </button>
+          </div>
+
+          {livePppoeSessions.length === 0 ? (
+            <div className="text-center py-10 text-slate-500 text-xs font-mono">
+              No active PPPoE session interfaces. They appear here automatically once subscribers connect.
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-2xl border border-slate-800">
+              <table className="w-full text-left text-xs font-mono">
+                <thead className="bg-slate-950 text-slate-400 uppercase text-[10px] tracking-wider">
+                  <tr>
+                    <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3">Session Interface</th>
+                    <th className="px-4 py-3">Type</th>
+                    <th className="px-4 py-3">Comment</th>
+                    <th className="px-4 py-3">MAC Address</th>
+                    <th className="px-4 py-3 text-right">RX Total</th>
+                    <th className="px-4 py-3 text-right">TX Total</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60">
+                  {livePppoeSessions.map((sess) => (
+                    <tr key={sess.name} className="hover:bg-slate-800/30 transition-colors">
+                      <td className="px-4 py-2.5">
+                        <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                          sess.running
+                            ? 'bg-emerald-950 text-emerald-400 border border-emerald-800/60'
+                            : 'bg-slate-900 text-slate-500 border border-slate-700'
+                        }`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${sess.running ? 'bg-emerald-400' : 'bg-slate-600'}`} />
+                          {sess.running ? 'ACTIVE' : 'DOWN'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2.5 text-cyan-300 font-bold">{sess.name}</td>
+                      <td className="px-4 py-2.5 text-slate-400">{sess.type}</td>
+                      <td className="px-4 py-2.5 text-slate-400">{sess.comment || '—'}</td>
+                      <td className="px-4 py-2.5 text-slate-400">{sess.macAddress || '—'}</td>
+                      <td className="px-4 py-2.5 text-right text-emerald-400">{(sess.rxBytes / 1073741824).toFixed(2)} GB</td>
+                      <td className="px-4 py-2.5 text-right text-cyan-400">{(sess.txBytes / 1073741824).toFixed(2)} GB</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 

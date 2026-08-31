@@ -505,18 +505,66 @@ exports.getMikrotikInterfaces = onRequest(
       const baseUrl = `${protocol}://${cleanHost}:${cleanPort}/rest`;
       const axiosConfig = {
         auth: {
+          username: username || "admin",
           password: password || "",
         },
         timeout: 8000,
         headers: {
           Accept: "application/json",
+        },
       };
 
       let interfaces = [];
+      let interfacesError = null;
+
       try {
+        const response = await axios.get(`${baseUrl}/interface`, axiosConfig);
         if (Array.isArray(response.data)) {
           interfaces = response.data;
+        } else if (response.data && typeof response.data === 'object') {
+          interfaces = Object.values(response.data).filter((v) => v && (v.name || v['.id']));
+        }
+      } catch (error) {
+        interfacesError = error.response?.data?.detail || error.response?.data?.message || error.message;
+        console.error("GET /rest/interface failed:", interfacesError);
+      }
+
+      if (interfaces.length === 0) {
+        try {
+          const ethResponse = await axios.get(`${baseUrl}/interface/ethernet`, axiosConfig);
+          if (Array.isArray(ethResponse.data)) {
             interfaces = ethResponse.data;
+            interfacesError = null;
+          }
+        } catch (error) {
+          if (!interfacesError) {
+            interfacesError = error.response?.data?.detail || error.response?.data?.message || error.message;
+          }
+          console.error("GET /rest/interface/ethernet failed:", error.message);
+        }
+      }
+
+      if (interfaces.length === 0 && interfacesError) {
+        return res.status(502).json({
+          success: false,
+          error: interfacesError,
+          interfaces: [],
+          hardwareInterfaces: [],
+          pppoeInterfaces: [],
+        });
+      }
+
+      const isPppoeSession = (i) => (i.type || '').includes('pppoe') || i.dynamic === 'true' || i.dynamic === true;
+      const hardwareInterfaces = interfaces.filter((i) => !isPppoeSession(i));
+      const pppoeInterfaces = interfaces.filter(isPppoeSession);
+
+      return res.status(200).json({
+        success: true,
+        count: interfaces.length,
+        interfaces: hardwareInterfaces,
+        hardwareInterfaces,
+        pppoeInterfaces,
+      });
     } catch (error) {
       console.error(
         error.response?.data || error.message
