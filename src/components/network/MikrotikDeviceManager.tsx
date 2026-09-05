@@ -75,6 +75,16 @@ const isPppoeSessionIface = (i: any): boolean => {
   return name.startsWith('<pppoe') || name.includes('@') && (i.dynamic === true || i.dynamic === 'true');
 };
 
+export type TrafficHistoryRange = 'live' | '10m' | '30m' | '1h';
+
+export interface TelemetryPoint {
+  timestamp: number;
+  time: string;
+  rx: number;
+  tx: number;
+  latency: number;
+}
+
 interface MikrotikDeviceManagerProps {
   onOpenTerminal?: (deviceId?: string) => void;
 }
@@ -289,13 +299,18 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({ on
     });
   }, []);
 
-  // Bandwidth & Latency History for Chart (last 24 points)
-  const [trafficHistory, setTrafficHistory] = useState<Array<{ time: string; rx: number; tx: number; latency: number }>>(() => {
-    const pts = [];
+  // Selected Traffic History Range: 'live' (~60s), '10m' (10 mins), '30m' (30 mins), '1h' (1 hour)
+  const [historyRange, setHistoryRange] = useState<TrafficHistoryRange>('live');
+  const portHistoriesRef = useRef<Record<string, TelemetryPoint[]>>({});
+
+  // Rolling telemetry points buffer (up to 1,600 samples ~ 1+ hour of data)
+  const [fullTrafficHistory, setFullTrafficHistory] = useState<TelemetryPoint[]>(() => {
+    const pts: TelemetryPoint[] = [];
     const now = Date.now();
-    for (let i = 20; i >= 0; i--) {
-      const t = new Date(now - i * 2000);
+    for (let i = 24; i >= 0; i--) {
+      const t = new Date(now - i * 2500);
       pts.push({
+        timestamp: t.getTime(),
         time: `${t.getHours().toString().padStart(2, '0')}:${t.getMinutes().toString().padStart(2, '0')}:${t.getSeconds().toString().padStart(2, '0')}`,
         rx: 0,
         tx: 0,
@@ -325,6 +340,92 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({ on
   // Peak throughput tracked during current session
   const [peakTraffic, setPeakTraffic] = useState<{ rx: number; tx: number }>({ rx: 0, tx: 0 });
 
+  // Derived Chart Data downsampled and windowed according to historyRange
+  const displayChartData = useMemo(() => {
+    const now = Date.now();
+    if (historyRange === 'live') {
+      return fullTrafficHistory.slice(-24);
+    }
+
+    let durationMs = 10 * 60 * 1000;
+    let targetBuckets = 30;
+    if (historyRange === '30m') {
+      durationMs = 30 * 60 * 1000;
+      targetBuckets = 35;
+    } else if (historyRange === '1h') {
+      durationMs = 60 * 60 * 1000;
+      targetBuckets = 45;
+    }
+
+    const cutoff = now - durationMs;
+    const filtered = fullTrafficHistory.filter((p) => p.timestamp >= cutoff);
+
+    const bucketSizeMs = durationMs / targetBuckets;
+    const buckets: TelemetryPoint[] = [];
+
+    for (let i = 0; i < targetBuckets; i++) {
+      const bucketStart = cutoff + i * bucketSizeMs;
+      const bucketEnd = bucketStart + bucketSizeMs;
+      const bucketPoints = filtered.filter((p) => p.timestamp >= bucketStart && p.timestamp < bucketEnd);
+
+      const bucketTime = new Date(bucketStart + bucketSizeMs / 2);
+      const hours = bucketTime.getHours().toString().padStart(2, '0');
+      const mins = bucketTime.getMinutes().toString().padStart(2, '0');
+      const secs = bucketTime.getSeconds().toString().padStart(2, '0');
+      const timeLabel = historyRange === '10m' ? `${hours}:${mins}:${secs}` : `${hours}:${mins}`;
+
+      if (bucketPoints.length > 0) {
+        const avgRx = Number((bucketPoints.reduce((acc, p) => acc + p.rx, 0) / bucketPoints.length).toFixed(2));
+        const avgTx = Number((bucketPoints.reduce((acc, p) => acc + p.tx, 0) / bucketPoints.length).toFixed(2));
+        const avgLat = Math.round(bucketPoints.reduce((acc, p) => acc + p.latency, 0) / bucketPoints.length);
+        buckets.push({
+          timestamp: bucketStart,
+          time: timeLabel,
+          rx: avgRx,
+          tx: avgTx,
+          latency: avgLat,
+        });
+      } else {
+        // Find nearest preceding point or default to 0
+        const preceding = filtered.filter((p) => p.timestamp <= bucketEnd).slice(-1)[0];
+        buckets.push({
+          timestamp: bucketStart,
+          time: timeLabel,
+          rx: preceding ? preceding.rx : 0,
+          tx: preceding ? preceding.tx : 0,
+          latency: preceding ? preceding.latency : 0,
+        });
+      }
+    }
+
+    return buckets;
+  }, [fullTrafficHistory, historyRange]);
+
+  // Telemetry statistics across the active time window
+  const rangeStats = useMemo(() => {
+    if (displayChartData.length === 0) {
+      return { avgRx: 0, avgTx: 0, peakRx: 0, peakTx: 0, avgLatency: 0 };
+    }
+    const nonZeroRx = displayChartData.filter((p) => p.rx > 0);
+    const nonZeroTx = displayChartData.filter((p) => p.tx > 0);
+    const nonZeroLat = displayChartData.filter((p) => p.latency > 0);
+
+    const avgRx = nonZeroRx.length > 0
+      ? Number((nonZeroRx.reduce((acc, p) => acc + p.rx, 0) / nonZeroRx.length).toFixed(2))
+      : 0;
+    const avgTx = nonZeroTx.length > 0
+      ? Number((nonZeroTx.reduce((acc, p) => acc + p.tx, 0) / nonZeroTx.length).toFixed(2))
+      : 0;
+    const avgLatency = nonZeroLat.length > 0
+      ? Math.round(nonZeroLat.reduce((acc, p) => acc + p.latency, 0) / nonZeroLat.length)
+      : (currentLatency || 0);
+
+    const peakRx = Number(Math.max(...displayChartData.map((p) => p.rx), 0).toFixed(2));
+    const peakTx = Number(Math.max(...displayChartData.map((p) => p.tx), 0).toFixed(2));
+
+    return { avgRx, avgTx, peakRx, peakTx, avgLatency };
+  }, [displayChartData, currentLatency]);
+
   // Dynamic Chart Y-Axis Domain calculation
   const chartDomainMax = useMemo(() => {
     if (chartScaleMode === 'fixed') {
@@ -333,7 +434,7 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({ on
     // Auto-scale mode (Professional NOC view):
     // Determine peak traffic across history buffer & current rates
     const maxDataVal = Math.max(
-      ...trafficHistory.map((p) => Math.max(p.rx, p.tx)),
+      ...displayChartData.map((p) => Math.max(p.rx, p.tx)),
       portTraffic.rxMbps,
       portTraffic.txMbps,
       1
@@ -350,13 +451,13 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({ on
     if (target <= 2500) return 2500;
     if (target <= 5000) return 5000;
     return Math.min(dynamicPortMaxMbps, Math.ceil(target / 1000) * 1000);
-  }, [trafficHistory, portTraffic, chartScaleMode, dynamicPortMaxMbps]);
+  }, [displayChartData, portTraffic, chartScaleMode, dynamicPortMaxMbps]);
 
   // Dynamic Latency Y-Axis Domain calculation
   const latencyDomainMax = useMemo(() => {
-    const maxLat = Math.max(...trafficHistory.map((p) => p.latency || 0), currentLatency, 25);
+    const maxLat = Math.max(...displayChartData.map((p) => p.latency || 0), currentLatency, 25);
     return Math.ceil(maxLat * 1.25);
-  }, [trafficHistory, currentLatency]);
+  }, [displayChartData, currentLatency]);
 
   // Simple Queues State
   const [queuesList, setQueuesList] = useState<any[]>([]);
@@ -453,6 +554,26 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({ on
 
   useEffect(() => {
     let isMounted = true;
+
+    // Restore cached history for this interface or seed initial baseline
+    const portKey = `${selectedRouterId}_${selectedPort}`;
+    if (portHistoriesRef.current[portKey] && portHistoriesRef.current[portKey].length > 0) {
+      setFullTrafficHistory(portHistoriesRef.current[portKey]);
+    } else {
+      const pts: TelemetryPoint[] = [];
+      const now = Date.now();
+      for (let i = 24; i >= 0; i--) {
+        const t = new Date(now - i * 2500);
+        pts.push({
+          timestamp: t.getTime(),
+          time: `${t.getHours().toString().padStart(2, '0')}:${t.getMinutes().toString().padStart(2, '0')}:${t.getSeconds().toString().padStart(2, '0')}`,
+          rx: 0,
+          tx: 0,
+          latency: 0,
+        });
+      }
+      setFullTrafficHistory(pts);
+    }
 
     const pollTelemetry = async () => {
       if (!selectedDevice || !isLiveStreaming) return;
@@ -562,13 +683,25 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({ on
           setLatencySamples((prev) => [...prev.slice(-9), finalLatency]);
         }
 
-        // Push new point into chart history (including real latency)
+        // Push new point into chart history (including real latency and timestamp)
         const now = new Date();
         const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
-        setTrafficHistory((prev) => [
-          ...prev.slice(-18),
-          { time: timeStr, rx: curRx, tx: curTx, latency: finalLatency },
-        ]);
+        const newPoint: TelemetryPoint = {
+          timestamp: now.getTime(),
+          time: timeStr,
+          rx: curRx,
+          tx: curTx,
+          latency: finalLatency,
+        };
+
+        setFullTrafficHistory((prev) => {
+          const oneHourAgo = Date.now() - 65 * 60 * 1000;
+          const updated = [...prev.filter((p) => p.timestamp >= oneHourAgo), newPoint].slice(-1600);
+          if (selectedRouterId && selectedPort) {
+            portHistoriesRef.current[`${selectedRouterId}_${selectedPort}`] = updated;
+          }
+          return updated;
+        });
       } catch (_) {
       } finally {
         if (isMounted) {
@@ -1181,16 +1314,16 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({ on
             </div>
 
             {/* Professional Recharts Area Chart */}
-            <div className="h-64 w-full bg-slate-950/95 rounded-2xl border border-slate-800/90 p-4 relative overflow-hidden flex flex-col justify-between shadow-inner">
+            <div className="min-h-[300px] h-72 w-full bg-slate-950/95 rounded-2xl border border-slate-800/90 p-4 relative overflow-hidden flex flex-col justify-between shadow-inner">
               <div className="flex flex-wrap items-center justify-between text-[11px] text-slate-400 font-mono pb-2 border-b border-slate-800/50 gap-2">
                 <div className="flex flex-wrap items-center gap-3">
                   <span className="flex items-center gap-1.5 text-emerald-400 font-bold">
                     <span className={`w-2.5 h-2.5 rounded-full inline-block shadow-sm ${portTraffic.rxMbps > 0 ? 'bg-emerald-400 shadow-emerald-400/50' : 'bg-slate-600'}`} />
-                    Rx (Download): {portTraffic.rxMbps} Mbps
+                    Rx: {portTraffic.rxMbps} Mbps
                   </span>
                   <span className="flex items-center gap-1.5 text-cyan-400 font-bold">
                     <span className={`w-2.5 h-2.5 rounded-full inline-block shadow-sm ${portTraffic.txMbps > 0 ? 'bg-cyan-400 shadow-cyan-400/50' : 'bg-slate-600'}`} />
-                    Tx (Upload): {portTraffic.txMbps} Mbps
+                    Tx: {portTraffic.txMbps} Mbps
                   </span>
                   <span className="flex items-center gap-1.5 text-amber-400 font-bold">
                     <span className={`w-2.5 h-2.5 rounded-full inline-block shadow-sm ${currentLatency > 0 ? 'bg-amber-400 shadow-amber-400/50' : 'bg-slate-600'}`} />
@@ -1198,17 +1331,48 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({ on
                   </span>
                   {(!selectedIfaceObj?.running || selectedIfaceObj?.disabled || portLink.status === 'link_down') && (
                     <span className="text-amber-400 font-bold font-mono text-[10px] px-2 py-0.5 rounded bg-amber-950/50 border border-amber-800/60 flex items-center gap-1">
-                      <AlertTriangle className="w-3 h-3" /> Port Offline / Link Down (0.00 Mbps)
+                      <AlertTriangle className="w-3 h-3" /> Port Offline / Link Down
                     </span>
                   )}
                 </div>
 
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-2.5">
+                  {/* Timeframe Selector Pills: Live, 10m, 30m, 1h */}
+                  <div className="flex items-center bg-slate-900 border border-slate-800 p-0.5 rounded-xl shadow-sm">
+                    {(
+                      [
+                        { id: 'live', label: 'Live' },
+                        { id: '10m', label: '10 Mins' },
+                        { id: '30m', label: '30 Mins' },
+                        { id: '1h', label: '1 Hour' },
+                      ] as { id: TrafficHistoryRange; label: string }[]
+                    ).map((tab) => {
+                      const isActive = historyRange === tab.id;
+                      return (
+                        <button
+                          key={tab.id}
+                          type="button"
+                          onClick={() => setHistoryRange(tab.id)}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-bold font-mono transition-all flex items-center gap-1.5 cursor-pointer ${
+                            isActive
+                              ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm'
+                              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 border border-transparent'
+                          }`}
+                        >
+                          {tab.id === 'live' && (
+                            <span className={`w-1.5 h-1.5 rounded-full ${isLiveStreaming ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
+                          )}
+                          {tab.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+
                   {/* Toggle Latency Line Button */}
                   <button
                     type="button"
                     onClick={() => setShowLatencyLine(!showLatencyLine)}
-                    className={`px-2 py-0.5 rounded-lg text-[10px] font-bold font-mono transition-all flex items-center gap-1 cursor-pointer border ${
+                    className={`px-2 py-1 rounded-lg text-[10px] font-bold font-mono transition-all flex items-center gap-1 cursor-pointer border ${
                       showLatencyLine
                         ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-sm shadow-amber-500/10'
                         : 'bg-slate-900 text-slate-500 border-slate-800 hover:text-slate-300'
@@ -1226,10 +1390,37 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({ on
                 </div>
               </div>
 
+              {/* Range Telemetry Summary Sub-strip */}
+              <div className="flex flex-wrap items-center justify-between text-[10px] font-mono text-slate-400 bg-slate-900/40 px-2.5 py-1 rounded-xl border border-slate-800/40 my-1.5 gap-2">
+                <div className="flex items-center gap-1.5 text-slate-300 font-semibold">
+                  <Clock className="w-3 h-3 text-cyan-400" />
+                  <span>
+                    {historyRange === 'live'
+                      ? 'Live Real-Time Stream (2.5s polling window)'
+                      : historyRange === '10m'
+                      ? 'Historical Telemetry • Last 10 Minutes'
+                      : historyRange === '30m'
+                      ? 'Historical Telemetry • Last 30 Minutes'
+                      : 'Historical Telemetry • Last 1 Hour'}
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-slate-400">
+                  <span>Avg Rx: <strong className="text-emerald-300 font-bold">{rangeStats.avgRx} Mbps</strong></span>
+                  <span className="text-slate-700 hidden sm:inline">•</span>
+                  <span>Peak Rx: <strong className="text-emerald-400 font-bold">{rangeStats.peakRx} Mbps</strong></span>
+                  <span className="text-slate-700 hidden sm:inline">•</span>
+                  <span>Avg Tx: <strong className="text-cyan-300 font-bold">{rangeStats.avgTx} Mbps</strong></span>
+                  <span className="text-slate-700 hidden sm:inline">•</span>
+                  <span>Peak Tx: <strong className="text-cyan-400 font-bold">{rangeStats.peakTx} Mbps</strong></span>
+                  <span className="text-slate-700 hidden sm:inline">•</span>
+                  <span>Avg Ping: <strong className="text-amber-300 font-bold">{rangeStats.avgLatency} ms</strong></span>
+                </div>
+              </div>
+
               {/* Recharts Area Container */}
-              <div className="flex-1 w-full relative pt-2">
+              <div className="flex-1 w-full relative pt-1">
                 <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={trafficHistory} margin={{ top: 8, right: showLatencyLine ? 24 : 10, left: -18, bottom: 0 }}>
+                  <AreaChart data={displayChartData} margin={{ top: 8, right: showLatencyLine ? 24 : 10, left: -18, bottom: 0 }}>
                     <defs>
                       <linearGradient id="colorRxGrad" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="5%" stopColor="#10b981" stopOpacity={0.45} />
