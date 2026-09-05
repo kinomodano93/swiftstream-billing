@@ -532,6 +532,7 @@ export const bulkSyncAllSubscribers = async (
 };
 
 export interface PppoeSecretItem {
+  id?: string;
   name: string;
   password?: string;
   service?: string;
@@ -541,33 +542,64 @@ export interface PppoeSecretItem {
   callerId?: string;
   comment?: string;
   disabled?: boolean;
+  lastLoggedOut?: string;
 }
 
-export const fallbackPppoeSecrets: PppoeSecretItem[] = [
-  { name: 'swift_jdelacruz', password: '••••••••', service: 'pppoe', profile: 'Plan-50M', remoteAddress: '10.10.20.15', localAddress: '10.10.20.1', comment: 'Juan Dela Cruz - NAP-01 Port 3', disabled: false },
-  { name: 'swift_mreyes', password: '••••••••', service: 'pppoe', profile: 'Plan-25M', remoteAddress: '10.10.20.16', localAddress: '10.10.20.1', comment: 'Maria Reyes - NAP-01 Port 4', disabled: false },
-  { name: 'swift_asanchez', password: '••••••••', service: 'pppoe', profile: 'Plan-100M', remoteAddress: '10.10.20.17', localAddress: '10.10.20.1', comment: 'Antonio Sanchez - NAP-02 Port 1', disabled: false },
-  { name: 'swift_rgarcia', password: '••••••••', service: 'pppoe', profile: 'Plan-35M', remoteAddress: '10.10.20.18', localAddress: '10.10.20.1', comment: 'Rosario Garcia - NAP-02 Port 2', disabled: false },
-  { name: 'swift_atorres', password: '••••••••', service: 'pppoe', profile: 'Plan-25M', remoteAddress: '10.10.20.19', localAddress: '10.10.20.1', comment: 'Alex Torres - NAP-03 Port 5', disabled: false },
-  { name: 'swift_cvillanueva', password: '••••••••', service: 'pppoe', profile: 'Plan-50M', remoteAddress: '10.10.20.20', localAddress: '10.10.20.1', comment: 'Carla Villanueva - NAP-03 Port 6', disabled: false },
-  { name: 'swift_elumban', password: '••••••••', service: 'pppoe', profile: 'Plan-75M', remoteAddress: '10.10.20.21', localAddress: '10.10.20.1', comment: 'Eduardo Lumban - NAP-04 Port 1', disabled: false },
-  { name: 'swift_gdomingo', password: '••••••••', service: 'pppoe', profile: 'Plan-25M', remoteAddress: '10.10.20.22', localAddress: '10.10.20.1', comment: 'Grace Domingo - NAP-04 Port 2', disabled: false },
-  { name: 'swift_pmercado', password: '••••••••', service: 'pppoe', profile: 'Plan-50M', remoteAddress: '10.10.20.23', localAddress: '10.10.20.1', comment: 'Pedro Mercado - NAP-05 Port 3', disabled: false },
-  { name: 'swift_knavarro', password: '••••••••', service: 'pppoe', profile: 'Plan-100M', remoteAddress: '10.10.20.24', localAddress: '10.10.20.1', comment: 'Kristine Navarro - NAP-05 Port 4', disabled: false },
-  { name: 'swift_mramos', password: '••••••••', service: 'pppoe', profile: 'Plan-35M', remoteAddress: '10.10.20.25', localAddress: '10.10.20.1', comment: 'Manuel Ramos - NAP-06 Port 1', disabled: false },
-  { name: 'swift_jflores', password: '••••••••', service: 'pppoe', profile: 'Plan-50M', remoteAddress: '10.10.20.26', localAddress: '10.10.20.1', comment: 'Jasmine Flores - NAP-06 Port 2', disabled: false },
-];
+export interface PppoeActiveSessionItem {
+  id: string;
+  username: string;
+  service: string;
+  callerIdMac: string;
+  assignedIp: string;
+  uptime: string;
+  encoding: string;
+  sessionId?: string;
+  limitBytesIn?: number;
+  limitBytesOut?: number;
+  radius?: boolean;
+}
+
+export interface PppoeProfileItem {
+  id: string;
+  name: string;
+  rateLimitRx?: string;
+  rateLimitTx?: string;
+  rateLimit?: string;
+  localAddress?: string;
+  remoteAddressPool?: string;
+  dnsServers?: string;
+  onlyOne?: string;
+  useEncryption?: string;
+  comment?: string;
+}
+
+export interface IpPoolItem {
+  id: string;
+  name: string;
+  ranges: string;
+  nextPool?: string;
+  comment?: string;
+}
+
+export interface PppoeQueryResult<T> {
+  success: boolean;
+  data: T[];
+  count: number;
+  statusCode?: number;
+  error?: string;
+  message?: string;
+}
 
 /**
- * 8. Fetch live or existing PPPoE Secrets from MikroTik RouterOS
+ * 8. Fetch live PPPoE Secrets from MikroTik RouterOS (Zero Mock Data)
  */
-export const fetchPppoeSecrets = async (
+export const fetchPppoeSecretsDetailed = async (
   creds: MikrotikCredentials
-): Promise<PppoeSecretItem[]> => {
+): Promise<PppoeQueryResult<PppoeSecretItem>> => {
   const cleanHost = creds.ipAddress.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
   const port = creds.port || (creds.useHttps ? 443 : 80);
 
-  // 1. Try dedicated backend proxy endpoint first
+  // 1. Dedicated backend proxy endpoints
   const proxyEndpoints = [
     '/api/getPppoeSecrets',
     '/api/mikrotikSecrets',
@@ -577,12 +609,13 @@ export const fetchPppoeSecrets = async (
   for (const endpoint of proxyEndpoints) {
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 6000);
+      const timeoutId = setTimeout(() => controller.abort(), 7000);
 
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          routerId: creds.id || creds.name,
           host: cleanHost,
           port: port,
           username: creds.username || 'admin',
@@ -593,21 +626,37 @@ export const fetchPppoeSecrets = async (
       });
       clearTimeout(timeoutId);
 
-      if (res.ok) {
-        const data = await res.json();
-        if (data && Array.isArray(data.secrets) && data.secrets.length > 0) {
-          return data.secrets;
+      const data = await res.json().catch(() => null);
+      if (data) {
+        if (data.statusCode === 401 || data.error === 'Unauthorized' || res.status === 401) {
+          return {
+            success: false,
+            data: [],
+            count: 0,
+            statusCode: 401,
+            error: 'Unauthorized',
+            message: data.message || `RouterOS authentication failed (HTTP 401 Unauthorized) for user '${creds.username}'`,
+          };
+        }
+        if (data.success && (Array.isArray(data.data) || Array.isArray(data.secrets))) {
+          const list = Array.isArray(data.data) ? data.data : data.secrets;
+          return {
+            success: true,
+            data: list,
+            count: list.length,
+            statusCode: 200,
+          };
         }
       }
     } catch (_) {}
   }
 
-  // 2. Direct RouterOS REST API request via executeMikrotikRequest
+  // 2. Direct RouterOS REST API request fallback
   const url = `${getBaseUrl(creds)}/ppp/secret`;
 
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 6000);
+    const timeoutId = setTimeout(() => controller.abort(), 7000);
 
     const response = await executeMikrotikRequest(url, {
       method: 'GET',
@@ -616,65 +665,138 @@ export const fetchPppoeSecrets = async (
     });
     clearTimeout(timeoutId);
 
+    if (response.status === 401 || response.status === 403) {
+      return {
+        success: false,
+        data: [],
+        count: 0,
+        statusCode: response.status,
+        error: 'Unauthorized',
+        message: `RouterOS authentication failed (HTTP ${response.status} Unauthorized) for user '${creds.username}'`,
+      };
+    }
+
     if (response.ok) {
       const data = await response.json();
-      if (Array.isArray(data) && data.length > 0) {
-        return data.map((item: any) => ({
-          name: item.name || '',
-          password: item.password || '',
-          service: item.service || 'pppoe',
-          profile: item.profile || 'default',
-          remoteAddress: item['remote-address'] || '',
-          localAddress: item['local-address'] || '',
-          callerId: item['caller-id'] || '',
-          comment: item.comment || '',
-          disabled: item.disabled === 'true' || item.disabled === true,
-        }));
-      }
+      const items = Array.isArray(data) ? data : (data ? [data] : []);
+      const mapped: PppoeSecretItem[] = items.map((item: any) => ({
+        id: item['.id'] || item.name || '',
+        name: item.name || '',
+        password: item.password || '••••••••',
+        service: item.service || 'pppoe',
+        profile: item.profile || 'default',
+        remoteAddress: item['remote-address'] || '',
+        localAddress: item['local-address'] || '',
+        callerId: item['caller-id'] || '',
+        comment: item.comment || '',
+        disabled: item.disabled === 'true' || item.disabled === true,
+        lastLoggedOut: item['last-logged-out'] || '',
+      }));
+
+      return {
+        success: true,
+        data: mapped,
+        count: mapped.length,
+        statusCode: 200,
+      };
     }
-  } catch (err) {
+  } catch (err: any) {
     console.warn('[MikroTik Bridge] Could not fetch remote PPPoE secrets:', err);
+    return {
+      success: false,
+      data: [],
+      count: 0,
+      statusCode: 500,
+      error: 'NetworkError',
+      message: err.message || 'Unable to connect to RouterOS REST API',
+    };
   }
 
-  // 3. Fallback: Parse registered subscriber secrets from localStorage if available
-  try {
-    const stored = localStorage.getItem('swiftstream_customers');
-    if (stored) {
-      const custs = JSON.parse(stored);
-      if (Array.isArray(custs) && custs.length > 0) {
-        const secretsFromStorage: PppoeSecretItem[] = custs
-          .filter((c: any) => c.pppoeUsername)
-          .map((c: any) => ({
-            name: c.pppoeUsername,
-            password: c.pppoePassword || '••••••••',
-            service: 'pppoe',
-            profile: c.pppoeProfile || 'default',
-            remoteAddress: c.ipAddress || '',
-            localAddress: '10.10.20.1',
-            comment: `${c.name || 'Subscriber'} - Plan ID: ${c.planId || 'Standard'}`,
-            disabled: c.status === 'suspended' || c.status === 'disconnected',
-          }));
-        if (secretsFromStorage.length > 0) {
-          return secretsFromStorage;
-        }
-      }
-    }
-  } catch (_) {}
+  return {
+    success: false,
+    data: [],
+    count: 0,
+    statusCode: 502,
+    error: 'Unreachable',
+    message: 'Could not reach RouterOS PPPoE service',
+  };
+};
 
-  return fallbackPppoeSecrets;
+export const fetchPppoeSecrets = async (
+  creds: MikrotikCredentials
+): Promise<PppoeSecretItem[]> => {
+  const res = await fetchPppoeSecretsDetailed(creds);
+  if (!res.success && res.statusCode === 401) {
+    throw new Error(res.message || 'RouterOS authentication failed (HTTP 401 Unauthorized)');
+  }
+  return res.data;
 };
 
 /**
- * 9. Fetch PPPoE Profiles from MikroTik RouterOS
+ * 8B. Fetch live PPPoE Active Sessions from MikroTik RouterOS (/rest/ppp/active)
  */
-export const fetchPppoeProfiles = async (
+export const fetchPppoeActiveSessions = async (
   creds: MikrotikCredentials
-): Promise<string[]> => {
-  const url = `${getBaseUrl(creds)}/ppp/profile`;
+): Promise<PppoeQueryResult<PppoeActiveSessionItem>> => {
+  const cleanHost = creds.ipAddress.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  const port = creds.port || (creds.useHttps ? 443 : 80);
 
+  const proxyEndpoints = [
+    '/api/getPppoeActive',
+    '/api/mikrotikActiveSessions',
+    'https://asia-southeast1-swiftstream-portal.cloudfunctions.net/getPppoeActive',
+  ];
+
+  for (const endpoint of proxyEndpoints) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 7000);
+
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          routerId: creds.id || creds.name,
+          host: cleanHost,
+          port: port,
+          username: creds.username || 'admin',
+          password: creds.password || '',
+          useHttps: creds.useHttps || false,
+        }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      const data = await res.json().catch(() => null);
+      if (data) {
+        if (data.statusCode === 401 || data.error === 'Unauthorized' || res.status === 401) {
+          return {
+            success: false,
+            data: [],
+            count: 0,
+            statusCode: 401,
+            error: 'Unauthorized',
+            message: data.message || `RouterOS authentication failed (HTTP 401 Unauthorized) for user '${creds.username}'`,
+          };
+        }
+        if (data.success && (Array.isArray(data.data) || Array.isArray(data.sessions))) {
+          const list = Array.isArray(data.data) ? data.data : data.sessions;
+          return {
+            success: true,
+            data: list,
+            count: list.length,
+            statusCode: 200,
+          };
+        }
+      }
+    } catch (_) {}
+  }
+
+  // Direct REST fallback
+  const url = `${getBaseUrl(creds)}/ppp/active`;
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 6000);
+    const timeoutId = setTimeout(() => controller.abort(), 7000);
 
     const response = await executeMikrotikRequest(url, {
       method: 'GET',
@@ -683,17 +805,320 @@ export const fetchPppoeProfiles = async (
     });
     clearTimeout(timeoutId);
 
+    if (response.status === 401 || response.status === 403) {
+      return {
+        success: false,
+        data: [],
+        count: 0,
+        statusCode: response.status,
+        error: 'Unauthorized',
+        message: `RouterOS authentication failed (HTTP 401 Unauthorized) for user '${creds.username}'`,
+      };
+    }
+
     if (response.ok) {
       const data = await response.json();
-      if (Array.isArray(data) && data.length > 0) {
-        return data.map((item: any) => item.name).filter(Boolean);
-      }
+      const items = Array.isArray(data) ? data : (data ? [data] : []);
+      const mapped: PppoeActiveSessionItem[] = items.map((item: any) => ({
+        id: item['.id'] || item.name || item['session-id'] || '',
+        username: item.name || '',
+        service: item.service || 'pppoe',
+        callerIdMac: item['caller-id'] || '',
+        assignedIp: item.address || item['remote-address'] || '',
+        uptime: item.uptime || '',
+        encoding: item.encoding || 'MPPE 128-bit',
+        sessionId: item['session-id'] || '',
+        limitBytesIn: item['limit-bytes-in'] || 0,
+        limitBytesOut: item['limit-bytes-out'] || 0,
+        radius: item.radius === 'true' || item.radius === true,
+      }));
+
+      return {
+        success: true,
+        data: mapped,
+        count: mapped.length,
+        statusCode: 200,
+      };
     }
-  } catch (err) {
-    console.warn('[MikroTik Bridge] Could not fetch remote PPPoE profiles:', err);
+  } catch (err: any) {
+    return {
+      success: false,
+      data: [],
+      count: 0,
+      statusCode: 500,
+      error: 'NetworkError',
+      message: err.message,
+    };
   }
 
+  return {
+    success: false,
+    data: [],
+    count: 0,
+    statusCode: 502,
+    error: 'Unreachable',
+    message: 'Could not reach RouterOS PPPoE active sessions',
+  };
+};
+
+/**
+ * 9. Fetch PPPoE Profiles from MikroTik RouterOS (/rest/ppp/profile)
+ */
+export const fetchPppoeProfilesDetailed = async (
+  creds: MikrotikCredentials
+): Promise<PppoeQueryResult<PppoeProfileItem>> => {
+  const cleanHost = creds.ipAddress.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  const port = creds.port || (creds.useHttps ? 443 : 80);
+
+  const proxyEndpoints = [
+    '/api/getPppoeProfiles',
+    'https://asia-southeast1-swiftstream-portal.cloudfunctions.net/getPppoeProfiles',
+  ];
+
+  for (const endpoint of proxyEndpoints) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 7000);
+
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          routerId: creds.id || creds.name,
+          host: cleanHost,
+          port: port,
+          username: creds.username || 'admin',
+          password: creds.password || '',
+          useHttps: creds.useHttps || false,
+        }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      const data = await res.json().catch(() => null);
+      if (data) {
+        if (data.statusCode === 401 || data.error === 'Unauthorized' || res.status === 401) {
+          return {
+            success: false,
+            data: [],
+            count: 0,
+            statusCode: 401,
+            error: 'Unauthorized',
+            message: data.message || `RouterOS authentication failed (HTTP 401)`,
+          };
+        }
+        if (data.success && (Array.isArray(data.data) || Array.isArray(data.profiles))) {
+          const list = Array.isArray(data.data) ? data.data : data.profiles;
+          return {
+            success: true,
+            data: list,
+            count: list.length,
+            statusCode: 200,
+          };
+        }
+      }
+    } catch (_) {}
+  }
+
+  // Direct REST fallback
+  const url = `${getBaseUrl(creds)}/ppp/profile`;
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 7000);
+
+    const response = await executeMikrotikRequest(url, {
+      method: 'GET',
+      headers: getAuthHeaders(creds.username, creds.password),
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    if (response.status === 401 || response.status === 403) {
+      return {
+        success: false,
+        data: [],
+        count: 0,
+        statusCode: response.status,
+        error: 'Unauthorized',
+        message: 'RouterOS authentication failed (HTTP 401)',
+      };
+    }
+
+    if (response.ok) {
+      const data = await response.json();
+      const items = Array.isArray(data) ? data : (data ? [data] : []);
+      const mapped: PppoeProfileItem[] = items.map((item: any) => ({
+        id: item['.id'] || item.name || '',
+        name: item.name || '',
+        rateLimitRx: (item['rate-limit'] || '').split('/')[0] || '',
+        rateLimitTx: (item['rate-limit'] || '').split('/')[1] || '',
+        rateLimit: item['rate-limit'] || '',
+        localAddress: item['local-address'] || '',
+        remoteAddressPool: item['remote-address'] || '',
+        dnsServers: item['dns-server'] || '',
+        onlyOne: item['only-one'] || 'default',
+        useEncryption: item['use-encryption'] || 'default',
+        comment: item.comment || '',
+      }));
+
+      return {
+        success: true,
+        data: mapped,
+        count: mapped.length,
+        statusCode: 200,
+      };
+    }
+  } catch (err: any) {
+    return {
+      success: false,
+      data: [],
+      count: 0,
+      statusCode: 500,
+      error: 'NetworkError',
+      message: err.message,
+    };
+  }
+
+  return {
+    success: false,
+    data: [],
+    count: 0,
+    statusCode: 502,
+    error: 'Unreachable',
+    message: 'Could not reach RouterOS PPPoE profiles',
+  };
+};
+
+export const fetchPppoeProfiles = async (
+  creds: MikrotikCredentials
+): Promise<string[]> => {
+  const res = await fetchPppoeProfilesDetailed(creds);
+  if (res.success && res.data.length > 0) {
+    return res.data.map((p) => p.name).filter(Boolean);
+  }
   return ['default'];
+};
+
+/**
+ * 9B. Fetch IP Pools from MikroTik RouterOS (/rest/ip/pool)
+ */
+export const fetchIpPools = async (
+  creds: MikrotikCredentials
+): Promise<PppoeQueryResult<IpPoolItem>> => {
+  const cleanHost = creds.ipAddress.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  const port = creds.port || (creds.useHttps ? 443 : 80);
+
+  const proxyEndpoints = [
+    '/api/getIpPools',
+    'https://asia-southeast1-swiftstream-portal.cloudfunctions.net/getIpPools',
+  ];
+
+  for (const endpoint of proxyEndpoints) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 7000);
+
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          routerId: creds.id || creds.name,
+          host: cleanHost,
+          port: port,
+          username: creds.username || 'admin',
+          password: creds.password || '',
+          useHttps: creds.useHttps || false,
+        }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      const data = await res.json().catch(() => null);
+      if (data) {
+        if (data.statusCode === 401 || data.error === 'Unauthorized' || res.status === 401) {
+          return {
+            success: false,
+            data: [],
+            count: 0,
+            statusCode: 401,
+            error: 'Unauthorized',
+            message: data.message || `RouterOS authentication failed (HTTP 401)`,
+          };
+        }
+        if (data.success && (Array.isArray(data.data) || Array.isArray(data.pools))) {
+          const list = Array.isArray(data.data) ? data.data : data.pools;
+          return {
+            success: true,
+            data: list,
+            count: list.length,
+            statusCode: 200,
+          };
+        }
+      }
+    } catch (_) {}
+  }
+
+  // Direct REST fallback
+  const url = `${getBaseUrl(creds)}/ip/pool`;
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 7000);
+
+    const response = await executeMikrotikRequest(url, {
+      method: 'GET',
+      headers: getAuthHeaders(creds.username, creds.password),
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    if (response.status === 401 || response.status === 403) {
+      return {
+        success: false,
+        data: [],
+        count: 0,
+        statusCode: response.status,
+        error: 'Unauthorized',
+        message: 'RouterOS authentication failed (HTTP 401)',
+      };
+    }
+
+    if (response.ok) {
+      const data = await response.json();
+      const items = Array.isArray(data) ? data : (data ? [data] : []);
+      const mapped: IpPoolItem[] = items.map((item: any) => ({
+        id: item['.id'] || item.name || '',
+        name: item.name || '',
+        ranges: item.ranges || '',
+        nextPool: item['next-pool'] || '',
+        comment: item.comment || '',
+      }));
+
+      return {
+        success: true,
+        data: mapped,
+        count: mapped.length,
+        statusCode: 200,
+      };
+    }
+  } catch (err: any) {
+    return {
+      success: false,
+      data: [],
+      count: 0,
+      statusCode: 500,
+      error: 'NetworkError',
+      message: err.message,
+    };
+  }
+
+  return {
+    success: false,
+    data: [],
+    count: 0,
+    statusCode: 502,
+    error: 'Unreachable',
+    message: 'Could not reach RouterOS IP pools',
+  };
 };
 
 export interface FullLiveTelemetryResult extends RouterHealthInfo {

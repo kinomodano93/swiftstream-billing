@@ -932,8 +932,9 @@ exports.getPppoeSecrets = onRequest(
         timeout: 10000,
       });
 
-      const items = Array.isArray(response.data) ? response.data : [];
+      const items = Array.isArray(response.data) ? response.data : (response.data ? [response.data] : []);
       const secrets = items.map((item) => ({
+        id: item['.id'] || item.name || '',
         name: item.name || '',
         password: item.password || '',
         service: item.service || 'pppoe',
@@ -943,18 +944,22 @@ exports.getPppoeSecrets = onRequest(
         callerId: item['caller-id'] || '',
         comment: item.comment || '',
         disabled: item.disabled === 'true' || item.disabled === true,
+        lastLoggedOut: item['last-logged-out'] || '',
       }));
 
       return res.status(200).json({
         success: true,
         count: secrets.length,
         secrets,
+        data: secrets,
       });
     } catch (error) {
       console.error("PPPoE secrets query error:", error.response?.data || error.message);
-      return res.status(500).json({
+      const statusCode = error.response ? error.response.status : 500;
+      return res.status(statusCode).json({
         success: false,
-        message: "Failed to retrieve PPPoE secrets from MikroTik",
+        statusCode,
+        message: statusCode === 401 ? "RouterOS authentication failed (HTTP 401 Unauthorized)" : "Failed to retrieve PPPoE secrets from MikroTik",
         error: error.response?.data || error.message,
       });
     }
@@ -962,6 +967,240 @@ exports.getPppoeSecrets = onRequest(
 );
 
 exports.mikrotikSecrets = exports.getPppoeSecrets;
+
+exports.getPppoeActive = onRequest(
+  {
+    region: "asia-southeast1",
+    cors: true,
+  },
+  async (req, res) => {
+    res.set("Access-Control-Allow-Origin", "*");
+    res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+    if (req.method === "OPTIONS") {
+      return res.status(204).send("");
+    }
+
+    try {
+      const { host, port, username, password, routerId } = req.body || {};
+
+      let cleanHost = host;
+      let cleanPort = port;
+      let cleanUser = username;
+      let cleanPass = password;
+
+      if (routerId || (!cleanHost && req.body)) {
+        const resolved = await resolveRouterCredentials(req.body);
+        cleanHost = cleanHost || resolved.host;
+        cleanPort = cleanPort || resolved.port;
+        cleanUser = cleanUser || resolved.username;
+        cleanPass = cleanPass !== undefined ? cleanPass : resolved.password;
+      }
+
+      if (!cleanHost || !cleanPort || !cleanUser) {
+        return res.status(400).json({
+          success: false,
+          message: "Missing MikroTik connection information",
+        });
+      }
+
+      const cleanHostFormatted = cleanHost.replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+      const url = `http://${cleanHostFormatted}:${cleanPort}/rest/ppp/active`;
+
+      const response = await axios.get(url, {
+        auth: { username: cleanUser, password: cleanPass },
+        timeout: 10000,
+      });
+
+      const items = Array.isArray(response.data) ? response.data : (response.data ? [response.data] : []);
+      const activeSessions = items.map((item) => ({
+        id: item['.id'] || item.name || item['session-id'] || '',
+        username: item.name || '',
+        service: item.service || 'pppoe',
+        callerIdMac: item['caller-id'] || '',
+        assignedIp: item.address || item['remote-address'] || '',
+        uptime: item.uptime || '',
+        encoding: item.encoding || 'MPPE 128-bit',
+        sessionId: item['session-id'] || '',
+        limitBytesIn: item['limit-bytes-in'] || 0,
+        limitBytesOut: item['limit-bytes-out'] || 0,
+        radius: item.radius === 'true' || item.radius === true,
+      }));
+
+      return res.status(200).json({
+        success: true,
+        count: activeSessions.length,
+        data: activeSessions,
+        sessions: activeSessions,
+      });
+    } catch (error) {
+      console.error("PPPoE active sessions query error:", error.response?.data || error.message);
+      const statusCode = error.response ? error.response.status : 500;
+      return res.status(statusCode).json({
+        success: false,
+        statusCode,
+        message: statusCode === 401 ? "RouterOS authentication failed (HTTP 401 Unauthorized)" : "Failed to retrieve active PPPoE sessions from MikroTik",
+        error: error.response?.data || error.message,
+      });
+    }
+  }
+);
+
+exports.mikrotikActiveSessions = exports.getPppoeActive;
+
+exports.getPppoeProfiles = onRequest(
+  {
+    region: "asia-southeast1",
+    cors: true,
+  },
+  async (req, res) => {
+    res.set("Access-Control-Allow-Origin", "*");
+    res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+    if (req.method === "OPTIONS") {
+      return res.status(204).send("");
+    }
+
+    try {
+      const { host, port, username, password, routerId } = req.body || {};
+
+      let cleanHost = host;
+      let cleanPort = port;
+      let cleanUser = username;
+      let cleanPass = password;
+
+      if (routerId || (!cleanHost && req.body)) {
+        const resolved = await resolveRouterCredentials(req.body);
+        cleanHost = cleanHost || resolved.host;
+        cleanPort = cleanPort || resolved.port;
+        cleanUser = cleanUser || resolved.username;
+        cleanPass = cleanPass !== undefined ? cleanPass : resolved.password;
+      }
+
+      if (!cleanHost || !cleanPort || !cleanUser) {
+        return res.status(400).json({
+          success: false,
+          message: "Missing MikroTik connection information",
+        });
+      }
+
+      const cleanHostFormatted = cleanHost.replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+      const url = `http://${cleanHostFormatted}:${cleanPort}/rest/ppp/profile`;
+
+      const response = await axios.get(url, {
+        auth: { username: cleanUser, password: cleanPass },
+        timeout: 10000,
+      });
+
+      const items = Array.isArray(response.data) ? response.data : (response.data ? [response.data] : []);
+      const profiles = items.map((item) => ({
+        id: item['.id'] || item.name || '',
+        name: item.name || '',
+        rateLimitRx: (item['rate-limit'] || '').split('/')[0] || '',
+        rateLimitTx: (item['rate-limit'] || '').split('/')[1] || '',
+        rateLimit: item['rate-limit'] || '',
+        localAddress: item['local-address'] || '',
+        remoteAddressPool: item['remote-address'] || '',
+        dnsServers: item['dns-server'] || '',
+        onlyOne: item['only-one'] || 'default',
+        useEncryption: item['use-encryption'] || 'default',
+        comment: item.comment || '',
+      }));
+
+      return res.status(200).json({
+        success: true,
+        count: profiles.length,
+        data: profiles,
+        profiles,
+      });
+    } catch (error) {
+      console.error("PPPoE profiles query error:", error.response?.data || error.message);
+      const statusCode = error.response ? error.response.status : 500;
+      return res.status(statusCode).json({
+        success: false,
+        statusCode,
+        message: statusCode === 401 ? "RouterOS authentication failed (HTTP 401 Unauthorized)" : "Failed to retrieve PPPoE profiles from MikroTik",
+        error: error.response?.data || error.message,
+      });
+    }
+  }
+);
+
+exports.getIpPools = onRequest(
+  {
+    region: "asia-southeast1",
+    cors: true,
+  },
+  async (req, res) => {
+    res.set("Access-Control-Allow-Origin", "*");
+    res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+    if (req.method === "OPTIONS") {
+      return res.status(204).send("");
+    }
+
+    try {
+      const { host, port, username, password, routerId } = req.body || {};
+
+      let cleanHost = host;
+      let cleanPort = port;
+      let cleanUser = username;
+      let cleanPass = password;
+
+      if (routerId || (!cleanHost && req.body)) {
+        const resolved = await resolveRouterCredentials(req.body);
+        cleanHost = cleanHost || resolved.host;
+        cleanPort = cleanPort || resolved.port;
+        cleanUser = cleanUser || resolved.username;
+        cleanPass = cleanPass !== undefined ? cleanPass : resolved.password;
+      }
+
+      if (!cleanHost || !cleanPort || !cleanUser) {
+        return res.status(400).json({
+          success: false,
+          message: "Missing MikroTik connection information",
+        });
+      }
+
+      const cleanHostFormatted = cleanHost.replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+      const url = `http://${cleanHostFormatted}:${cleanPort}/rest/ip/pool`;
+
+      const response = await axios.get(url, {
+        auth: { username: cleanUser, password: cleanPass },
+        timeout: 10000,
+      });
+
+      const items = Array.isArray(response.data) ? response.data : (response.data ? [response.data] : []);
+      const pools = items.map((item) => ({
+        id: item['.id'] || item.name || '',
+        name: item.name || '',
+        ranges: item.ranges || '',
+        nextPool: item['next-pool'] || '',
+        comment: item.comment || '',
+      }));
+
+      return res.status(200).json({
+        success: true,
+        count: pools.length,
+        data: pools,
+        pools,
+      });
+    } catch (error) {
+      console.error("IP pools query error:", error.response?.data || error.message);
+      const statusCode = error.response ? error.response.status : 500;
+      return res.status(statusCode).json({
+        success: false,
+        statusCode,
+        message: statusCode === 401 ? "RouterOS authentication failed (HTTP 401 Unauthorized)" : "Failed to retrieve IP pools from MikroTik",
+        error: error.response?.data || error.message,
+      });
+    }
+  }
+);
+
 
 exports.mikrotikCli = onRequest(
   {

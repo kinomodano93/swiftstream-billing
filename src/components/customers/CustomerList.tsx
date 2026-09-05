@@ -4,7 +4,7 @@ import {
   Plus,
   Search,
   Filter,
-  CreditCard,
+  FileText,
   Eye,
   Edit2,
   Trash2,
@@ -24,13 +24,11 @@ import { ConfirmDeleteModal } from '../common/ConfirmDeleteModal';
 
 interface CustomerListProps {
   onOpenCustomerModal: (customer?: Customer) => void;
-  onOpenPaymentModal: (customerId: string) => void;
   onSelectCustomer: (customerId: string) => void;
 }
 
 export const CustomerList: React.FC<CustomerListProps> = ({
   onOpenCustomerModal,
-  onOpenPaymentModal,
   onSelectCustomer,
 }) => {
   const {
@@ -42,6 +40,7 @@ export const CustomerList: React.FC<CustomerListProps> = ({
     setSearchTerm,
     plans,
     napBoxes,
+    setActiveTab,
   } = useApp();
 
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -358,11 +357,14 @@ export const CustomerList: React.FC<CustomerListProps> = ({
                           )}
 
                           <button
-                            onClick={() => onOpenPaymentModal(customer.id)}
+                            onClick={() => {
+                              setSearchTerm(customer.accountNo);
+                              setActiveTab('billing');
+                            }}
                             className="p-1.5 bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600 hover:text-white rounded-lg transition-colors"
-                            title="Collect Payment (POS)"
+                            title="View Bills & Collect Payment"
                           >
-                            <CreditCard className="w-3.5 h-3.5" />
+                            <FileText className="w-3.5 h-3.5" />
                           </button>
 
                           <button

@@ -960,8 +960,8 @@ function mikrotikProxyPlugin(): Plugin {
         });
       });
 
-      // 7. PPPoE Secrets Fetch & Discovery Endpoint
-      const handleGetPppoeSecrets = (req: any, res: any) => {
+      // Helper: Dispatch JSON request to RouterOS REST API
+      const proxyRouterosEndpoint = (req: any, res: any, restPath: string, transform: (items: any[]) => any) => {
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
         res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
@@ -987,21 +987,6 @@ function mikrotikProxyPlugin(): Plugin {
           const isHttps = body.useHttps === true || port === 443;
           const transport = isHttps ? https : http;
 
-          const fallbackSecrets = [
-            { name: 'swift_jdelacruz', password: '••••••••', service: 'pppoe', profile: 'Plan-50M', remoteAddress: '10.10.20.15', localAddress: '10.10.20.1', comment: 'Juan Dela Cruz - NAP-01 Port 3', disabled: false },
-            { name: 'swift_mreyes', password: '••••••••', service: 'pppoe', profile: 'Plan-25M', remoteAddress: '10.10.20.16', localAddress: '10.10.20.1', comment: 'Maria Reyes - NAP-01 Port 4', disabled: false },
-            { name: 'swift_asanchez', password: '••••••••', service: 'pppoe', profile: 'Plan-100M', remoteAddress: '10.10.20.17', localAddress: '10.10.20.1', comment: 'Antonio Sanchez - NAP-02 Port 1', disabled: false },
-            { name: 'swift_rgarcia', password: '••••••••', service: 'pppoe', profile: 'Plan-35M', remoteAddress: '10.10.20.18', localAddress: '10.10.20.1', comment: 'Rosario Garcia - NAP-02 Port 2', disabled: false },
-            { name: 'swift_atorres', password: '••••••••', service: 'pppoe', profile: 'Plan-25M', remoteAddress: '10.10.20.19', localAddress: '10.10.20.1', comment: 'Alex Torres - NAP-03 Port 5', disabled: false },
-            { name: 'swift_cvillanueva', password: '••••••••', service: 'pppoe', profile: 'Plan-50M', remoteAddress: '10.10.20.20', localAddress: '10.10.20.1', comment: 'Carla Villanueva - NAP-03 Port 6', disabled: false },
-            { name: 'swift_elumban', password: '••••••••', service: 'pppoe', profile: 'Plan-75M', remoteAddress: '10.10.20.21', localAddress: '10.10.20.1', comment: 'Eduardo Lumban - NAP-04 Port 1', disabled: false },
-            { name: 'swift_gdomingo', password: '••••••••', service: 'pppoe', profile: 'Plan-25M', remoteAddress: '10.10.20.22', localAddress: '10.10.20.1', comment: 'Grace Domingo - NAP-04 Port 2', disabled: false },
-            { name: 'swift_pmercado', password: '••••••••', service: 'pppoe', profile: 'Plan-50M', remoteAddress: '10.10.20.23', localAddress: '10.10.20.1', comment: 'Pedro Mercado - NAP-05 Port 3', disabled: false },
-            { name: 'swift_knavarro', password: '••••••••', service: 'pppoe', profile: 'Plan-100M', remoteAddress: '10.10.20.24', localAddress: '10.10.20.1', comment: 'Kristine Navarro - NAP-05 Port 4', disabled: false },
-            { name: 'swift_mramos', password: '••••••••', service: 'pppoe', profile: 'Plan-35M', remoteAddress: '10.10.20.25', localAddress: '10.10.20.1', comment: 'Manuel Ramos - NAP-06 Port 1', disabled: false },
-            { name: 'swift_jflores', password: '••••••••', service: 'pppoe', profile: 'Plan-50M', remoteAddress: '10.10.20.26', localAddress: '10.10.20.1', comment: 'Jasmine Flores - NAP-06 Port 2', disabled: false },
-          ];
-
           try {
             const authHeader = `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`;
             const cReq = transport.request(
@@ -1009,71 +994,189 @@ function mikrotikProxyPlugin(): Plugin {
                 protocol: isHttps ? 'https:' : 'http:',
                 hostname: host,
                 port: port,
-                path: '/rest/ppp/secret',
+                path: `/rest${restPath}`,
                 method: 'GET',
                 headers: {
                   'Authorization': authHeader,
                   'Accept': 'application/json',
                 },
-                timeout: 6000,
+                timeout: 7000,
               },
               (cRes: any) => {
                 let data = '';
                 cRes.on('data', (chunk: any) => (data += chunk));
                 cRes.on('end', () => {
+                  res.setHeader('Content-Type', 'application/json');
+
+                  if (cRes.statusCode === 401 || cRes.statusCode === 403) {
+                    res.statusCode = 200; // Deliver structured error to frontend
+                    res.end(
+                      JSON.stringify({
+                        success: false,
+                        statusCode: cRes.statusCode,
+                        error: 'Unauthorized',
+                        message: `RouterOS authentication failed (HTTP ${cRes.statusCode} Unauthorized). Please enter the correct router password.`,
+                      })
+                    );
+                    return;
+                  }
+
+                  if (cRes.statusCode !== 200) {
+                    res.statusCode = 200;
+                    res.end(
+                      JSON.stringify({
+                        success: false,
+                        statusCode: cRes.statusCode,
+                        error: 'RouterError',
+                        message: `RouterOS returned HTTP ${cRes.statusCode}: ${data || 'Unknown error'}`,
+                      })
+                    );
+                    return;
+                  }
+
                   try {
                     const parsed = JSON.parse(data);
-                    if (Array.isArray(parsed) && parsed.length > 0) {
-                      const secrets = parsed.map((item: any) => ({
-                        name: item.name || '',
-                        password: item.password || '',
-                        service: item.service || 'pppoe',
-                        profile: item.profile || 'default',
-                        remoteAddress: item['remote-address'] || '',
-                        localAddress: item['local-address'] || '',
-                        callerId: item['caller-id'] || '',
-                        comment: item.comment || '',
-                        disabled: item.disabled === 'true' || item.disabled === true,
-                      }));
-                      res.statusCode = 200;
-                      res.setHeader('Content-Type', 'application/json');
-                      res.end(JSON.stringify({ success: true, count: secrets.length, secrets, source: 'live_router' }));
-                      return;
-                    }
-                  } catch (_) {}
-
-                  // Fallback if empty or parse failed
-                  res.statusCode = 200;
-                  res.setHeader('Content-Type', 'application/json');
-                  res.end(JSON.stringify({ success: true, count: fallbackSecrets.length, secrets: fallbackSecrets, source: 'subscriber_directory' }));
+                    const items = Array.isArray(parsed) ? parsed : (parsed ? [parsed] : []);
+                    const mapped = transform(items);
+                    res.statusCode = 200;
+                    res.end(
+                      JSON.stringify({
+                        success: true,
+                        count: mapped.length,
+                        data: mapped,
+                        source: 'live_router',
+                      })
+                    );
+                  } catch (e: any) {
+                    res.statusCode = 200;
+                    res.end(
+                      JSON.stringify({
+                        success: false,
+                        error: 'ParseError',
+                        message: `Failed to parse RouterOS JSON response: ${e.message}`,
+                      })
+                    );
+                  }
                 });
               }
             );
 
-            cReq.on('error', () => {
+            cReq.on('error', (err: any) => {
               res.statusCode = 200;
               res.setHeader('Content-Type', 'application/json');
-              res.end(JSON.stringify({ success: true, count: fallbackSecrets.length, secrets: fallbackSecrets, source: 'subscriber_directory' }));
+              res.end(
+                JSON.stringify({
+                  success: false,
+                  statusCode: 502,
+                  error: 'NetworkError',
+                  message: `Could not reach MikroTik at ${host}:${port}: ${err.message}`,
+                })
+              );
             });
 
             cReq.on('timeout', () => {
               cReq.destroy();
               res.statusCode = 200;
               res.setHeader('Content-Type', 'application/json');
-              res.end(JSON.stringify({ success: true, count: fallbackSecrets.length, secrets: fallbackSecrets, source: 'subscriber_directory' }));
+              res.end(
+                JSON.stringify({
+                  success: false,
+                  statusCode: 408,
+                  error: 'Timeout',
+                  message: `Connection timed out while querying ${host}:${port}${restPath}`,
+                })
+              );
             });
 
             cReq.end();
           } catch (err: any) {
             res.statusCode = 200;
             res.setHeader('Content-Type', 'application/json');
-            res.end(JSON.stringify({ success: true, count: fallbackSecrets.length, secrets: fallbackSecrets, source: 'subscriber_directory' }));
+            res.end(
+              JSON.stringify({
+                success: false,
+                statusCode: 500,
+                error: 'InternalError',
+                message: err.message,
+              })
+            );
           }
         });
       };
 
+      // 7. PPPoE Real Endpoints (No Mock Fallbacks)
+      const handleGetPppoeSecrets = (req: any, res: any) => {
+        proxyRouterosEndpoint(req, res, '/ppp/secret', (items) =>
+          items.map((item: any) => ({
+            id: item['.id'] || item.name || '',
+            name: item.name || '',
+            password: item.password || '••••••••',
+            service: item.service || 'pppoe',
+            profile: item.profile || 'default',
+            remoteAddress: item['remote-address'] || '',
+            localAddress: item['local-address'] || '',
+            callerId: item['caller-id'] || '',
+            comment: item.comment || '',
+            disabled: item.disabled === 'true' || item.disabled === true,
+            lastLoggedOut: item['last-logged-out'] || '',
+          }))
+        );
+      };
+
+      const handleGetPppoeActive = (req: any, res: any) => {
+        proxyRouterosEndpoint(req, res, '/ppp/active', (items) =>
+          items.map((item: any) => ({
+            id: item['.id'] || item.name || item['session-id'] || '',
+            username: item.name || '',
+            service: item.service || 'pppoe',
+            callerIdMac: item['caller-id'] || '',
+            assignedIp: item.address || item['remote-address'] || '',
+            uptime: item.uptime || '',
+            encoding: item.encoding || 'MPPE 128-bit',
+            sessionId: item['session-id'] || '',
+            limitBytesIn: item['limit-bytes-in'] || 0,
+            limitBytesOut: item['limit-bytes-out'] || 0,
+            radius: item.radius === 'true' || item.radius === true,
+          }))
+        );
+      };
+
+      const handleGetPppoeProfiles = (req: any, res: any) => {
+        proxyRouterosEndpoint(req, res, '/ppp/profile', (items) =>
+          items.map((item: any) => ({
+            id: item['.id'] || item.name || '',
+            name: item.name || '',
+            rateLimitRx: (item['rate-limit'] || '').split('/')[0] || '',
+            rateLimitTx: (item['rate-limit'] || '').split('/')[1] || '',
+            rateLimit: item['rate-limit'] || '',
+            localAddress: item['local-address'] || '',
+            remoteAddressPool: item['remote-address'] || '',
+            dnsServers: item['dns-server'] || '',
+            onlyOne: item['only-one'] || 'default',
+            useEncryption: item['use-encryption'] || 'default',
+            comment: item.comment || '',
+          }))
+        );
+      };
+
+      const handleGetIpPools = (req: any, res: any) => {
+        proxyRouterosEndpoint(req, res, '/ip/pool', (items) =>
+          items.map((item: any) => ({
+            id: item['.id'] || item.name || '',
+            name: item.name || '',
+            ranges: item.ranges || '',
+            nextPool: item['next-pool'] || '',
+            comment: item.comment || '',
+          }))
+        );
+      };
+
       server.middlewares.use('/api/getPppoeSecrets', handleGetPppoeSecrets);
       server.middlewares.use('/api/mikrotikSecrets', handleGetPppoeSecrets);
+      server.middlewares.use('/api/getPppoeActive', handleGetPppoeActive);
+      server.middlewares.use('/api/mikrotikActiveSessions', handleGetPppoeActive);
+      server.middlewares.use('/api/getPppoeProfiles', handleGetPppoeProfiles);
+      server.middlewares.use('/api/getIpPools', handleGetIpPools);
 
       // 8. MikroTik CLI Terminal Command Execution Endpoint
       const handleMikrotikCli = (req: any, res: any) => {

@@ -156,7 +156,6 @@ const MainLayout: React.FC = () => {
           {activeTab === 'customers' && (
             <CustomerList
               onOpenCustomerModal={handleOpenCustomerModal}
-              onOpenPaymentModal={(id) => handleOpenPayment(id)}
               onSelectCustomer={(id) => setSelectedCustomerId(id)}
             />
           )}

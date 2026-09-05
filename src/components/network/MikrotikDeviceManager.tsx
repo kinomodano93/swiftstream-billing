@@ -1913,7 +1913,7 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({ on
       {/* TAB 3: PPPoE MANAGEMENT */}
       {activeTab === 'pppoe' && (
         <div className="space-y-4">
-          <PppoeManager />
+          <PppoeManager selectedDeviceId={selectedDevice?.id} />
         </div>
       )}
 

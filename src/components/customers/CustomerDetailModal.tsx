@@ -56,6 +56,7 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
     sendReminder,
     addCustomerWalletCredit,
     setActiveTab: setGlobalActiveTab,
+    setSearchTerm,
   } = useApp();
 
   const [activeTab, setActiveTab] = useState<'profile' | 'invoices' | 'payments' | 'repairs'>('profile');
@@ -134,11 +135,16 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
         <div className="px-6 py-3 bg-slate-900 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs">
           <div className="flex items-center gap-2">
             <button
-              onClick={() => onOpenPaymentModal(customer.id)}
+              onClick={() => {
+                onClose();
+                setSearchTerm(customer.accountNo);
+                setGlobalActiveTab('billing');
+              }}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-semibold shadow-sm transition-colors"
+              title="Go to Billing to view invoices and collect payment"
             >
-              <CreditCard className="w-3.5 h-3.5" />
-              <span>Collect Payment</span>
+              <FileText className="w-3.5 h-3.5" />
+              <span>View Bills</span>
             </button>
 
             <button

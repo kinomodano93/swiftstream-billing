@@ -94,7 +94,8 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
   const [autoSyncMikrotik, setAutoSyncMikrotik] = useState<boolean>(true);
   const [routerPasswordOverride, setRouterPasswordOverride] = useState<string>('');
   const [secretSearchQuery, setSecretSearchQuery] = useState<string>('');
-
+  const [fetchAuth401, setFetchAuth401] = useState<boolean>(false);
+  const [showRouterPassword, setShowRouterPassword] = useState<boolean>(false);
   // Hardware details
   const [selectedNapBoxId, setSelectedNapBoxId] = useState(
     customerToEdit?.network.napBoxId || napBoxes[0]?.id || ''
@@ -156,13 +157,14 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
       return;
     }
     setIsFetchingSecrets(true);
+    setFetchAuth401(false);
     const passToUse = overridePass !== undefined ? overridePass : (routerPasswordOverride || selectedRouter.password || '');
     try {
       const secrets = await fetchPppoeSecrets({
-        ipAddress: selectedRouter.ipAddress,
+        ipAddress: selectedRouter.ipAddress || selectedRouter.remoteAddress || '',
         username: selectedRouter.username || 'admin',
         password: passToUse,
-        port: selectedRouter.port || 10988,
+        port: selectedRouter.port || selectedRouter.webfigPort || 10988,
         useHttps: selectedRouter.useSsl,
       });
       setFetchedSecrets(secrets);
@@ -172,7 +174,12 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
         showToast('info', 'No Secrets Found', `No PPPoE secrets found on ${selectedRouter.name}.`);
       }
     } catch (err: any) {
-      showToast('error', 'Fetch Failed', err?.message || 'Failed to query MikroTik secrets.');
+      const msg: string = err?.message || '';
+      if (msg.includes('401') || msg.toLowerCase().includes('unauthorized') || msg.toLowerCase().includes('authentication failed')) {
+        setFetchAuth401(true);
+      } else {
+        showToast('error', 'Fetch Failed', msg || 'Failed to query MikroTik secrets.');
+      }
     } finally {
       setIsFetchingSecrets(false);
     }
@@ -716,30 +723,68 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
                   </div>
                 </div>
 
-                {/* Optional Router REST Password Override */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-xl bg-slate-900/80 border border-purple-800/30 text-xs">
-                  <div>
-                    <label className="block text-slate-400 font-medium mb-1 flex items-center gap-1.5">
-                      <Key className="w-3 h-3 text-purple-400" />
-                      <span>Router REST Password (Optional Override)</span>
-                    </label>
-                    <input
-                      type="password"
-                      value={routerPasswordOverride}
-                      onChange={(e) => setRouterPasswordOverride(e.target.value)}
-                      placeholder={selectedRouter?.password ? '•••••••• (Using Stored Password)' : 'Enter router password if required'}
-                      className="w-full px-3 py-1.5 bg-slate-950 border border-slate-700 rounded-lg text-slate-200 font-mono text-xs focus:outline-none focus:border-purple-400"
-                    />
+
+                {/* 401 Auth Banner — shown automatically when router rejects credentials */}
+                {fetchAuth401 ? (
+                  <div className="p-3 rounded-xl bg-amber-950/60 border border-amber-600/60 space-y-2">
+                    <div className="flex items-start gap-2">
+                      <Key className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-amber-300 font-semibold text-xs">Router Authentication Required</p>
+                        <p className="text-amber-400/80 text-[11px] mt-0.5">
+                          {selectedRouter?.name} ({selectedRouter?.ipAddress}:{selectedRouter?.port || selectedRouter?.webfigPort || 10988}) returned HTTP 401 — password incorrect or not set.
+                          Enter the RouterOS <span className="font-mono font-bold">admin</span> password and click Retry.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <div className="relative flex-1">
+                        <input
+                          type={showRouterPassword ? 'text' : 'password'}
+                          value={routerPasswordOverride}
+                          onChange={(e) => setRouterPasswordOverride(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter' && routerPasswordOverride) handleFetchSecrets(routerPasswordOverride); }}
+                          placeholder="Enter router password..."
+                          autoFocus
+                          className="w-full pl-3 pr-8 py-2 bg-slate-950 border border-amber-700/60 rounded-lg text-slate-200 font-mono text-xs focus:outline-none focus:border-amber-400"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowRouterPassword(!showRouterPassword)}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200"
+                        >
+                          {showRouterPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                        </button>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={!routerPasswordOverride || isFetchingSecrets}
+                        onClick={() => handleFetchSecrets(routerPasswordOverride)}
+                        className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-xs font-semibold flex items-center gap-1.5 shrink-0"
+                      >
+                        {isFetchingSecrets ? <RefreshCw className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                        Retry
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex flex-col justify-end">
-                    <p className="text-[11px] text-slate-400">
-                      Target Gateway: <span className="font-mono text-purple-300 font-semibold">{selectedRouter?.ipAddress}:{selectedRouter?.port || 10988}</span>
-                    </p>
-                    <p className="text-[10px] text-slate-500">
-                      Zero CORS / Mixed Content enabled via backend REST bridge.
-                    </p>
+                ) : (
+                  /* Compact optional override — only visible when no 401 */
+                  <div className="flex items-center gap-2 text-[11px] text-slate-500">
+                    <Key className="w-3 h-3 text-slate-600 shrink-0" />
+                    <span>Target: <span className="font-mono text-slate-400">{selectedRouter?.ipAddress}:{selectedRouter?.port || selectedRouter?.webfigPort || 10988}</span></span>
+                    {(selectedRouter?.password) ? (
+                      <span className="text-emerald-600 font-mono">• password stored</span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setFetchAuth401(true)}
+                        className="text-amber-500 hover:text-amber-400 underline underline-offset-2"
+                      >
+                        enter password
+                      </button>
+                    )}
                   </div>
-                </div>
+                )}
 
                 {fetchedSecrets.length > 0 ? (
                   <div className="space-y-3">
