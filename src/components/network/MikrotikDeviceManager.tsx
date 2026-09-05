@@ -21,6 +21,7 @@ import {
   TrendingUp,
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
   Wifi,
   Eye,
   EyeOff,
@@ -39,6 +40,7 @@ import {
   ResponsiveContainer,
   AreaChart,
   Area,
+  Line,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -58,6 +60,7 @@ import {
   fetchInterfaceTraffic,
   fetchSfpOpticalDiagnostics,
   fetchSimpleQueues,
+  pingGoogleDns,
   MikrotikCredentials,
   RouterHealthInfo,
 } from '../../services/mikrotikApiService';
@@ -194,10 +197,10 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({ on
     rxPps: number;
     txPps: number;
   }>({
-    rxMbps: 624.5,
-    txMbps: 52.8,
-    rxPps: 48500,
-    txPps: 12400,
+    rxMbps: 0,
+    txMbps: 0,
+    rxPps: 0,
+    txPps: 0,
   });
 
   // Negotiated physical link state for the selected port (from /interface/ethernet/monitor)
@@ -286,16 +289,17 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({ on
     });
   }, []);
 
-  // Bandwidth History for Chart (last 24 points)
-  const [trafficHistory, setTrafficHistory] = useState<Array<{ time: string; rx: number; tx: number }>>(() => {
+  // Bandwidth & Latency History for Chart (last 24 points)
+  const [trafficHistory, setTrafficHistory] = useState<Array<{ time: string; rx: number; tx: number; latency: number }>>(() => {
     const pts = [];
     const now = Date.now();
     for (let i = 20; i >= 0; i--) {
       const t = new Date(now - i * 2000);
       pts.push({
         time: `${t.getHours().toString().padStart(2, '0')}:${t.getMinutes().toString().padStart(2, '0')}:${t.getSeconds().toString().padStart(2, '0')}`,
-        rx: Number((320 + Math.sin(i * 0.5) * 60 + Math.random() * 20).toFixed(1)),
-        tx: Number((42 + Math.cos(i * 0.5) * 10 + Math.random() * 8).toFixed(1)),
+        rx: 0,
+        tx: 0,
+        latency: 0,
       });
     }
     return pts;
@@ -303,9 +307,23 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({ on
 
   // Chart Scale Mode: 'auto' (NOC dynamic zoom) vs 'fixed' (physical interface limit)
   const [chartScaleMode, setChartScaleMode] = useState<'auto' | 'fixed'>('auto');
+  const [showLatencyLine, setShowLatencyLine] = useState<boolean>(true);
+  const [latencySamples, setLatencySamples] = useState<number[]>([]);
+  const [liveLatency, setLiveLatency] = useState<number>(0);
+
+  // Current live latency and computed jitter (prioritize fast traffic poll duration over multi-query health check)
+  const currentLatency = liveLatency > 0 ? liveLatency : (liveHealth?.status === 'connected' ? (liveHealth.latencyMs || 0) : 0);
+  const currentJitter = useMemo(() => {
+    if (latencySamples.length < 2) return 0.5;
+    let diff = 0;
+    for (let i = 1; i < latencySamples.length; i++) {
+      diff += Math.abs(latencySamples[i] - latencySamples[i - 1]);
+    }
+    return Number((diff / (latencySamples.length - 1)).toFixed(1));
+  }, [latencySamples]);
 
   // Peak throughput tracked during current session
-  const [peakTraffic, setPeakTraffic] = useState<{ rx: number; tx: number }>({ rx: 612.4, tx: 58.2 });
+  const [peakTraffic, setPeakTraffic] = useState<{ rx: number; tx: number }>({ rx: 0, tx: 0 });
 
   // Dynamic Chart Y-Axis Domain calculation
   const chartDomainMax = useMemo(() => {
@@ -333,6 +351,12 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({ on
     if (target <= 5000) return 5000;
     return Math.min(dynamicPortMaxMbps, Math.ceil(target / 1000) * 1000);
   }, [trafficHistory, portTraffic, chartScaleMode, dynamicPortMaxMbps]);
+
+  // Dynamic Latency Y-Axis Domain calculation
+  const latencyDomainMax = useMemo(() => {
+    const maxLat = Math.max(...trafficHistory.map((p) => p.latency || 0), currentLatency, 25);
+    return Math.ceil(maxLat * 1.25);
+  }, [trafficHistory, currentLatency]);
 
   // Simple Queues State
   const [queuesList, setQueuesList] = useState<any[]>([]);
@@ -415,8 +439,17 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({ on
     };
   }, [selectedRouterId]);
 
+  // 1B. Reset or clear port traffic immediately when switching selected port
+  useEffect(() => {
+    const iface = liveInterfaces.find((i) => i.name === selectedPort);
+    if (!iface || !iface.running || iface.disabled) {
+      setPortTraffic({ rxMbps: 0, txMbps: 0, rxPps: 0, txPps: 0 });
+    }
+  }, [selectedPort, liveInterfaces]);
+
   // 2. Real-Time Telemetry & Traffic Stream Loop
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const pollCountRef = useRef<number>(0);
 
   useEffect(() => {
     let isMounted = true;
@@ -426,12 +459,15 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({ on
       setIsPolling(true);
       try {
         const creds = getDeviceCreds(selectedDevice);
-        
-        // Single unified call (Same as CPU & RAM approach)
-        const [health, traffic, monitor] = await Promise.allSettled([
-          testRouterConnection(creds),
+        pollCountRef.current += 1;
+        const isFullCheck = pollCountRef.current === 1 || pollCountRef.current % 4 === 0;
+
+        // Fetch high-frequency interface traffic and ICMP ping to 8.8.8.8
+        const [traffic, pingResult, health, monitor] = await Promise.allSettled([
           fetchInterfaceTraffic(selectedPort, creds),
-          fetchSfpOpticalDiagnostics(creds, selectedPort),
+          pingGoogleDns(creds, '8.8.8.8'),
+          isFullCheck ? testRouterConnection(creds) : Promise.resolve(null as any),
+          isFullCheck ? fetchSfpOpticalDiagnostics(creds, selectedPort) : Promise.resolve(null as any),
         ]);
 
         if (!isMounted) return;
@@ -441,52 +477,58 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({ on
           applyPortLink(monitor.value, selectedPort);
         }
 
-        let curRx = portTraffic.rxMbps;
-        let curTx = portTraffic.txMbps;
-        let curRxPps = portTraffic.rxPps;
-        let curTxPps = portTraffic.txPps;
+        // Check if selected interface is offline/down/disabled or router is offline
+        const targetIface = liveInterfacesRef.current.find((i: any) => i.name === selectedPort);
+        const isDeviceOffline = selectedDevice.status === 'offline';
+        const isIfaceDown = targetIface ? (!targetIface.running || targetIface.disabled) : false;
+        const isLinkDown = monitor.status === 'fulfilled' && monitor.value && (monitor.value.status === 'no-link' || monitor.value.status === 'link_down');
+        const isPortOffline = isDeviceOffline || isIfaceDown || isLinkDown;
 
-        if (traffic.status === 'fulfilled' && traffic.value) {
+        let curRx = 0;
+        let curTx = 0;
+        let curRxPps = 0;
+        let curTxPps = 0;
+        let curLatency = 0;
+
+        if (!isPortOffline && traffic.status === 'fulfilled' && traffic.value) {
           const tf = traffic.value;
-          if (tf.rxBps > 0 || tf.txBps > 0) {
-            curRx = Number((tf.rxBps / 1000000).toFixed(2));
-            curTx = Number((tf.txBps / 1000000).toFixed(2));
-            curRxPps = tf.rxPps;
-            curTxPps = tf.txPps;
-          } else {
-            // Dynamically scale traffic baseline according to the actual interface speed
-            const cap = dynamicPortMaxMbps;
-            const rxBase = cap >= 10000 ? 540 : cap >= 1000 ? 320 : 45;
-            const txBase = cap >= 10000 ? 58 : cap >= 1000 ? 38 : 9;
-            const delta = Math.max(1, cap * 0.03);
-            curRx = Number((rxBase + (Math.random() * delta * 2 - delta)).toFixed(1));
-            curTx = Number((txBase + (Math.random() * (delta * 0.3) * 2 - (delta * 0.3))).toFixed(1));
+          // Actual RouterOS bits-per-second converted to Mbps (exact real data)
+          curRx = Number(((tf.rxBps || 0) / 1000000).toFixed(2));
+          curTx = Number(((tf.txBps || 0) / 1000000).toFixed(2));
+          curRxPps = tf.rxPps || 0;
+          curTxPps = tf.txPps || 0;
+        }
+
+        // Prioritize ICMP ping to 8.8.8.8 as requested
+        if (!isPortOffline) {
+          if (pingResult.status === 'fulfilled' && pingResult.value && pingResult.value.latencyMs > 0) {
+            curLatency = pingResult.value.latencyMs;
+          } else if (traffic.status === 'fulfilled' && traffic.value?.latencyMs) {
+            curLatency = traffic.value.latencyMs;
           }
-        } else {
-          // If traffic request failed/timed out, maintain active telemetry stream based on port capacity
-          const cap = dynamicPortMaxMbps;
-          const rxBase = cap >= 10000 ? 520 : cap >= 1000 ? 290 : 42;
-          const txBase = cap >= 10000 ? 52 : cap >= 1000 ? 32 : 8;
-          const delta = Math.max(1, cap * 0.03);
-          curRx = Number((rxBase + (Math.random() * delta * 2 - delta)).toFixed(1));
-          curTx = Number((txBase + (Math.random() * (delta * 0.3) * 2 - (delta * 0.3))).toFixed(1));
         }
 
         setPortTraffic({
           rxMbps: curRx,
           txMbps: curTx,
-          rxPps: curRxPps || Math.round((curRx * 1000000) / (1500 * 8)),
-          txPps: curTxPps || Math.round((curTx * 1000000) / (1500 * 8)),
+          rxPps: curRxPps,
+          txPps: curTxPps,
         });
 
-        setPeakTraffic((prev) => ({
-          rx: Math.max(prev.rx, curRx),
-          tx: Math.max(prev.tx, curTx),
-        }));
+        if (curRx > 0 || curTx > 0) {
+          setPeakTraffic((prev) => ({
+            rx: Math.max(prev.rx, curRx),
+            tx: Math.max(prev.tx, curTx),
+          }));
+        }
 
         if (health.status === 'fulfilled' && health.value) {
           const res = health.value;
           setLiveHealth(res);
+          // If interface polling didn't supply latency, fallback to health ping
+          if (curLatency === 0 && res.status === 'connected' && !isPortOffline) {
+            curLatency = res.latencyMs || 0;
+          }
 
           // If real interfaces returned in health, update live list (hardware only; PPPoE sessions go to their own tab)
           if (Array.isArray(res.interfaces) && res.interfaces.length > 0) {
@@ -514,12 +556,18 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({ on
           }
         }
 
-        // Push new point into chart history
+        const finalLatency = isPortOffline ? 0 : curLatency;
+        setLiveLatency(finalLatency);
+        if (finalLatency > 0) {
+          setLatencySamples((prev) => [...prev.slice(-9), finalLatency]);
+        }
+
+        // Push new point into chart history (including real latency)
         const now = new Date();
         const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
         setTrafficHistory((prev) => [
           ...prev.slice(-18),
-          { time: timeStr, rx: curRx, tx: curTx },
+          { time: timeStr, rx: curRx, tx: curTx, latency: finalLatency },
         ]);
       } catch (_) {
       } finally {
@@ -555,7 +603,7 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({ on
           name: `queue_${c.accountNo.toLowerCase()}`,
           target: c.network.ipAddress || `10.200.14.${idx + 10}`,
           'max-limit': `${c.monthlyFee > 1500 ? '100M' : '50M'}/${c.monthlyFee > 1500 ? '100M' : '50M'}`,
-          rate: `${Math.round(Math.random() * 25)}M/${Math.round(Math.random() * 8)}M`,
+          rate: '0M/0M',
           dropped: '0/0',
           dynamic: 'true',
           disabled: 'false',
@@ -1048,7 +1096,8 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({ on
             </div>
 
             {/* Current Rates Badges */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-950/80 p-4 rounded-2xl border border-slate-800/80">
+            {/* Current Rates Badges */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 bg-slate-950/80 p-4 rounded-2xl border border-slate-800/80">
               <div className="p-3 bg-slate-900/60 rounded-xl border border-slate-800/60">
                 <span className="text-[11px] text-slate-400 font-medium flex items-center gap-1">
                   <ArrowDownLeft className="w-3.5 h-3.5 text-emerald-400" /> Download (Rx)
@@ -1088,13 +1137,30 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({ on
                   <div
                     className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-cyan-400 transition-all duration-500"
                     style={{
-                      width: `${Math.max(4, Math.min(100, (portTraffic.rxMbps / dynamicPortMaxMbps) * 100))}%`,
+                      width: `${(!selectedIfaceObj?.running || selectedIfaceObj?.disabled || portLink.status === 'link_down' || portTraffic.rxMbps === 0) ? 0 : Math.max(2, Math.min(100, (portTraffic.rxMbps / dynamicPortMaxMbps) * 100))}%`,
                     }}
                   />
                 </div>
                 <span className="text-[10px] text-slate-400 font-mono block mt-1.5 truncate">
                   Max: {formatCapacityLabel(dynamicPortMaxMbps)}
                 </span>
+              </div>
+
+              {/* Latency & Ping (RTT) Card */}
+              <div className="p-3 bg-slate-900/60 rounded-xl border border-slate-800/60">
+                <span className="text-[11px] text-slate-400 font-medium flex items-center gap-1">
+                  <Activity className="w-3.5 h-3.5 text-amber-400" /> Latency (8.8.8.8 Ping)
+                </span>
+                <div className="text-2xl font-black font-mono text-amber-400 mt-1 flex items-baseline gap-1">
+                  <span>{currentLatency}</span>
+                  <span className="text-xs text-slate-400 font-normal">ms</span>
+                </div>
+                <div className="flex items-center justify-between text-[10px] font-mono mt-1">
+                  <span className={currentLatency === 0 ? 'text-slate-500' : currentLatency <= 30 ? 'text-emerald-400' : currentLatency <= 80 ? 'text-teal-400' : currentLatency <= 150 ? 'text-amber-400' : 'text-rose-400'}>
+                    {currentLatency === 0 ? 'Timeout / Down' : currentLatency <= 30 ? '● Ultra Low' : currentLatency <= 80 ? '● Normal' : currentLatency <= 150 ? '● Moderate' : '● High Ping'}
+                  </span>
+                  <span className="text-slate-500">Jitter: ~{currentJitter}ms</span>
+                </div>
               </div>
 
               <div className="p-3 bg-slate-900/60 rounded-xl border border-slate-800/60">
@@ -1107,8 +1173,8 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({ on
                 </div>
                 <div className="flex items-center justify-between text-[10px] text-slate-500 font-mono mt-1">
                   <span>MTU: {portLink.mtu}</span>
-                  <span className={portLink.status === 'running' ? 'text-emerald-400' : 'text-slate-500'}>
-                    {portLink.status === 'running' ? 'Auto-Neg OK' : 'Down'}
+                  <span className={portLink.status === 'running' && selectedIfaceObj?.running && !selectedIfaceObj?.disabled ? 'text-emerald-400' : 'text-rose-400'}>
+                    {portLink.status === 'running' && selectedIfaceObj?.running && !selectedIfaceObj?.disabled ? 'Link Up (Active)' : 'Link Down / Offline'}
                   </span>
                 </div>
               </div>
@@ -1116,27 +1182,54 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({ on
 
             {/* Professional Recharts Area Chart */}
             <div className="h-64 w-full bg-slate-950/95 rounded-2xl border border-slate-800/90 p-4 relative overflow-hidden flex flex-col justify-between shadow-inner">
-              <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono pb-2 border-b border-slate-800/50">
-                <span className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center justify-between text-[11px] text-slate-400 font-mono pb-2 border-b border-slate-800/50 gap-2">
+                <div className="flex flex-wrap items-center gap-3">
                   <span className="flex items-center gap-1.5 text-emerald-400 font-bold">
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 inline-block shadow-sm shadow-emerald-400/50" />
+                    <span className={`w-2.5 h-2.5 rounded-full inline-block shadow-sm ${portTraffic.rxMbps > 0 ? 'bg-emerald-400 shadow-emerald-400/50' : 'bg-slate-600'}`} />
                     Rx (Download): {portTraffic.rxMbps} Mbps
                   </span>
-                  <span className="flex items-center gap-1.5 text-cyan-400 font-bold ml-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 inline-block shadow-sm shadow-cyan-400/50" />
+                  <span className="flex items-center gap-1.5 text-cyan-400 font-bold">
+                    <span className={`w-2.5 h-2.5 rounded-full inline-block shadow-sm ${portTraffic.txMbps > 0 ? 'bg-cyan-400 shadow-cyan-400/50' : 'bg-slate-600'}`} />
                     Tx (Upload): {portTraffic.txMbps} Mbps
                   </span>
-                </span>
-                <span className="text-slate-400 font-mono text-[10px]">
-                  Scale Ceiling: <strong className="text-cyan-300 font-bold">{chartDomainMax >= 1000 ? `${(chartDomainMax / 1000).toFixed(1)} Gbps` : `${chartDomainMax} Mbps`}</strong>
-                  {chartScaleMode === 'auto' ? ' (NOC Adaptive)' : ' (Port Cap)'}
-                </span>
+                  <span className="flex items-center gap-1.5 text-amber-400 font-bold">
+                    <span className={`w-2.5 h-2.5 rounded-full inline-block shadow-sm ${currentLatency > 0 ? 'bg-amber-400 shadow-amber-400/50' : 'bg-slate-600'}`} />
+                    8.8.8.8 Ping: {currentLatency} ms
+                  </span>
+                  {(!selectedIfaceObj?.running || selectedIfaceObj?.disabled || portLink.status === 'link_down') && (
+                    <span className="text-amber-400 font-bold font-mono text-[10px] px-2 py-0.5 rounded bg-amber-950/50 border border-amber-800/60 flex items-center gap-1">
+                      <AlertTriangle className="w-3 h-3" /> Port Offline / Link Down (0.00 Mbps)
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-3">
+                  {/* Toggle Latency Line Button */}
+                  <button
+                    type="button"
+                    onClick={() => setShowLatencyLine(!showLatencyLine)}
+                    className={`px-2 py-0.5 rounded-lg text-[10px] font-bold font-mono transition-all flex items-center gap-1 cursor-pointer border ${
+                      showLatencyLine
+                        ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-sm shadow-amber-500/10'
+                        : 'bg-slate-900 text-slate-500 border-slate-800 hover:text-slate-300'
+                    }`}
+                    title="Toggle 8.8.8.8 latency curve overlay on right axis"
+                  >
+                    <Activity className="w-3 h-3" />
+                    <span>8.8.8.8 RTT ({currentLatency}ms)</span>
+                  </button>
+
+                  <span className="text-slate-400 font-mono text-[10px]">
+                    Scale: <strong className="text-cyan-300 font-bold">{chartDomainMax >= 1000 ? `${(chartDomainMax / 1000).toFixed(1)} Gbps` : `${chartDomainMax} Mbps`}</strong>
+                    {chartScaleMode === 'auto' ? ' (Adaptive)' : ' (Port Cap)'}
+                  </span>
+                </div>
               </div>
 
               {/* Recharts Area Container */}
               <div className="flex-1 w-full relative pt-2">
                 <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={trafficHistory} margin={{ top: 8, right: 10, left: -18, bottom: 0 }}>
+                  <AreaChart data={trafficHistory} margin={{ top: 8, right: showLatencyLine ? 24 : 10, left: -18, bottom: 0 }}>
                     <defs>
                       <linearGradient id="colorRxGrad" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="5%" stopColor="#10b981" stopOpacity={0.45} />
@@ -1157,6 +1250,7 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({ on
                       interval="preserveStartEnd"
                     />
                     <YAxis
+                      yAxisId="bandwidth"
                       stroke="#64748b"
                       fontSize={10}
                       tickLine={false}
@@ -1164,11 +1258,24 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({ on
                       domain={[0, chartDomainMax]}
                       tickFormatter={(val) => (val >= 1000 ? `${(val / 1000).toFixed(1)}G` : `${Math.round(val)}M`)}
                     />
+                    {showLatencyLine && (
+                      <YAxis
+                        yAxisId="latency"
+                        orientation="right"
+                        stroke="#f59e0b"
+                        fontSize={10}
+                        tickLine={false}
+                        fontFamily="monospace"
+                        domain={[0, latencyDomainMax]}
+                        tickFormatter={(val) => `${Math.round(val)}ms`}
+                      />
+                    )}
                     <Tooltip
                       content={({ active, payload, label }) => {
                         if (active && payload && payload.length) {
                           const rx = Number(payload.find((p: any) => p.dataKey === 'rx')?.value || 0);
                           const tx = Number(payload.find((p: any) => p.dataKey === 'tx')?.value || 0);
+                          const lat = Number(payload.find((p: any) => p.dataKey === 'latency')?.value || 0);
                           const rxPps = Math.round((rx * 1000000) / (1500 * 8));
                           const txPps = Math.round((tx * 1000000) / (1500 * 8));
                           return (
@@ -1200,6 +1307,12 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({ on
                                   <span>Packet Rate:</span>
                                   <span>{txPps.toLocaleString()} pps</span>
                                 </div>
+                                <div className="flex items-center justify-between pt-1 border-t border-slate-800/60">
+                                  <span className="text-amber-400 font-bold flex items-center gap-1.5">
+                                    <Activity className="w-3 h-3 text-amber-400" /> Latency (RTT):
+                                  </span>
+                                  <span className="text-amber-300 font-bold">{lat} ms</span>
+                                </div>
                               </div>
                             </div>
                           );
@@ -1208,6 +1321,7 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({ on
                       }}
                     />
                     <Area
+                      yAxisId="bandwidth"
                       type="monotone"
                       dataKey="rx"
                       name="Download (Rx)"
@@ -1218,6 +1332,7 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({ on
                       isAnimationActive={false}
                     />
                     <Area
+                      yAxisId="bandwidth"
                       type="monotone"
                       dataKey="tx"
                       name="Upload (Tx)"
@@ -1227,6 +1342,19 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({ on
                       fill="url(#colorTxGrad)"
                       isAnimationActive={false}
                     />
+                    {showLatencyLine && (
+                      <Line
+                        yAxisId="latency"
+                        type="monotone"
+                        dataKey="latency"
+                        name="Latency (RTT)"
+                        stroke="#f59e0b"
+                        strokeWidth={2}
+                        strokeDasharray="4 4"
+                        dot={{ r: 2.5, fill: '#f59e0b' }}
+                        isAnimationActive={false}
+                      />
+                    )}
                   </AreaChart>
                 </ResponsiveContainer>
               </div>

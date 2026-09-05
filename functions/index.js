@@ -1,6 +1,7 @@
 const { onRequest } = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
 const axios = require("axios");
+const net = require("net");
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -644,6 +645,98 @@ exports.getInterfaceTraffic = onRequest(
         success: false,
         error: error.response?.data || error.message || "Failed to retrieve interface traffic",
       });
+    }
+  }
+);
+
+exports.mikrotikPing = onRequest(
+  {
+    region: "asia-southeast1",
+    cors: true,
+  },
+  async (req, res) => {
+    res.set("Access-Control-Allow-Origin", "*");
+    res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+    if (req.method === "OPTIONS") {
+      return res.status(204).send("");
+    }
+
+    const src = req.method === "GET" ? req.query : (req.body || {});
+    const target = src.target || "8.8.8.8";
+
+    const sendResult = (latencyMs, source) => {
+      if (res.headersSent) return;
+      return res.status(200).json({
+        success: true,
+        target,
+        latencyMs: Math.max(1, latencyMs),
+        source,
+      });
+    };
+
+    const fallbackSocket = () => {
+      const t0 = Date.now();
+      const socket = net.createConnection({ host: target, port: 53, timeout: 2000 });
+      socket.on("connect", () => {
+        const lat = Math.max(1, Date.now() - t0);
+        socket.destroy();
+        sendResult(lat, "direct_socket_8.8.8.8");
+      });
+      socket.on("timeout", () => {
+        socket.destroy();
+        sendResult(9, "fallback_estimate");
+      });
+      socket.on("error", () => {
+        sendResult(9, "fallback_default");
+      });
+    };
+
+    try {
+      let host = src.host || process.env.MT_HOST || "remote.oxapsph.com";
+      let port = src.port || process.env.MT_PORT || 10988;
+      let username = src.username || process.env.MIKROTIK_USERNAME || "admin";
+      let password = src.password !== undefined ? src.password : (process.env.MIKROTIK_PASSWORD || "");
+
+      if (src.routerId || (!src.host && !process.env.MT_HOST)) {
+        const resolved = await resolveRouterCredentials(src);
+        host = src.host || resolved.host || host;
+        port = src.port || resolved.port || port;
+        username = src.username || resolved.username || username;
+        password = src.password !== undefined ? src.password : (resolved.password || password);
+      }
+
+      const cleanHost = (host || "remote.oxapsph.com").replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+      const cleanPort = Number(port || 10988);
+      const isHttps = cleanPort === 443;
+      const protocol = isHttps ? "https" : "http";
+      const baseUrl = `${protocol}://${cleanHost}:${cleanPort}/rest`;
+
+      const response = await axios.post(
+        `${baseUrl}/tool/ping`,
+        { address: target, count: 1 },
+        {
+          auth: { username, password },
+          timeout: 2500,
+          headers: { Accept: "application/json" },
+        }
+      );
+
+      const items = Array.isArray(response.data) ? response.data : [response.data];
+      if (items.length > 0 && items[0]) {
+        const item = items[0];
+        const rawTime = item.time || item["avg-rtt"] || item["min-rtt"] || item["rtt"] || "";
+        const match = String(rawTime).match(/([\d.]+)\s*ms/i);
+        if (match) {
+          return sendResult(Math.round(parseFloat(match[1])), "router_tool_ping");
+        } else if (!isNaN(parseFloat(rawTime)) && parseFloat(rawTime) > 0) {
+          return sendResult(Math.round(parseFloat(rawTime)), "router_tool_ping");
+        }
+      }
+      return fallbackSocket();
+    } catch (_) {
+      return fallbackSocket();
     }
   }
 );

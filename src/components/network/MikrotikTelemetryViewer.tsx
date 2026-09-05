@@ -454,25 +454,34 @@ export const MikrotikTelemetryViewer: React.FC<MikrotikTelemetryViewerProps> = (
     powerW: 28.5,
     latencyMs: 8,
     activePppoe: 18,
-    rxThroughputMbps: 672.53,
-    txThroughputMbps: 56.87,
-    peakRxMbps: 672.53,
-    peakTxMbps: 56.87,
-    percentile95Mbps: 672.53,
-    totalRxMb: 80.2,
-    totalTxMb: 6.8,
-    transferredVolumeMb: 87.0,
+    rxThroughputMbps: 0,
+    txThroughputMbps: 0,
+    peakRxMbps: 0,
+    peakTxMbps: 0,
+    percentile95Mbps: 0,
+    totalRxMb: 0,
+    totalTxMb: 0,
+    transferredVolumeMb: 0,
     packetDropRate: 0.00,
     jitterMs: 0.8,
     wanStatus: 'normal' as 'normal' | 'elevated' | 'congested',
-    history: [
-      { timestamp: '22:00:00', rxMbps: 540.2, txMbps: 42.1, wan2RxMbps: 140.5, wan2TxMbps: 12.1, bridgeRxMbps: 680.7, bridgeTxMbps: 54.2 },
-      { timestamp: '22:00:05', rxMbps: 582.4, txMbps: 46.8, wan2RxMbps: 155.2, wan2TxMbps: 14.8, bridgeRxMbps: 737.6, bridgeTxMbps: 61.6 },
-      { timestamp: '22:00:10', rxMbps: 610.1, txMbps: 48.4, wan2RxMbps: 162.8, wan2TxMbps: 15.4, bridgeRxMbps: 772.9, bridgeTxMbps: 63.8 },
-      { timestamp: '22:00:15', rxMbps: 595.7, txMbps: 52.3, wan2RxMbps: 158.4, wan2TxMbps: 16.3, bridgeRxMbps: 754.1, bridgeTxMbps: 68.6 },
-      { timestamp: '22:00:20', rxMbps: 638.9, txMbps: 54.5, wan2RxMbps: 171.0, wan2TxMbps: 17.5, bridgeRxMbps: 809.9, bridgeTxMbps: 72.0 },
-      { timestamp: '22:00:25', rxMbps: 672.53, txMbps: 56.87, wan2RxMbps: 184.2, wan2TxMbps: 18.2, bridgeRxMbps: 856.7, bridgeTxMbps: 75.1 },
-    ],
+    history: (() => {
+      const pts = [];
+      const now = Date.now();
+      for (let i = 10; i >= 0; i--) {
+        const t = new Date(now - i * 2000);
+        pts.push({
+          timestamp: `${t.getHours().toString().padStart(2, '0')}:${t.getMinutes().toString().padStart(2, '0')}:${t.getSeconds().toString().padStart(2, '0')}`,
+          rxMbps: 0,
+          txMbps: 0,
+          wan2RxMbps: 0,
+          wan2TxMbps: 0,
+          bridgeRxMbps: 0,
+          bridgeTxMbps: 0,
+        });
+      }
+      return pts;
+    })(),
   });
 
   // Sync prop changes
@@ -609,6 +618,12 @@ export const MikrotikTelemetryViewer: React.FC<MikrotikTelemetryViewerProps> = (
             calculatedTxMbps = Number(((deltaTx * 8) / (deltaSec * 1000000)).toFixed(2));
           }
 
+          // If target interface is offline/down/disabled, throughput is strictly 0 Mbps
+          if (!targetIface.running || (targetIface as any).disabled) {
+            calculatedRxMbps = 0;
+            calculatedTxMbps = 0;
+          }
+
           prevInterfaceBytesRef.current[targetIface.name] = {
             rxBytes: targetIface.rxBytes,
             txBytes: targetIface.txBytes,
@@ -634,9 +649,14 @@ export const MikrotikTelemetryViewer: React.FC<MikrotikTelemetryViewerProps> = (
               txBytes: sfpIface.txBytes,
               timestamp: nowTs,
             };
-            if (sfpRxSpeed <= 0 && sfpIface.name === targetIface.name) {
-              sfpRxSpeed = calculatedRxMbps;
-              sfpTxSpeed = calculatedTxMbps;
+            if (sfpIface.running && !(sfpIface as any).disabled) {
+              if (sfpRxSpeed <= 0 && sfpIface.name === targetIface.name) {
+                sfpRxSpeed = calculatedRxMbps;
+                sfpTxSpeed = calculatedTxMbps;
+              }
+            } else {
+              sfpRxSpeed = 0;
+              sfpTxSpeed = 0;
             }
             const isSfpType = (sfpIface.type || '').toLowerCase().includes('sfp') || sfpIface.name.toLowerCase().includes('sfp');
             const negotiatedRate = res.sfpDiagnostics?.rate || (isSfpType ? '10 Gbps' : '1 Gbps');
@@ -658,11 +678,6 @@ export const MikrotikTelemetryViewer: React.FC<MikrotikTelemetryViewerProps> = (
               mac: (sfpIface as any).macAddress || '---',
             });
           }
-        }
-
-        if (calculatedRxMbps <= 0) {
-          calculatedRxMbps = Number((620 + Math.random() * 80).toFixed(2));
-          calculatedTxMbps = Number((48 + Math.random() * 15).toFixed(2));
         }
 
         const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
@@ -729,8 +744,34 @@ export const MikrotikTelemetryViewer: React.FC<MikrotikTelemetryViewerProps> = (
         });
       } else if (res.status === 'auth_failed') {
         setLiveStatus('auth_failed');
+        setLiveStats((prev) => ({
+          ...prev,
+          rxThroughputMbps: 0,
+          txThroughputMbps: 0,
+        }));
+        setSfpTraffic((prev) => ({
+          ...prev,
+          rxMbps: 0,
+          txMbps: 0,
+          rxPps: 0,
+          txPps: 0,
+          status: 'link_down',
+        }));
       } else {
         setLiveStatus('unreachable');
+        setLiveStats((prev) => ({
+          ...prev,
+          rxThroughputMbps: 0,
+          txThroughputMbps: 0,
+        }));
+        setSfpTraffic((prev) => ({
+          ...prev,
+          rxMbps: 0,
+          txMbps: 0,
+          rxPps: 0,
+          txPps: 0,
+          status: 'link_down',
+        }));
       }
     } catch (err: any) {
       if (err.name !== 'AbortError') {
@@ -894,8 +935,8 @@ export const MikrotikTelemetryViewer: React.FC<MikrotikTelemetryViewerProps> = (
         </div>
       </div>
 
-      {/* 3. HARDWARE & THERMAL GAUGES (4 Cards Row) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+      {/* 3. HARDWARE & THERMAL GAUGES (5 Cards Row) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3.5">
         {/* 1. CPU Utilization */}
         <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 space-y-3">
           <div className="flex items-center justify-between text-slate-400">
@@ -1002,6 +1043,44 @@ export const MikrotikTelemetryViewer: React.FC<MikrotikTelemetryViewerProps> = (
           <div className="flex items-center justify-between text-xs font-mono text-slate-400 pt-1">
             <span>Board Temp: {liveStats.boardTempC}°C</span>
             <span className="text-slate-500">Cooling: Passive (0 RPM)</span>
+          </div>
+        </div>
+
+        {/* 5. Network Latency & Ping (RTT) */}
+        <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 space-y-3">
+          <div className="flex items-center justify-between text-slate-400">
+            <span className="text-[11px] font-bold tracking-wider uppercase">LATENCY & JITTER (RTT)</span>
+            <div className="flex items-center gap-1.5">
+              <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold border ${liveStatus === 'connected' ? 'bg-amber-950/60 text-amber-400 border-amber-800/40' : 'bg-rose-950/60 text-rose-400 border-rose-800/40'}`}>
+                {liveStatus === 'connected' ? '● ICMP Live' : '● Offline'}
+              </span>
+              <Activity className="w-4 h-4 text-amber-400" />
+            </div>
+          </div>
+
+          <div className="flex items-baseline justify-between">
+            <div className="flex items-baseline">
+              <span className="text-3xl font-black font-mono text-amber-400">{liveStatus === 'connected' ? liveStats.latencyMs : 0}</span>
+              <span className="text-xs text-slate-400 ml-1.5 font-mono">ms RTT</span>
+            </div>
+            <div className="text-right">
+              <span className="text-xs font-bold font-mono text-slate-200">~{liveStats.jitterMs} ms</span>
+              <span className="text-[10px] font-mono text-slate-400 block">Jitter</span>
+            </div>
+          </div>
+
+          <div className="h-2 w-full bg-slate-950 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-gradient-to-r from-emerald-500 via-amber-400 to-rose-500 rounded-full transition-all duration-500"
+              style={{ width: `${liveStatus === 'connected' ? Math.min(Math.max((liveStats.latencyMs / 50) * 100, 6), 100) : 0}%` }}
+            />
+          </div>
+
+          <div className="flex items-center justify-between text-xs font-mono text-slate-400 pt-1">
+            <span className={liveStatus !== 'connected' ? 'text-slate-500' : liveStats.latencyMs <= 15 ? 'text-emerald-400' : 'text-amber-400'}>
+              {liveStatus !== 'connected' ? 'Unreachable' : liveStats.latencyMs <= 15 ? '● Ultra Low' : '● Stable Ping'}
+            </span>
+            <span className="text-slate-500">Loss: {liveStats.packetDropRate}%</span>
           </div>
         </div>
       </div>

@@ -142,11 +142,8 @@ export const openMikrotikTelemetryStream = (
             }
           }
 
-          if (rxMbps <= 0) {
-            const baseBandwidth = Math.max(120, (pppActive.length || 1) * 35);
-            rxMbps = Number((baseBandwidth * (0.8 + (cpu / 100) * 0.5) + (Math.random() * 20 - 10)).toFixed(1));
-            txMbps = Number((rxMbps * 0.28 + (Math.random() * 8 - 4)).toFixed(1));
-          }
+          rxMbps = Math.max(0, rxMbps);
+          txMbps = Math.max(0, txMbps);
 
           // Bufferbloat Grading
           let grade = 'A+';
