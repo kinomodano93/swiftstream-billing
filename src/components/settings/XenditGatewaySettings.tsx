@@ -15,9 +15,11 @@ import {
   Globe,
   DollarSign,
   Layers,
+  Activity,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { XenditConfig } from '../../types';
+import { testXenditConnection } from '../../utils/xenditService';
 
 interface XenditGatewaySettingsProps {
   onSaved?: () => void;
@@ -111,6 +113,25 @@ export const XenditGatewaySettings: React.FC<XenditGatewaySettingsProps> = ({ on
   const [showWebhookToken, setShowWebhookToken] = useState<boolean>(false);
   const [copiedWebhook, setCopiedWebhook] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [isTestingApi, setIsTestingApi] = useState<boolean>(false);
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  const handleTestConnection = async () => {
+    if (!secretKey) {
+      showToast('warning', 'Missing Key', 'Please enter a Xendit Secret Key first.');
+      return;
+    }
+    setIsTestingApi(true);
+    setTestResult(null);
+    const res = await testXenditConnection(secretKey);
+    setIsTestingApi(false);
+    setTestResult(res);
+    if (res.success) {
+      showToast('success', 'Xendit Connected', res.message);
+    } else {
+      showToast('error', 'Connection Failed', res.message);
+    }
+  };
 
   const toggleChannel = (channel: string) => {
     setEnabledChannels((prev) =>
@@ -256,13 +277,27 @@ export const XenditGatewaySettings: React.FC<XenditGatewaySettingsProps> = ({ on
           </div>
 
           {/* Secret API Key */}
-          <div className="space-y-1">
-            <label className="block text-[11px] font-medium text-slate-400">Xendit Secret API Key</label>
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label className="block text-[11px] font-medium text-slate-400">Xendit Secret API Key</label>
+              <button
+                type="button"
+                onClick={handleTestConnection}
+                disabled={isTestingApi}
+                className="inline-flex items-center gap-1 text-[10px] text-cyan-400 hover:text-cyan-300 hover:underline disabled:opacity-50 cursor-pointer"
+              >
+                <Activity className={`w-3 h-3 ${isTestingApi ? 'animate-spin text-cyan-400' : ''}`} />
+                <span>{isTestingApi ? 'Testing Handshake...' : 'Test API Connection'}</span>
+              </button>
+            </div>
             <div className="relative">
               <input
                 type={showSecretKey ? 'text' : 'password'}
                 value={secretKey}
-                onChange={(e) => setSecretKey(e.target.value)}
+                onChange={(e) => {
+                  setSecretKey(e.target.value);
+                  setTestResult(null);
+                }}
                 placeholder="xnd_production_..."
                 className="w-full pl-3.5 pr-10 py-2.5 bg-slate-950 border border-slate-800 rounded-2xl text-slate-100 font-mono text-xs focus:outline-none focus:border-cyan-500"
               />
@@ -274,6 +309,19 @@ export const XenditGatewaySettings: React.FC<XenditGatewaySettingsProps> = ({ on
                 {showSecretKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
               </button>
             </div>
+
+            {testResult && (
+              <div
+                className={`p-2.5 rounded-xl border text-[10px] flex items-center justify-between ${
+                  testResult.success
+                    ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300'
+                    : 'bg-rose-950/40 border-rose-500/40 text-rose-300'
+                }`}
+              >
+                <span>{testResult.message}</span>
+                <span className="font-bold">{testResult.success ? '✓ VERIFIED' : 'FAILED'}</span>
+              </div>
+            )}
           </div>
 
           {/* Webhook Verification Token */}
@@ -299,27 +347,58 @@ export const XenditGatewaySettings: React.FC<XenditGatewaySettingsProps> = ({ on
             </div>
           </div>
 
-          {/* Webhook URL with Copy button */}
-          <div className="space-y-1">
-            <label className="block text-[11px] font-medium text-slate-400">
-              Webhook URL (Copy to Xendit)
-            </label>
+          {/* Webhook URL with Copy button & presets */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label className="block text-[11px] font-medium text-slate-400">
+                Webhook URL (Copy to Xendit Dashboard)
+              </label>
+              <div className="flex items-center gap-1.5 text-[10px]">
+                <button
+                  type="button"
+                  onClick={() => setWebhookUrl(`${window.location.origin}/api/xendit/webhook`)}
+                  className="text-cyan-400 hover:underline cursor-pointer"
+                >
+                  Use Current Domain
+                </button>
+                <span className="text-slate-600">•</span>
+                <button
+                  type="button"
+                  onClick={() => setWebhookUrl('https://asia-southeast1-swiftstream-billing.cloudfunctions.net/xenditWebhook')}
+                  className="text-cyan-400 hover:underline cursor-pointer"
+                >
+                  Use Cloud Function
+                </button>
+              </div>
+            </div>
             <div className="relative flex items-center">
               <input
                 type="text"
-                readOnly
                 value={webhookUrl}
-                className="w-full pl-3.5 pr-11 py-2.5 bg-slate-950 border border-slate-800 rounded-2xl text-slate-300 font-mono text-xs select-all focus:outline-none"
+                onChange={(e) => setWebhookUrl(e.target.value)}
+                placeholder="https://your-domain.com/api/xendit/webhook"
+                className="w-full pl-3.5 pr-11 py-2.5 bg-slate-950 border border-slate-800 rounded-2xl text-slate-100 font-mono text-xs focus:outline-none focus:border-cyan-500"
               />
               <button
                 type="button"
                 onClick={handleCopyWebhook}
-                className="absolute right-2 p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl transition-colors"
-                title="Copy Webhook URL"
+                className="absolute right-2 p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl transition-colors cursor-pointer"
+                title="Copy Webhook URL to clipboard"
               >
                 {copiedWebhook ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
               </button>
             </div>
+            <p className="text-[10px] text-slate-500">
+              Paste this URL into your Xendit Dashboard under <strong>Settings &rarr; Webhooks</strong> to receive automatic payment callbacks.
+            </p>
+          </div>
+
+          {/* Online vs Cash Policy Note */}
+          <div className="p-3.5 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-1 text-xs">
+            <span className="font-bold text-slate-300 block text-[11px]">💡 Online vs Cash Payments</span>
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+              Subscribers paying online via <strong>GCash</strong>, <strong>Maya</strong>, <strong>QR Ph</strong>, or <strong>Cards</strong> are processed directly through Xendit with instant automated line un-isolation. <strong>Cash</strong> payments are recorded manually by authorized staff in the POS Terminal.
+            </p>
           </div>
         </div>
 

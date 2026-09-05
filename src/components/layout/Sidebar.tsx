@@ -68,117 +68,155 @@ export const Sidebar: React.FC = () => {
   const pendingInstallsCount = customers.filter((c) => c.status === 'pending_install').length;
   const fiberReadyCount = coverageAreas.filter((a) => a.status === 'fiber_ready').length;
 
-  const navItems = [
+  interface NavItem {
+    id: string;
+    label: string;
+    icon: any;
+    badge?: string | null;
+    badgeColor?: string;
+  }
+
+  interface NavGroup {
+    id: string;
+    category: string;
+    items: NavItem[];
+  }
+
+  const navGroups: NavGroup[] = [
     {
-      id: 'dashboard',
-      label: 'Dashboard & KPI',
-      icon: LayoutDashboard,
-      badge: null,
-    },
-    {
-      id: 'applications',
-      label: 'Online Applications',
-      icon: FileCheck2,
-      badge: 'New',
-      badgeColor: 'bg-cyan-500/20 text-cyan-300 font-bold font-mono',
-    },
-    {
-      id: 'customers',
-      label: 'Subscribers CRM',
-      icon: Users,
-      badge: overdueCount > 0 ? `${overdueCount} due` : `${activeSubscribers}`,
-      badgeColor: overdueCount > 0 ? 'bg-amber-500/20 text-amber-300' : 'bg-slate-800 text-slate-400',
-    },
-    {
-      id: 'field_ops',
-      label: 'Field Tech & Installs',
-      icon: Smartphone,
-      badge: pendingInstallsCount > 0 ? `${pendingInstallsCount} new` : 'PWA',
-      badgeColor: 'bg-emerald-500/20 text-emerald-300 font-bold font-mono',
-    },
-    {
-      id: 'mikrotik',
-      label: 'MikroTik Routers',
-      icon: Server,
-      badge: 'Online',
-      badgeColor: 'bg-emerald-500/20 text-emerald-300 font-bold font-mono',
-    },
-    {
-      id: 'radius',
-      label: 'RADIUS / AAA',
-      icon: ShieldCheck,
-      badge: 'FreeRADIUS',
-      badgeColor: 'bg-amber-500/20 text-amber-300 font-bold font-mono',
-    },
-    {
-      id: 'genieacs',
-      label: 'GenieACS (TR-069)',
-      icon: Router,
-      badge: 'ACS',
-      badgeColor: 'bg-teal-500/20 text-teal-300 font-bold font-mono',
-    },
-    {
-      id: 'ipoe_dhcp',
-      label: 'IPoE / DHCP Leases',
-      icon: Cable,
-      badge: null,
+      id: 'operations',
+      category: 'Operations & CRM',
+      items: [
+        {
+          id: 'dashboard',
+          label: 'Dashboard & KPI',
+          icon: LayoutDashboard,
+          badge: null,
+        },
+        {
+          id: 'customers',
+          label: 'Subscribers CRM',
+          icon: Users,
+          badge: overdueCount > 0 ? `${overdueCount} due` : `${activeSubscribers}`,
+          badgeColor: overdueCount > 0 ? 'bg-amber-500/20 text-amber-300' : 'bg-slate-800 text-slate-400',
+        },
+        {
+          id: 'applications',
+          label: 'Online Applications',
+          icon: FileCheck2,
+          badge: 'New',
+          badgeColor: 'bg-cyan-500/20 text-cyan-300 font-bold font-mono',
+        },
+        {
+          id: 'field_ops',
+          label: 'Field Tech & Installs',
+          icon: Smartphone,
+          badge: pendingInstallsCount > 0 ? `${pendingInstallsCount} new` : 'PWA',
+          badgeColor: 'bg-emerald-500/20 text-emerald-300 font-bold font-mono',
+        },
+        {
+          id: 'repairs',
+          label: 'Repair Shop Orders',
+          icon: Wrench,
+          badge: openRepairsCount > 0 ? `${openRepairsCount}` : null,
+          badgeColor: 'bg-cyan-500/20 text-cyan-300',
+        },
+      ],
     },
     {
       id: 'billing',
-      label: 'Billing & Invoices',
-      icon: FileText,
-      badge: unpaidInvoicesCount > 0 ? `${unpaidInvoicesCount}` : null,
-      badgeColor: 'bg-rose-500/20 text-rose-300',
-    },
-    {
-      id: 'payments',
-      label: 'Cashier & POS',
-      icon: CreditCard,
-      badge: null,
-    },
-    {
-      id: 'plans',
-      label: 'Plans & Packages',
-      icon: Layers,
-      badge: null,
-    },
-    {
-      id: 'coverage',
-      label: 'Coverage Areas',
-      icon: MapPin,
-      badge: `${fiberReadyCount} Ready`,
-      badgeColor: 'bg-emerald-500/20 text-emerald-300 font-bold font-mono',
+      category: 'Billing & Finance',
+      items: [
+        {
+          id: 'billing',
+          label: 'Billing & Invoices',
+          icon: FileText,
+          badge: unpaidInvoicesCount > 0 ? `${unpaidInvoicesCount}` : null,
+          badgeColor: 'bg-rose-500/20 text-rose-300',
+        },
+        {
+          id: 'payments',
+          label: 'Cashier & POS',
+          icon: CreditCard,
+          badge: null,
+        },
+        {
+          id: 'plans',
+          label: 'Plans & Packages',
+          icon: Layers,
+          badge: null,
+        },
+        {
+          id: 'reports',
+          label: 'Financial Reports',
+          icon: BarChart3,
+          badge: null,
+        },
+      ],
     },
     {
       id: 'network',
-      label: 'NAP Box & Fiber Map',
-      icon: Network,
-      badge: null,
+      category: 'Network Infrastructure',
+      items: [
+        {
+          id: 'mikrotik',
+          label: 'MikroTik Routers',
+          icon: Server,
+          badge: 'Online',
+          badgeColor: 'bg-emerald-500/20 text-emerald-300 font-bold font-mono',
+        },
+        {
+          id: 'radius',
+          label: 'RADIUS / AAA',
+          icon: ShieldCheck,
+          badge: 'FreeRADIUS',
+          badgeColor: 'bg-amber-500/20 text-amber-300 font-bold font-mono',
+        },
+        {
+          id: 'genieacs',
+          label: 'GenieACS (TR-069)',
+          icon: Router,
+          badge: 'ACS',
+          badgeColor: 'bg-teal-500/20 text-teal-300 font-bold font-mono',
+        },
+        {
+          id: 'ipoe_dhcp',
+          label: 'IPoE / DHCP Leases',
+          icon: Cable,
+          badge: null,
+        },
+        {
+          id: 'network',
+          label: 'NAP Box & Fiber Map',
+          icon: Network,
+          badge: null,
+        },
+        {
+          id: 'coverage',
+          label: 'Coverage Areas',
+          icon: MapPin,
+          badge: `${fiberReadyCount} Ready`,
+          badgeColor: 'bg-emerald-500/20 text-emerald-300 font-bold font-mono',
+        },
+      ],
     },
     {
-      id: 'repairs',
-      label: 'Repair Shop Orders',
-      icon: Wrench,
-      badge: openRepairsCount > 0 ? `${openRepairsCount}` : null,
-      badgeColor: 'bg-cyan-500/20 text-cyan-300',
-    },
-    {
-      id: 'reminders',
-      label: 'SMS & Email Blast',
-      icon: Send,
-      badge: null,
-    },
-    {
-      id: 'reports',
-      label: 'Financial Reports',
-      icon: BarChart3,
-      badge: null,
-    },
-    {
-      id: 'settings',
-      label: 'Business Settings',
-      icon: Settings,
-      badge: null,
+      id: 'system',
+      category: 'System & Automation',
+      items: [
+        {
+          id: 'reminders',
+          label: 'SMS & Email Blast',
+          icon: Send,
+          badge: null,
+        },
+        {
+          id: 'settings',
+          label: 'Business Settings',
+          icon: Settings,
+          badge: null,
+        },
+      ],
     },
   ];
 
@@ -265,51 +303,64 @@ export const Sidebar: React.FC = () => {
           </div>
         )}
 
-        {/* Navigation Links */}
-        <nav className="flex-1 overflow-y-auto p-3 space-y-1 scrollbar-thin scrollbar-thumb-slate-800">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = activeTab === item.id;
-            return (
-              <button
-                key={item.id}
-                onClick={() => handleNavClick(item.id)}
-                title={item.label}
-                className={`w-full flex items-center ${
-                  isCollapsed ? 'justify-center p-3' : 'justify-between px-3 py-2.5'
-                } rounded-xl text-xs font-medium transition-all group cursor-pointer ${
-                  isActive
-                    ? 'bg-cyan-600/15 text-cyan-300 border border-cyan-500/30 shadow-sm'
-                    : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 border border-transparent'
-                }`}
-              >
-                <div className={`flex items-center ${isCollapsed ? 'justify-center' : 'gap-3'} min-w-0`}>
-                  <div className="relative">
-                    <Icon
-                      className={`w-4 h-4 transition-transform group-hover:scale-110 shrink-0 ${
-                        isActive ? 'text-cyan-400' : 'text-slate-400 group-hover:text-slate-200'
-                      }`}
-                    />
-                    {isCollapsed && item.badge && (
-                      <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-cyan-400 ring-2 ring-slate-900" />
-                    )}
-                  </div>
-                  {!isCollapsed && <span className="truncate">{item.label}</span>}
+        {/* Navigation Links Grouped by Functional Categories */}
+        <nav className="flex-1 overflow-y-auto p-3 space-y-3 scrollbar-thin scrollbar-thumb-slate-800">
+          {navGroups.map((group, groupIdx) => (
+            <div key={group.id} className="space-y-1">
+              {!isCollapsed ? (
+                <div className="px-3 pt-1.5 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400/80 flex items-center justify-between select-none">
+                  <span>{group.category}</span>
+                  <span className="text-[9px] font-mono text-slate-500 font-normal">{group.items.length}</span>
                 </div>
+              ) : (
+                groupIdx > 0 && <div className="my-2 border-t border-slate-800/80 mx-2" />
+              )}
 
-                {!isCollapsed && (
-                  <div className="flex items-center gap-1.5">
-                    {item.badge && (
-                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${item.badgeColor}`}>
-                        {item.badge}
-                      </span>
+              {group.items.map((item) => {
+                const Icon = item.icon;
+                const isActive = activeTab === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => handleNavClick(item.id)}
+                    title={item.label}
+                    className={`w-full flex items-center ${
+                      isCollapsed ? 'justify-center p-3' : 'justify-between px-3 py-2'
+                    } rounded-xl text-xs font-medium transition-all group cursor-pointer ${
+                      isActive
+                        ? 'bg-cyan-600/15 text-cyan-300 border border-cyan-500/30 shadow-sm'
+                        : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 border border-transparent'
+                    }`}
+                  >
+                    <div className={`flex items-center ${isCollapsed ? 'justify-center' : 'gap-3'} min-w-0`}>
+                      <div className="relative">
+                        <Icon
+                          className={`w-4 h-4 transition-transform group-hover:scale-110 shrink-0 ${
+                            isActive ? 'text-cyan-400' : 'text-slate-400 group-hover:text-slate-200'
+                          }`}
+                        />
+                        {isCollapsed && item.badge && (
+                          <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-cyan-400 ring-2 ring-slate-900" />
+                        )}
+                      </div>
+                      {!isCollapsed && <span className="truncate">{item.label}</span>}
+                    </div>
+
+                    {!isCollapsed && (
+                      <div className="flex items-center gap-1.5">
+                        {item.badge && (
+                          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${item.badgeColor}`}>
+                            {item.badge}
+                          </span>
+                        )}
+                        {isActive && <ChevronRight className="w-3.5 h-3.5 text-cyan-400" />}
+                      </div>
                     )}
-                    {isActive && <ChevronRight className="w-3.5 h-3.5 text-cyan-400" />}
-                  </div>
-                )}
-              </button>
-            );
-          })}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
         </nav>
 
         {/* Bottom Network Status Banner & Sign Out */}

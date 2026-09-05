@@ -20,6 +20,7 @@ import {
   X,
   Sun,
   Moon,
+  Terminal,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 
@@ -27,12 +28,14 @@ interface HeaderProps {
   onOpenPaymentModal: () => void;
   onOpenCustomerModal: () => void;
   onOpenBatchBillingModal: () => void;
+  onOpenTerminalModal?: (deviceId?: string) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   onOpenPaymentModal,
   onOpenCustomerModal,
   onOpenBatchBillingModal,
+  onOpenTerminalModal,
 }) => {
   const {
     searchTerm,
@@ -126,6 +129,17 @@ export const Header: React.FC<HeaderProps> = ({
         >
           <CreditCard className="w-3.5 h-3.5" />
           <span className="hidden xs:inline sm:inline">Collect</span>
+        </button>
+
+        {/* MikroTik RouterOS Live Terminal Button */}
+        <button
+          type="button"
+          onClick={() => onOpenTerminalModal?.(coreRouter?.id)}
+          className="flex items-center gap-1.5 px-2.5 sm:px-3 py-2 bg-slate-900 hover:bg-slate-800 text-purple-300 hover:text-purple-200 border border-purple-800/50 hover:border-purple-500/60 rounded-xl text-xs font-semibold shadow-md shadow-purple-950/40 transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
+          title={`Open MikroTik RouterOS CLI Terminal (${coreRouter?.name || 'Gateway'})`}
+        >
+          <Terminal className="w-3.5 h-3.5 text-purple-400" />
+          <span className="hidden xs:inline sm:inline">Terminal</span>
         </button>
 
         <button

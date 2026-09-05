@@ -195,28 +195,64 @@ export const PaymentTerminalModal: React.FC<PaymentTerminalModalProps> = ({
             <label className="block text-slate-400 mb-2 font-medium">Payment Channel / Method *</label>
             <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
               {[
+                { id: 'cash', label: 'Cash (Manual)', icon: '💵', badge: 'Admin POS' },
+                { id: 'xendit', label: 'Xendit', icon: '⚡', badge: 'Gateway' },
                 { id: 'gcash', label: 'GCash', icon: '📱' },
                 { id: 'maya', label: 'Maya', icon: '💳' },
-                { id: 'xendit', label: 'Xendit', icon: '⚡' },
-                { id: 'cash', label: 'Cash', icon: '💵' },
-                { id: 'bank_transfer', label: 'Bank Transfer', icon: '🏦' },
+                { id: 'bank_transfer', label: 'Bank', icon: '🏦' },
               ].map((method) => (
                 <button
                   type="button"
                   key={method.id}
                   onClick={() => setPaymentMethod(method.id as PaymentMethod)}
-                  className={`p-3 rounded-xl border flex flex-col items-center gap-1 font-semibold transition-all ${
+                  className={`relative p-3 rounded-xl border flex flex-col items-center gap-1 font-semibold transition-all cursor-pointer ${
                     paymentMethod === method.id
-                      ? 'bg-emerald-600/20 border-emerald-500 text-emerald-300 shadow-sm'
+                      ? method.id === 'cash'
+                        ? 'bg-amber-600/20 border-amber-500 text-amber-300 shadow-sm'
+                        : method.id === 'xendit'
+                        ? 'bg-cyan-600/20 border-cyan-500 text-cyan-300 shadow-sm'
+                        : 'bg-emerald-600/20 border-emerald-500 text-emerald-300 shadow-sm'
                       : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
                   }`}
                 >
+                  {method.badge && (
+                    <span className={`text-[8px] font-mono font-bold px-1.5 py-0.2 rounded-full ${
+                      method.id === 'cash' ? 'bg-amber-950 text-amber-300 border border-amber-800/60' : 'bg-cyan-950 text-cyan-300 border border-cyan-800/60'
+                    }`}>
+                      {method.badge}
+                    </span>
+                  )}
                   <span className="text-base">{method.icon}</span>
                   <span className="text-[11px]">{method.label}</span>
                 </button>
               ))}
             </div>
           </div>
+
+          {/* Cash Manual Collection Banner */}
+          {paymentMethod === 'cash' && (
+            <div className="p-3.5 rounded-2xl bg-amber-950/30 border border-amber-800/50 flex items-start gap-3 text-xs">
+              <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center justify-center font-bold text-base flex-shrink-0">
+                💵
+              </div>
+              <div className="space-y-0.5 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-amber-400 font-bold uppercase tracking-wider block">
+                    Manual Cash Collection (Admin / Cashier)
+                  </span>
+                  <span className="text-[9px] bg-amber-950 border border-amber-700/60 px-1.5 py-0.2 rounded text-amber-300 font-semibold">
+                    In-Person / Field Collection
+                  </span>
+                </div>
+                <p className="text-slate-200 text-xs">
+                  Customer is paying physical cash. Enter the cash tendered below to automatically compute change.
+                </p>
+                <p className="text-[10px] text-slate-400">
+                  Submitting will log the payment into the daily cash drawer, mark the invoice as paid, and sync un-isolation on the MikroTik router.
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* Xendit Quick Reference Banner */}
           {paymentMethod === 'xendit' && (

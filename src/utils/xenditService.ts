@@ -154,22 +154,23 @@ export const XENDIT_CHANNELS: XenditChannel[] = [
 export interface XenditInvoiceResponse {
   id: string;
   external_id: string;
-  user_id: string;
-  status: 'PENDING' | 'PAID' | 'EXPIRED';
-  merchant_name: string;
+  user_id?: string;
+  status: 'PENDING' | 'PAID' | 'EXPIRED' | 'SETTLED';
+  merchant_name?: string;
   amount: number;
-  payer_email: string;
+  payer_email?: string;
   description: string;
   invoice_url: string;
-  expiry_date: string;
+  expiry_date?: string;
   currency: string;
   payment_channel?: string;
   payment_method?: string;
   barcode_number?: string;
+  is_simulation?: boolean;
 }
 
 /**
- * Creates a simulated or real Xendit Hosted Checkout Invoice
+ * Creates a simulated fallback Xendit Hosted Checkout Invoice
  */
 export const createXenditCheckoutSession = (
   customer: Customer,
@@ -185,7 +186,7 @@ export const createXenditCheckoutSession = (
   // 7-Eleven barcode simulation
   const barcodeNumber = `711-${customer.accountNo.replace(/\D/g, '')}-${Math.floor(100000 + Math.random() * 900000)}`;
 
-  const checkoutUrl = `https://checkout.xendit.co/v2/${invoiceId}`;
+  const checkoutUrl = `https://checkout.xendit.co/web/${invoiceId}`;
 
   return {
     id: invoiceId,
@@ -201,6 +202,132 @@ export const createXenditCheckoutSession = (
     currency: 'PHP',
     payment_channel: preferredChannel || 'MULTI_CHANNEL',
     barcode_number: barcodeNumber,
+    is_simulation: true,
   };
 };
+
+/**
+ * Creates a real Xendit Hosted Invoice via Backend Proxy (/api/xendit/create-invoice)
+ */
+export const createRealXenditInvoice = async (
+  customer: Customer,
+  invoice: Invoice | { id: string; invoiceNumber: string; totalAmount: number; balanceDue: number },
+  amount: number,
+  business: BusinessProfile,
+  preferredChannel?: string
+): Promise<XenditInvoiceResponse> => {
+  const externalId = `INV-${customer.accountNo}-${Date.now().toString().slice(-6)}`;
+  const secretKey = business.paymentGateways.xenditSecretKey || business.paymentGateways.xenditConfig?.secretKey;
+
+  const requestBody = {
+    external_id: externalId,
+    amount: Math.max(1, Math.round(amount)),
+    description: `SwiftStream Fiber Internet - ${customer.fullName} (${customer.accountNo})`,
+    payer_email: customer.email || 'customer@swiftstream.ph',
+    customer: {
+      given_names: customer.fullName.split(' ')[0] || customer.fullName,
+      surname: customer.fullName.split(' ').slice(1).join(' ') || 'Subscriber',
+      email: customer.email || 'customer@swiftstream.ph',
+      mobile_number: customer.mobile?.startsWith('+') ? customer.mobile : customer.mobile?.startsWith('0') ? `+63${customer.mobile.slice(1)}` : '+639171234567',
+    },
+    payment_methods: preferredChannel && preferredChannel !== 'MULTI_CHANNEL' ? [preferredChannel] : undefined,
+    currency: 'PHP',
+    secretKey,
+    success_redirect_url: window.location.origin + '/?status=payment_success',
+    failure_redirect_url: window.location.origin + '/?status=payment_failed',
+  };
+
+  try {
+    const response = await fetch('/api/xendit/create-invoice', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody),
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      if (data && (data.invoice_url || data.id)) {
+        return {
+          id: data.id,
+          external_id: data.external_id || externalId,
+          status: data.status || 'PENDING',
+          amount: data.amount || amount,
+          description: data.description || requestBody.description,
+          invoice_url: data.invoice_url || `https://checkout.xendit.co/web/${data.id}`,
+          expiry_date: data.expiry_date,
+          currency: data.currency || 'PHP',
+          payment_channel: preferredChannel || 'MULTI_CHANNEL',
+          barcode_number: `711-${customer.accountNo.replace(/\D/g, '')}-${Math.floor(100000 + Math.random() * 900000)}`,
+          is_simulation: data.is_simulation || false,
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('[Xendit Service] Backend proxy unreachable, falling back to local session generation:', err);
+  }
+
+  // Fallback to local session if network error
+  return createXenditCheckoutSession(customer, invoice, amount, business, preferredChannel);
+};
+
+/**
+ * Checks the status of an existing Xendit Invoice
+ */
+export const checkXenditInvoiceStatus = async (
+  invoiceId: string,
+  secretKey?: string
+): Promise<{ status: 'PENDING' | 'PAID' | 'EXPIRED'; invoice?: any }> => {
+  try {
+    const query = new URLSearchParams({ id: invoiceId });
+    if (secretKey) query.set('secretKey', secretKey);
+
+    const response = await fetch(`/api/xendit/invoice-status?${query.toString()}`);
+    if (response.ok) {
+      const data = await response.json();
+      return {
+        status: data.status || 'PENDING',
+        invoice: data,
+      };
+    }
+  } catch (err) {
+    console.warn('[Xendit Service] Failed to poll invoice status:', err);
+  }
+  return { status: 'PENDING' };
+};
+
+/**
+ * Diagnostic test connection against Xendit API
+ */
+export const testXenditConnection = async (
+  secretKey: string
+): Promise<{ success: boolean; message: string; details?: any }> => {
+  try {
+    const res = await fetch('/api/xendit/test-connection', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ secretKey }),
+    });
+
+    const data = await res.json();
+    if (res.ok && data.success) {
+      return {
+        success: true,
+        message: `Successfully connected to Xendit! Merchant User: ${data.user?.business_name || data.user?.email || 'Authorized'}`,
+        details: data.user,
+      };
+    }
+
+    return {
+      success: false,
+      message: data.error?.message || data.message || `Xendit API returned HTTP ${res.status}`,
+      details: data,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      message: `Failed to reach Xendit API proxy: ${err.message}`,
+    };
+  }
+};
+
 

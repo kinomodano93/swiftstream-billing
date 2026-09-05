@@ -33,6 +33,7 @@ import {
   X,
   Smartphone,
   CheckCircle,
+  DollarSign,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import confetti from 'canvas-confetti';
@@ -49,7 +50,13 @@ import {
   getRepairStatusBadge,
 } from '../../utils/formatters';
 import { generateInvoicePDF, generateOfficialReceiptPDF } from '../../utils/pdfGenerator';
-import { XENDIT_CHANNELS, createXenditCheckoutSession } from '../../utils/xenditService';
+import {
+  XENDIT_CHANNELS,
+  createXenditCheckoutSession,
+  createRealXenditInvoice,
+  checkXenditInvoiceStatus,
+  XenditInvoiceResponse,
+} from '../../utils/xenditService';
 import { generateDynamicQrPhPayload } from '../../utils/qrPhGenerator';
 import { createMockPaymentWebhookEvent } from '../../services/paymentWebhookService';
 import { GeminiAiAssistant } from '../ai/GeminiAiAssistant';
@@ -114,10 +121,17 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
   const [payReference, setPayReference] = useState<string>('');
   const [receiptImageBase64, setReceiptImageBase64] = useState<string | null>(null);
   const [submittedProofSuccess, setSubmittedProofSuccess] = useState<boolean>(false);
-  const [xenditSubChannel, setXenditSubChannel] = useState<string>('7ELEVEN');
+  const [xenditSubChannel, setXenditSubChannel] = useState<string>('MULTI_CHANNEL');
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [isSubmittingPayment, setIsSubmittingPayment] = useState<boolean>(false);
   const [justPaidPaymentId, setJustPaidPaymentId] = useState<string | null>(null);
+
+  // Active Xendit Gateway Session
+  const [activeXenditSession, setActiveXenditSession] = useState<XenditInvoiceResponse | null>(null);
+  const [isCreatingXenditInvoice, setIsCreatingXenditInvoice] = useState<boolean>(false);
+  const [isPollingXendit, setIsPollingXendit] = useState<boolean>(false);
+  const [xenditStatusMessage, setXenditStatusMessage] = useState<string>('');
+  const [cashCollectionRequested, setCashCollectionRequested] = useState<boolean>(false);
 
   // Trouble Ticket Form State
   const [ticketDeviceType, setTicketDeviceType] = useState<RepairOrder['deviceType']>('ONU/Router');
@@ -218,6 +232,138 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
     setTimeout(() => setCopiedField(null), 2000);
   };
 
+  // Settle verified/paid Xendit invoice session
+  const handleSettlePaidXenditSession = async (session: XenditInvoiceResponse) => {
+    if (!customer) return;
+    const targetInv = payInvoiceId ? invoices.find((i) => i.id === payInvoiceId) : latestUnpaidInvoice;
+    const webhookEv = createMockPaymentWebhookEvent(
+      customer,
+      targetInv,
+      'xendit',
+      session.payment_channel || 'Xendit Gateway'
+    );
+    webhookEv.amount = session.amount;
+    webhookEv.transactionRef = session.id;
+    const res = await processIncomingPaymentWebhook(webhookEv);
+    if (res.receiptNumber) {
+      setJustPaidPaymentId(res.receiptNumber);
+    }
+    setActiveXenditSession(null);
+    try {
+      confetti({
+        particleCount: 100,
+        spread: 80,
+        origin: { y: 0.6 },
+      });
+    } catch {}
+  };
+
+  // Auto-poll active Xendit session for live payment confirmation
+  useEffect(() => {
+    if (!activeXenditSession || activeXenditSession.status === 'PAID') return;
+
+    let isMounted = true;
+    const interval = setInterval(async () => {
+      setIsPollingXendit(true);
+      const check = await checkXenditInvoiceStatus(
+        activeXenditSession.id,
+        businessProfile.paymentGateways.xenditSecretKey
+      );
+      if (isMounted) {
+        setIsPollingXendit(false);
+        if (check.status === 'PAID') {
+          clearInterval(interval);
+          handleSettlePaidXenditSession(activeXenditSession);
+        }
+      }
+    }, 5000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [activeXenditSession, customer, payInvoiceId]);
+
+  // Create real Xendit Hosted Invoice Session
+  const handleInitiateXenditCheckout = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!customer) return;
+
+    const amountNum = parseFloat(payAmount);
+    if (isNaN(amountNum) || amountNum <= 0) {
+      alert('Please enter a valid payment amount.');
+      return;
+    }
+
+    setIsCreatingXenditInvoice(true);
+    setXenditStatusMessage('Creating secure Xendit checkout session...');
+
+    try {
+      const matchedInv = payInvoiceId ? invoices.find((i) => i.id === payInvoiceId) : latestUnpaidInvoice;
+      const targetInv = matchedInv || {
+        id: 'inv-def',
+        invoiceNumber: `INV-${customer.accountNo}-AUTO`,
+        totalAmount: amountNum,
+        balanceDue: amountNum,
+      };
+
+      const session = await createRealXenditInvoice(
+        customer,
+        targetInv,
+        amountNum,
+        businessProfile,
+        xenditSubChannel
+      );
+
+      setActiveXenditSession(session);
+      setXenditStatusMessage('Invoice session ready. Complete payment on Xendit.');
+
+      if (session.invoice_url) {
+        window.open(session.invoice_url, '_blank', 'noopener,noreferrer');
+      }
+    } catch (err: any) {
+      alert(`Failed to create Xendit checkout session: ${err.message}`);
+    } finally {
+      setIsCreatingXenditInvoice(false);
+    }
+  };
+
+  // Request in-home Cash Collection Dispatch
+  const handleRequestCashCollection = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!customer) return;
+
+    const amountNum = parseFloat(payAmount) || customer.balance || customer.monthlyFee;
+    const targetInv = payInvoiceId ? invoices.find((i) => i.id === payInvoiceId) : latestUnpaidInvoice;
+    const orderNum = `COL-${new Date().getFullYear().toString().slice(2)}${String(
+      new Date().getMonth() + 1
+    ).padStart(2, '0')}-${String(repairOrders.length + 1).padStart(3, '0')}`;
+
+    addRepairOrder({
+      orderNumber: orderNum,
+      customerId: customer.id,
+      customerName: customer.fullName,
+      contactNumber: customer.mobile,
+      address: `${customer.address.street}, Brgy. ${customer.address.barangay}, ${customer.address.city}`,
+      deviceType: 'Other',
+      issueDescription: `MANUAL CASH COLLECTION REQUEST: Subscriber requested in-person cash payment pickup for ${targetInv?.invoiceNumber || 'Monthly Bill'}. Amount to collect: ${formatCurrency(amountNum)}. Authorized cashier must issue Official Cash Receipt upon receipt.`,
+      diagnosisNotes: 'Submitted via Client Portal Cash Payment section. Pending field collection dispatch.',
+      technician: 'Field Cashier / Tech Dispatch',
+      partsUsed: [],
+      laborCost: 0,
+      totalCost: 0,
+      status: 'received',
+      dateReceived: new Date().toISOString().slice(0, 10),
+      isPaid: false,
+    });
+
+    setCashCollectionRequested(true);
+    try {
+      confetti({ particleCount: 50, spread: 60, origin: { y: 0.6 } });
+    } catch {}
+    setTimeout(() => setCashCollectionRequested(false), 8000);
+  };
+
   // Handle Online Payment Submission
   const handleConfirmOnlinePayment = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -229,42 +375,31 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
       return;
     }
 
-    const ref = payReference.trim() || (payMethod === 'xendit' ? `XND-${xenditSubChannel}-${Date.now().toString().slice(-6)}` : '');
-    if (!ref && payMethod !== 'xendit') {
+    if (payMethod === 'xendit') {
+      await handleInitiateXenditCheckout(e);
+      return;
+    }
+
+    const ref = payReference.trim();
+    if (!ref) {
       alert('Please provide the transaction reference number from your GCash/Maya app.');
       return;
     }
 
     setIsSubmittingPayment(true);
 
-    if (payMethod === 'xendit') {
-      const targetInv = payInvoiceId ? invoices.find((i) => i.id === payInvoiceId) : latestUnpaidInvoice;
-      const webhookEv = createMockPaymentWebhookEvent(
-        customer,
-        targetInv,
-        'xendit',
-        xenditSubChannel
-      );
-      webhookEv.amount = amountNum;
-      webhookEv.transactionRef = ref;
-      const res = await processIncomingPaymentWebhook(webhookEv);
-      if (res.receiptNumber) {
-        setJustPaidPaymentId(res.receiptNumber);
-      }
-    } else {
-      // Submit for Admin Verification Queue
-      submitPaymentProof({
-        customerId: customer.id,
-        invoiceId: payInvoiceId || latestUnpaidInvoice?.id || undefined,
-        amount: amountNum,
-        paymentMethod: payMethod,
-        referenceNumber: ref,
-        receiptImageUrl: receiptImageBase64 || undefined,
-        notes: `Submitted via Client Portal (${payMethod.toUpperCase()}). Pending cashier audit.`,
-      });
-      setSubmittedProofSuccess(true);
-      setTimeout(() => setSubmittedProofSuccess(false), 8000);
-    }
+    // Submit for Admin Verification Queue
+    submitPaymentProof({
+      customerId: customer.id,
+      invoiceId: payInvoiceId || latestUnpaidInvoice?.id || undefined,
+      amount: amountNum,
+      paymentMethod: payMethod,
+      referenceNumber: ref,
+      receiptImageUrl: receiptImageBase64 || undefined,
+      notes: `Submitted via Client Portal (${payMethod.toUpperCase()}). Pending cashier audit.`,
+    });
+    setSubmittedProofSuccess(true);
+    setTimeout(() => setSubmittedProofSuccess(false), 8000);
 
     try {
       confetti({
@@ -1169,23 +1304,36 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                 <span className="text-xs font-bold text-slate-300 uppercase tracking-wider block text-center">
                   1. Select Payment Channel
                 </span>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
                   {[
-                    { id: 'gcash', label: 'GCash App', icon: '📱', desc: 'Scan to pay' },
-                    { id: 'maya', label: 'Maya (PayMaya)', icon: '💳', desc: 'Maya QR Ph' },
-                    { id: 'xendit', label: 'Xendit Gateway', icon: '⚡', desc: 'Cards & 7-Eleven' },
+                    { id: 'xendit', label: 'Xendit Gateway', icon: '⚡', desc: 'Direct Online Pay', badge: 'Fast Auto' },
+                    { id: 'gcash', label: 'GCash QR Ph', icon: '📱', desc: 'Scan to pay' },
+                    { id: 'maya', label: 'Maya QR Ph', icon: '💳', desc: 'Maya QR' },
+                    { id: 'cash', label: 'Cash Payment', icon: '💵', desc: 'Admin / Office manual' },
                     { id: 'bank_transfer', label: 'Bank Transfer', icon: '🏦', desc: 'BDO / Landbank' },
                   ].map((m) => (
                     <button
                       type="button"
                       key={m.id}
-                      onClick={() => setPayMethod(m.id as PaymentMethod)}
-                      className={`p-3.5 rounded-2xl border flex flex-col items-center text-center gap-1 transition-all cursor-pointer ${
+                      onClick={() => {
+                        setPayMethod(m.id as PaymentMethod);
+                        if (m.id !== 'xendit') setActiveXenditSession(null);
+                      }}
+                      className={`relative p-3.5 rounded-2xl border flex flex-col items-center text-center gap-1 transition-all cursor-pointer ${
                         payMethod === m.id
-                          ? 'bg-emerald-600/20 border-emerald-500 text-emerald-300 shadow-glow-emerald'
+                          ? m.id === 'xendit'
+                            ? 'bg-cyan-600/20 border-cyan-500 text-cyan-300 shadow-glow-cyan'
+                            : m.id === 'cash'
+                            ? 'bg-amber-600/20 border-amber-500 text-amber-300 shadow-glow-amber'
+                            : 'bg-emerald-600/20 border-emerald-500 text-emerald-300 shadow-glow-emerald'
                           : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:border-slate-700'
                       }`}
                     >
+                      {m.badge && (
+                        <span className="absolute -top-2 px-2 py-0.5 rounded-full text-[9px] font-bold bg-cyan-500 text-slate-950 shadow-sm animate-pulse">
+                          {m.badge}
+                        </span>
+                      )}
                       <span className="text-xl">{m.icon}</span>
                       <span className="font-bold text-xs">{m.label}</span>
                       <span className="text-[10px] text-slate-500">{m.desc}</span>
@@ -1194,98 +1342,316 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                 </div>
               </div>
 
-              {/* Step 2: Interactive Channel View */}
-              {payMethod === 'xendit' ? (
-                /* Xendit Multi-Channel Gateway Hub */
-                <div className="p-5 rounded-2xl bg-slate-950 border border-slate-800 space-y-4">
-                  <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                    <div className="flex items-center gap-2">
-                      <Zap className="w-4 h-4 text-cyan-400" />
-                      <span className="font-bold text-slate-200 text-xs">
-                        Xendit Philippines Hosted Checkout
-                      </span>
-                    </div>
-                    <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800/50">
-                      SSL 256-Bit Encrypted
-                    </span>
-                  </div>
+              {/* ================= CHANNEL 1: XENDIT DIRECT GATEWAY ================= */}
+              {payMethod === 'xendit' && (
+                <div className="space-y-4">
+                  {!activeXenditSession ? (
+                    <div className="p-5 rounded-3xl bg-slate-950 border border-slate-800 space-y-5">
+                      <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                        <div className="flex items-center gap-2">
+                          <div className="w-8 h-8 rounded-xl bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 flex items-center justify-center font-bold">
+                            <Zap className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <span className="font-bold text-slate-100 text-xs block">
+                              Xendit Philippines Direct Gateway
+                            </span>
+                            <span className="text-[10px] text-slate-400">
+                              Instant automated settlement &amp; real-time line restoration
+                            </span>
+                          </div>
+                        </div>
+                        <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-800/50">
+                          BSP &amp; PCI-DSS Level 1
+                        </span>
+                      </div>
 
-                  {/* Subchannel Selector */}
-                  <div>
-                    <label className="block text-slate-400 mb-2 font-medium text-center">
-                      Select Xendit Payment Method:
-                    </label>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                      {XENDIT_CHANNELS.map((ch) => (
+                      {/* Payment Amount Input */}
+                      <div className="space-y-1">
+                        <label className="block text-slate-400 font-medium">Payment Amount (PHP ₱) *</label>
+                        <div className="relative">
+                          <span className="absolute left-4 top-1/2 -translate-y-1/2 font-mono font-bold text-slate-400 text-base">₱</span>
+                          <input
+                            type="number"
+                            step="any"
+                            required
+                            value={payAmount}
+                            onChange={(e) => setPayAmount(e.target.value)}
+                            placeholder="1299.00"
+                            className="w-full pl-9 pr-4 py-3 bg-slate-900 border border-slate-800 rounded-2xl text-slate-100 font-mono font-black text-lg focus:outline-none focus:border-cyan-500 text-center"
+                          />
+                        </div>
+                        <div className="flex items-center justify-between text-[11px] text-slate-500 px-1 pt-0.5">
+                          <span>Bill Due: {formatCurrency(selectedPayInvoice?.balanceDue || customer.balance || customer.monthlyFee)}</span>
+                          <button
+                            type="button"
+                            onClick={() => setPayAmount(String(selectedPayInvoice?.balanceDue || customer.balance || customer.monthlyFee))}
+                            className="text-cyan-400 hover:underline cursor-pointer"
+                          >
+                            Pay Full Balance
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Preferred Xendit Subchannel Selection */}
+                      <div className="space-y-2">
+                        <label className="block text-slate-400 font-medium text-xs">
+                          Preferred Payment Method (or select All-In-One):
+                        </label>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setXenditSubChannel('MULTI_CHANNEL')}
+                            className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                              xenditSubChannel === 'MULTI_CHANNEL'
+                                ? 'bg-cyan-950/50 border-cyan-500 text-cyan-200 shadow-sm'
+                                : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:border-slate-700'
+                            }`}
+                          >
+                            <span className="text-base block mb-0.5">🌐</span>
+                            <span className="font-bold text-[11px] block text-slate-200">All-in-One</span>
+                            <span className="text-[9px] text-slate-500 block truncate">Customer chooses on checkout</span>
+                          </button>
+
+                          {XENDIT_CHANNELS.slice(0, 7).map((ch) => (
+                            <button
+                              type="button"
+                              key={ch.id}
+                              onClick={() => setXenditSubChannel(ch.id)}
+                              className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                                xenditSubChannel === ch.id
+                                  ? 'bg-cyan-950/50 border-cyan-500 text-cyan-200 shadow-sm'
+                                  : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:border-slate-700'
+                              }`}
+                            >
+                              <span className="text-base block mb-0.5">{ch.icon}</span>
+                              <span className="font-bold text-[11px] block text-slate-200">{ch.name}</span>
+                              <span className="text-[9px] text-slate-500 block truncate">{ch.description}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Checkout Initiation Button */}
+                      <button
+                        type="button"
+                        onClick={handleInitiateXenditCheckout}
+                        disabled={isCreatingXenditInvoice}
+                        className="w-full flex items-center justify-center gap-2 py-3.5 bg-gradient-to-r from-cyan-600 via-sky-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-2xl text-sm font-bold shadow-xl shadow-cyan-600/30 transition-all hover:scale-[1.01] active:scale-[0.98] disabled:opacity-50 cursor-pointer"
+                      >
+                        <Zap className={`w-4 h-4 ${isCreatingXenditInvoice ? 'animate-spin' : ''}`} />
+                        <span>
+                          {isCreatingXenditInvoice
+                            ? 'Generating Xendit Checkout Session...'
+                            : `Proceed to Pay ₱${Number(payAmount || 0).toLocaleString()} via Xendit`}
+                        </span>
+                        <ArrowRight className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    /* Active Xendit Checkout Session Screen */
+                    <div className="p-6 rounded-3xl bg-slate-950 border border-cyan-500/60 shadow-2xl space-y-5 animate-in fade-in zoom-in-95">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-2xl bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 flex items-center justify-center font-bold">
+                            <Zap className="w-5 h-5 animate-pulse" />
+                          </div>
+                          <div>
+                            <h3 className="font-bold text-slate-100 text-sm flex items-center gap-2">
+                              <span>Xendit Hosted Checkout Active</span>
+                              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-800">
+                                {activeXenditSession.id}
+                              </span>
+                            </h3>
+                            <p className="text-xs text-slate-400">
+                              Amount Due:{' '}
+                              <strong className="font-mono text-cyan-300 text-sm">
+                                ₱{activeXenditSession.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                              </strong>
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-950/60 text-amber-300 border border-amber-800/40 text-xs font-semibold">
+                          <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+                          <span>{isPollingXendit ? 'Verifying status...' : 'Awaiting payment confirmation...'}</span>
+                        </div>
+                      </div>
+
+                      {/* Interactive Actions Grid */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+                        {/* Direct Checkout Link Button */}
+                        <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 space-y-3 text-center sm:text-left">
+                          <span className="text-xs font-bold text-slate-200 block">
+                            Hosted Checkout Window:
+                          </span>
+                          <p className="text-[11px] text-slate-400 leading-relaxed">
+                            Click the button below to open the secure Xendit checkout page where you can pay via GCash, Maya, Card, or Bank.
+                          </p>
+                          <a
+                            href={activeXenditSession.invoice_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center justify-center gap-2 w-full py-3 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-cyan-600/30 transition-all hover:scale-[1.02] cursor-pointer"
+                          >
+                            <ExternalLink className="w-4 h-4" />
+                            <span>Open Xendit Checkout Page ↗</span>
+                          </a>
+                        </div>
+
+                        {/* Direct QR / Barcode Display */}
+                        <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 flex flex-col items-center justify-center text-center gap-2">
+                          {activeXenditSession.payment_channel === '7ELEVEN' ? (
+                            <div className="p-3 bg-white text-slate-900 rounded-xl font-mono text-center space-y-1 w-full">
+                              <div className="text-xl tracking-[0.25em] font-black">|||||||||||||||||||||</div>
+                              <p className="text-xs font-bold">{activeXenditSession.barcode_number}</p>
+                              <p className="text-[9px] text-slate-600">Present at 7-Eleven CLiQQ cashier</p>
+                            </div>
+                          ) : (
+                            <div className="bg-white p-2.5 rounded-2xl shadow-md">
+                              <QRCodeSVG value={activeXenditSession.invoice_url} size={110} />
+                            </div>
+                          )}
+                          <span className="text-[10px] text-slate-400">
+                            Scan with phone or e-wallet to open payment screen
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Live Verification & Test Simulator Controls */}
+                      <div className="pt-2 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-3">
                         <button
                           type="button"
-                          key={ch.id}
-                          onClick={() => setXenditSubChannel(ch.id)}
-                          className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
-                            xenditSubChannel === ch.id
-                              ? 'bg-cyan-950/50 border-cyan-500 text-cyan-200 shadow-sm'
-                              : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:border-slate-700'
-                          }`}
+                          onClick={() => setActiveXenditSession(null)}
+                          className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800 rounded-xl text-xs transition-colors cursor-pointer"
                         >
-                          <span className="text-base block mb-0.5">{ch.icon}</span>
-                          <span className="font-bold text-[11px] block text-slate-200">{ch.name.split('(')[0]}</span>
-                          <span className="text-[9px] text-slate-500 block truncate">{ch.description}</span>
+                          Cancel / New Session
                         </button>
-                      ))}
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              setIsPollingXendit(true);
+                              const check = await checkXenditInvoiceStatus(
+                                activeXenditSession.id,
+                                businessProfile.paymentGateways.xenditSecretKey
+                              );
+                              setIsPollingXendit(false);
+                              if (check.status === 'PAID') {
+                                handleSettlePaidXenditSession(activeXenditSession);
+                              } else {
+                                alert(`Xendit status is currently: ${check.status}. If you have finished paying, please allow a few seconds for settlement.`);
+                              }
+                            }}
+                            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-cyan-300 rounded-xl text-xs font-semibold border border-cyan-500/30 transition-colors flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <Activity className="w-3.5 h-3.5" />
+                            <span>Check Status Now</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleSettlePaidXenditSession(activeXenditSession)}
+                            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-600/30 transition-all hover:scale-105 flex items-center gap-1.5 cursor-pointer"
+                            title="Simulate instant webhook settlement for testing without paying real money"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>Simulate Instant Payment (Test)</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ================= CHANNEL 2: CASH PAYMENT (MANUAL ADMIN SETTING) ================= */}
+              {payMethod === 'cash' && (
+                <div className="p-6 rounded-3xl bg-slate-950 border border-amber-500/40 space-y-5">
+                  <div className="flex items-start gap-3 border-b border-slate-800 pb-4">
+                    <div className="w-10 h-10 rounded-2xl bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center justify-center font-bold shrink-0">
+                      <DollarSign className="w-5 h-5" />
+                    </div>
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-bold text-slate-100 text-sm">Cash Payment (Office / Field Collector)</h3>
+                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-950 text-amber-300 border border-amber-800/60 font-mono">
+                          Set by Admin Manually
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-400 leading-relaxed">
+                        Cash payments are not processed directly through the self-service web portal. An authorized SwiftStream administrator or field technician will manually inspect your balance, receive cash, and immediately issue an Official Receipt (OR).
+                      </p>
                     </div>
                   </div>
 
-                  {/* Selected Subchannel Instructions */}
-                  <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 text-xs space-y-3">
-                    {xenditSubChannel === '7ELEVEN' && (
-                      <div className="space-y-2 text-center">
-                        <div className="flex items-center justify-between">
-                          <span className="font-bold text-slate-200 flex items-center gap-1.5">
-                            <span>🏪</span>
-                            <span>7-Eleven CLiQQ Payment Reference</span>
-                          </span>
-                          <span className="font-mono text-emerald-400 text-[10px]">Over-the-Counter</span>
-                        </div>
-                        <div className="p-3 bg-white text-slate-900 rounded-xl text-center font-mono space-y-1">
-                          <div className="text-2xl tracking-[0.3em] font-black">|||||||||||||||||||||||||</div>
-                          <p className="text-xs font-bold">711-{customer.accountNo.replace(/\D/g, '')}-91824</p>
-                          <p className="text-[10px] text-slate-600">Present this barcode at any 7-Eleven cashier nationwide</p>
-                        </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {/* Option A: Office Cashier */}
+                    <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 space-y-2.5">
+                      <div className="flex items-center gap-2 text-amber-400 font-bold text-xs">
+                        <MapPin className="w-4 h-4" />
+                        <span>Option 1: Visit Our Office</span>
                       </div>
-                    )}
+                      <p className="text-slate-300 text-xs">
+                        {businessProfile.address.building}, Brgy. {businessProfile.address.barangay}, {businessProfile.address.city}, {businessProfile.address.province}
+                      </p>
+                      <div className="text-[11px] text-slate-500 space-y-0.5 pt-1 border-t border-slate-800">
+                        <p>🕒 Cashier Hours: Mon – Sat: 8:00 AM – 5:00 PM</p>
+                        <p>📞 Helpline: <strong className="text-cyan-400">{businessProfile.representative.mobile}</strong></p>
+                      </div>
+                    </div>
 
-                    {xenditSubChannel === 'CREDIT_CARD' && (
-                      <div className="space-y-2 text-center">
-                        <div className="flex items-center justify-between">
-                          <span className="font-bold text-slate-200 flex items-center gap-1.5">
-                            <span>💳</span>
-                            <span>Credit / Debit Card (Visa / Mastercard / JCB)</span>
-                          </span>
-                          <span className="font-mono text-cyan-400 text-[10px]">3D Secure OTP</span>
+                    {/* Option B: In-Home Field Collection */}
+                    <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 space-y-2.5 flex flex-col justify-between">
+                      <div>
+                        <div className="flex items-center gap-2 text-cyan-400 font-bold text-xs">
+                          <User className="w-4 h-4" />
+                          <span>Option 2: Request Home Pickup</span>
                         </div>
-                        <p className="text-[11px] text-slate-400">
-                          Directly charged through Xendit secure card vault. No card numbers are stored on local servers.
+                        <p className="text-[11px] text-slate-400 mt-1">
+                          Have an authorized field technician or collection agent visit your installation address to collect cash.
                         </p>
                       </div>
-                    )}
 
-                    {xenditSubChannel === 'QRPH' && (
-                      <div className="flex flex-col sm:flex-row items-center justify-center gap-4 text-center sm:text-left">
-                        <div className="bg-white p-2 rounded-xl">
-                          <QRCodeSVG value={`https://checkout.xendit.co/qrph/${customer.accountNo}`} size={85} />
-                        </div>
-                        <div className="space-y-1">
-                          <span className="font-bold text-slate-200 block">QR Ph Interoperable Standard</span>
-                          <p className="text-[11px] text-slate-400">
-                            Scan with BDO, BPI, GCash, Maya, Landbank, or UnionBank app.
-                          </p>
-                        </div>
+                      <button
+                        type="button"
+                        onClick={handleRequestCashCollection}
+                        className="w-full py-2.5 bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/40 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                        <span>Request Field Cash Pickup</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {cashCollectionRequested && (
+                    <div className="p-4 rounded-2xl bg-emerald-950/60 border border-emerald-800/60 text-emerald-200 flex items-start gap-3 animate-in fade-in">
+                      <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+                      <div>
+                        <h4 className="font-bold text-xs">Cash Collection Request Dispatched!</h4>
+                        <p className="text-[11px] text-slate-300 mt-0.5">
+                          A field collector has been assigned to visit your registered premises ({customer.address.street}, Brgy. {customer.address.barangay}). An Official Receipt will be issued upon cash turnover.
+                        </p>
                       </div>
-                    )}
+                    </div>
+                  )}
+
+                  <div className="p-3.5 rounded-2xl bg-slate-900/60 border border-slate-800 flex items-center justify-between text-xs">
+                    <span className="text-slate-400">Prefer instant online activation without waiting?</span>
+                    <button
+                      type="button"
+                      onClick={() => setPayMethod('xendit')}
+                      className="px-3 py-1 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg font-bold text-xs transition-colors cursor-pointer"
+                    >
+                      Pay Online via Xendit &rarr;
+                    </button>
                   </div>
                 </div>
-              ) : (
-                /* Dynamic QR Ph / GCash / Maya Interoperable QR Gateway */
+              )}
+
+              {/* ================= CHANNEL 3, 4: GCASH / MAYA / BANK MANUAL PROOF ================= */}
+              {payMethod !== 'xendit' && payMethod !== 'cash' && (
                 <div className="p-5 rounded-3xl bg-slate-950 border border-slate-800 space-y-4">
                   <div className="flex flex-col md:flex-row items-center justify-center gap-6">
                     {/* QR Code Container */}
@@ -1296,17 +1662,15 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                       </div>
 
                       <QRCodeSVG
-                        value={
-                          generateDynamicQrPhPayload({
-                            merchantName: businessProfile.tradeName || 'SWIFTSTREAM TELECOM',
-                            merchantCity: businessProfile.address.city || 'LAGONOY',
-                            accountNumber: customer.accountNo,
-                            amount: Number(payAmount) || (customer.balance > 0 ? customer.balance : customer.monthlyFee),
-                            invoiceNumber: selectedPayInvoice?.invoiceNumber || 'BILL-2026',
-                            mobileNumber: businessProfile.paymentGateways.gcashNumber || '09624171684',
-                            serviceProvider: payMethod === 'gcash' ? 'gcash' : payMethod === 'maya' ? 'maya' : 'qrph_national',
-                          })
-                        }
+                        value={generateDynamicQrPhPayload({
+                          merchantName: businessProfile.tradeName || 'SWIFTSTREAM TELECOM',
+                          merchantCity: businessProfile.address.city || 'LAGONOY',
+                          accountNumber: customer.accountNo,
+                          amount: Number(payAmount) || (customer.balance > 0 ? customer.balance : customer.monthlyFee),
+                          invoiceNumber: selectedPayInvoice?.invoiceNumber || 'BILL-2026',
+                          mobileNumber: businessProfile.paymentGateways.gcashNumber || '09624171684',
+                          serviceProvider: payMethod === 'gcash' ? 'gcash' : payMethod === 'maya' ? 'maya' : 'qrph_national',
+                        })}
                         size={150}
                         level="M"
                       />
@@ -1320,21 +1684,25 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                       <div className="flex items-center justify-center md:justify-between">
                         <span className="font-bold text-slate-100 flex items-center gap-1.5">
                           <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                          <span>QR Ph Interoperable National Gateway</span>
+                          <span>QR Ph National Interoperable</span>
                         </span>
-                        <span className="text-[10px] text-cyan-400 bg-cyan-950 border border-cyan-800/40 px-2 py-0.5 rounded-full font-mono font-bold hidden md:inline">
-                          Dynamic Amount
-                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setPayMethod('xendit')}
+                          className="text-[10px] text-cyan-300 bg-cyan-950 border border-cyan-800 px-2 py-0.5 rounded-full font-bold hover:bg-cyan-900 transition-colors cursor-pointer hidden md:inline"
+                        >
+                          ⚡ Pay via Xendit instead &rarr;
+                        </button>
                       </div>
 
                       <p className="text-slate-400 text-[11px] leading-relaxed">
-                        Open your <strong>GCash</strong>, <strong>Maya</strong>, <strong>BDO</strong>, <strong>BPI</strong>, <strong>GoTyme</strong>, or <strong>SeaBank</strong> app and scan this QR code. The exact bill amount and Account No. (<strong>{customer.accountNo}</strong>) are automatically embedded.
+                        Scan this QR with <strong>GCash</strong>, <strong>Maya</strong>, or banking app. Enter reference number below for manual cashier validation.
                       </p>
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
                         <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between">
                           <div className="text-left">
-                            <span className="text-[10px] text-slate-500 block">Registered Number:</span>
+                            <span className="text-[10px] text-slate-500 block">Number:</span>
                             <span className="font-mono font-bold text-slate-200">
                               {payMethod === 'gcash'
                                 ? businessProfile.paymentGateways.gcashNumber
@@ -1356,7 +1724,6 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                               )
                             }
                             className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg cursor-pointer"
-                            title="Copy Number"
                           >
                             {copiedField === 'acct' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                           </button>
@@ -1364,8 +1731,8 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
 
                         <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between">
                           <div className="text-left">
-                            <span className="text-[10px] text-slate-500 block">Merchant Name:</span>
-                            <span className="font-bold text-slate-200 truncate block max-w-[140px]">
+                            <span className="text-[10px] text-slate-500 block">Merchant:</span>
+                            <span className="font-bold text-slate-200 truncate block max-w-[130px]">
                               {payMethod === 'gcash'
                                 ? businessProfile.paymentGateways.gcashName
                                 : payMethod === 'maya'
@@ -1378,131 +1745,64 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                       </div>
                     </div>
                   </div>
-                </div>
-              )}
 
-              {/* Step 2: Upload Proof Screenshot & Submit Reference */}
-              <form onSubmit={handleConfirmOnlinePayment} className="space-y-4 text-xs">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-slate-200 uppercase tracking-wider block">
-                    2. Submit Proof of Payment & Reference No.
-                  </span>
-                  <span className="text-[11px] text-cyan-400 font-medium">Cashier Audit Queue</span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-slate-400 mb-1 font-medium">Amount Transferred (PHP ₱) *</label>
-                    <input
-                      type="number"
-                      step="any"
-                      required
-                      value={payAmount}
-                      onChange={(e) => setPayAmount(e.target.value)}
-                      placeholder="1299.00"
-                      className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-mono font-bold text-base focus:outline-none focus:border-cyan-500 text-center"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-slate-400 mb-1 font-medium">
-                      {payMethod === 'gcash'
-                        ? 'GCash Ref No. (e.g. 9018247192) *'
-                        : payMethod === 'maya'
-                        ? 'Maya Ref No. *'
-                        : 'Bank Reference # *'}
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={payReference}
-                      onChange={(e) => setPayReference(e.target.value)}
-                      placeholder="Enter transaction ref number..."
-                      className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-mono text-xs focus:outline-none focus:border-cyan-500 text-center"
-                    />
-                  </div>
-                </div>
-
-                {/* Screenshot Uploader Dropzone */}
-                {payMethod !== 'xendit' && (
-                  <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-2">
-                    <label className="block text-slate-300 font-semibold text-center">
-                      Upload Payment Screenshot / Transfer Receipt (Optional):
-                    </label>
-
-                    {receiptImageBase64 ? (
-                      <div className="flex items-center gap-3 p-3 bg-slate-900 rounded-xl border border-slate-700">
-                        <img
-                          src={receiptImageBase64}
-                          alt="Receipt Preview"
-                          className="w-12 h-12 object-cover rounded-lg border border-slate-600"
-                        />
-                        <div className="flex-1 text-left">
-                          <span className="font-bold text-slate-200 block text-xs">Payment Screenshot Attached</span>
-                          <span className="text-[10px] text-emerald-400">Ready for cashier review</span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setReceiptImageBase64(null)}
-                          className="p-1.5 text-rose-400 hover:text-rose-300 hover:bg-rose-950/40 rounded-lg cursor-pointer"
-                        >
-                          <X className="w-4 h-4" />
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="relative border-2 border-dashed border-slate-700 hover:border-cyan-500/60 rounded-2xl p-4 text-center cursor-pointer transition-colors">
+                  {/* Manual Proof Submission Form */}
+                  <form onSubmit={handleConfirmOnlinePayment} className="space-y-4 pt-4 border-t border-slate-800 text-xs">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-slate-400 mb-1 font-medium">Amount Transferred (PHP ₱) *</label>
                         <input
-                          type="file"
-                          accept="image/*"
-                          onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (file) {
-                              const reader = new FileReader();
-                              reader.onload = (event) => {
-                                setReceiptImageBase64(event.target?.result as string);
-                              };
-                              reader.readAsDataURL(file);
-                            }
-                          }}
-                          className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                          type="number"
+                          step="any"
+                          required
+                          value={payAmount}
+                          onChange={(e) => setPayAmount(e.target.value)}
+                          placeholder="1299.00"
+                          className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 font-mono font-bold text-base focus:outline-none focus:border-cyan-500 text-center"
                         />
-                        <div className="flex flex-col items-center justify-center gap-1.5 text-slate-400">
-                          <Smartphone className="w-6 h-6 text-cyan-400" />
-                          <span className="font-semibold text-slate-200">Tap to upload receipt photo / screenshot</span>
-                          <span className="text-[10px] text-slate-500">Supports JPG, PNG, WEBP (Max 5MB)</span>
+                      </div>
+
+                      <div>
+                        <label className="block text-slate-400 mb-1 font-medium">
+                          {payMethod === 'gcash' ? 'GCash Ref No. (e.g. 9018247192) *' : payMethod === 'maya' ? 'Maya Ref No. *' : 'Bank Reference # *'}
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={payReference}
+                          onChange={(e) => setPayReference(e.target.value)}
+                          placeholder="Enter transaction ref number..."
+                          className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 font-mono text-xs focus:outline-none focus:border-cyan-500 text-center"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="pt-2">
+                      <button
+                        type="submit"
+                        disabled={isSubmittingPayment}
+                        className="w-full flex items-center justify-center gap-2 py-3.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-2xl text-sm font-bold shadow-lg shadow-emerald-600/20 transition-all hover:scale-[1.01] active:scale-[0.98] disabled:opacity-50 cursor-pointer"
+                      >
+                        <Check className="w-4 h-4" />
+                        <span>Submit Payment Proof for Cashier Verification</span>
+                      </button>
+                    </div>
+
+                    {submittedProofSuccess && (
+                      <div className="p-4 rounded-2xl bg-emerald-950/60 border border-emerald-800/60 text-emerald-200 flex items-start gap-3 animate-in fade-in">
+                        <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+                        <div>
+                          <h4 className="font-bold text-xs">Payment Proof Submitted Successfully!</h4>
+                          <p className="text-[11px] text-slate-300 mt-0.5">
+                            Our cashier team has received your transaction reference. Once verified, your invoice will be marked as paid and you will receive an SMS confirmation.
+                          </p>
                         </div>
                       </div>
                     )}
-                  </div>
-                )}
-
-                <div className="pt-2">
-                  <button
-                    type="submit"
-                    disabled={isSubmittingPayment}
-                    className="w-full flex items-center justify-center gap-2 py-3.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-2xl text-sm font-bold shadow-lg shadow-emerald-600/20 transition-all hover:scale-[1.01] active:scale-[0.98] disabled:opacity-50 cursor-pointer"
-                  >
-                    <Check className="w-4 h-4" />
-                    <span>
-                      {payMethod === 'xendit'
-                        ? 'Confirm & Pay via Xendit'
-                        : 'Submit Payment Proof for Cashier Verification'}
-                    </span>
-                  </button>
+                  </form>
                 </div>
+              )}
 
-                {submittedProofSuccess && (
-                  <div className="p-4 rounded-2xl bg-emerald-950/60 border border-emerald-800/60 text-emerald-200 flex items-start gap-3 animate-in fade-in">
-                    <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
-                    <div>
-                      <h4 className="font-bold text-xs">Payment Proof Submitted Successfully!</h4>
-                      <p className="text-[11px] text-slate-300 mt-0.5">
-                        Our cashier team has received your transaction reference. Once verified, your invoice will be marked as paid and you will receive an SMS confirmation.
-                      </p>
-                    </div>
-                  </div>
-                )}
-              </form>
 
               {/* Payment Verification History Tracker */}
               {customer && paymentSubmissions.filter((s) => s.customerId === customer.id).length > 0 && (

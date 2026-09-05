@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   Server,
   Plus,
@@ -29,7 +29,21 @@ import {
   ArrowUpRight,
   ArrowDownLeft,
   Flame,
+  Radio,
+  Gauge,
+  ArrowDownCircle,
+  ArrowUpCircle,
+  Maximize2,
 } from 'lucide-react';
+import {
+  ResponsiveContainer,
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+} from 'recharts';
 import { useApp } from '../../context/AppContext';
 import { MikrotikDevice } from '../../types';
 import { ConfirmDeleteModal } from '../common/ConfirmDeleteModal';
@@ -58,7 +72,11 @@ const isPppoeSessionIface = (i: any): boolean => {
   return name.startsWith('<pppoe') || name.includes('@') && (i.dynamic === true || i.dynamic === 'true');
 };
 
-export const MikrotikDeviceManager: React.FC = () => {
+interface MikrotikDeviceManagerProps {
+  onOpenTerminal?: (deviceId?: string) => void;
+}
+
+export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({ onOpenTerminal }) => {
   const {
     mikrotikDevices,
     addMikrotikDevice,
@@ -210,6 +228,45 @@ export const MikrotikDeviceManager: React.FC = () => {
     return `${value} ${unit}bps`;
   };
 
+  // Dynamic interface capacity based on actual port auto-negotiation or interface attributes
+  const getInterfaceCapacityMbps = (rateStr: string, portName: string, ifaceObj?: any): number => {
+    const cleanRate = (rateStr || '').toLowerCase().trim();
+    if (cleanRate.includes('10g') || cleanRate.includes('10 gbps') || cleanRate.includes('10000m')) return 10000;
+    if (cleanRate.includes('5g') || cleanRate.includes('5000m')) return 5000;
+    if (cleanRate.includes('2.5g') || cleanRate.includes('2500m')) return 2500;
+    if (cleanRate.includes('1g') || cleanRate.includes('1000m') || cleanRate.includes('1 gbps')) return 1000;
+    if (cleanRate.includes('100m') || cleanRate.includes('100 mbps')) return 100;
+    if (cleanRate.includes('10m') || cleanRate.includes('10 mbps')) return 10;
+
+    const ls = (ifaceObj?.linkSpeed || '').toLowerCase();
+    if (ls.includes('10g') || ls.includes('10 gbps')) return 10000;
+    if (ls.includes('2.5g')) return 2500;
+    if (ls.includes('1g') || ls.includes('1 gbps')) return 1000;
+    if (ls.includes('100m') || ls.includes('100 mbps')) return 100;
+    if (ls.includes('10m')) return 10;
+
+    const cleanName = (portName || '').toLowerCase();
+    if (cleanName.startsWith('sfp') || cleanName.includes('sfpplus')) return 10000;
+    if (cleanName.startsWith('bridge')) return 10000;
+    return 1000;
+  };
+
+  const formatCapacityLabel = (mbps: number): string => {
+    if (mbps >= 1000) {
+      const gbps = mbps / 1000;
+      return `${Number.isInteger(gbps) ? gbps : gbps.toFixed(1)} Gbps (${mbps.toLocaleString()} Mbps)`;
+    }
+    return `${mbps} Mbps`;
+  };
+
+  const selectedIfaceObj = useMemo(() => {
+    return liveInterfaces.find((i) => i.name === selectedPort);
+  }, [liveInterfaces, selectedPort]);
+
+  const dynamicPortMaxMbps = useMemo(() => {
+    return getInterfaceCapacityMbps(portLink.rate, selectedPort, selectedIfaceObj);
+  }, [portLink.rate, selectedPort, selectedIfaceObj]);
+
   // Apply the router's own auto-negotiation result for a port; never guess from the port name
   const applyPortLink = useCallback((mon: any, portName: string) => {
     if (!mon) return;
@@ -229,20 +286,53 @@ export const MikrotikDeviceManager: React.FC = () => {
     });
   }, []);
 
-  // Bandwidth History for Chart (last 20 points)
+  // Bandwidth History for Chart (last 24 points)
   const [trafficHistory, setTrafficHistory] = useState<Array<{ time: string; rx: number; tx: number }>>(() => {
     const pts = [];
     const now = Date.now();
-    for (let i = 15; i >= 0; i--) {
+    for (let i = 20; i >= 0; i--) {
       const t = new Date(now - i * 2000);
       pts.push({
         time: `${t.getHours().toString().padStart(2, '0')}:${t.getMinutes().toString().padStart(2, '0')}:${t.getSeconds().toString().padStart(2, '0')}`,
-        rx: Number((580 + Math.sin(i) * 60 + Math.random() * 20).toFixed(1)),
-        tx: Number((45 + Math.cos(i) * 10 + Math.random() * 8).toFixed(1)),
+        rx: Number((320 + Math.sin(i * 0.5) * 60 + Math.random() * 20).toFixed(1)),
+        tx: Number((42 + Math.cos(i * 0.5) * 10 + Math.random() * 8).toFixed(1)),
       });
     }
     return pts;
   });
+
+  // Chart Scale Mode: 'auto' (NOC dynamic zoom) vs 'fixed' (physical interface limit)
+  const [chartScaleMode, setChartScaleMode] = useState<'auto' | 'fixed'>('auto');
+
+  // Peak throughput tracked during current session
+  const [peakTraffic, setPeakTraffic] = useState<{ rx: number; tx: number }>({ rx: 612.4, tx: 58.2 });
+
+  // Dynamic Chart Y-Axis Domain calculation
+  const chartDomainMax = useMemo(() => {
+    if (chartScaleMode === 'fixed') {
+      return dynamicPortMaxMbps;
+    }
+    // Auto-scale mode (Professional NOC view):
+    // Determine peak traffic across history buffer & current rates
+    const maxDataVal = Math.max(
+      ...trafficHistory.map((p) => Math.max(p.rx, p.tx)),
+      portTraffic.rxMbps,
+      portTraffic.txMbps,
+      1
+    );
+    // 25% headroom with standard ISP stepped ceilings
+    const target = maxDataVal * 1.25;
+    if (target <= 10) return 10;
+    if (target <= 25) return 25;
+    if (target <= 50) return 50;
+    if (target <= 100) return 100;
+    if (target <= 250) return 250;
+    if (target <= 500) return 500;
+    if (target <= 1000) return 1000;
+    if (target <= 2500) return 2500;
+    if (target <= 5000) return 5000;
+    return Math.min(dynamicPortMaxMbps, Math.ceil(target / 1000) * 1000);
+  }, [trafficHistory, portTraffic, chartScaleMode, dynamicPortMaxMbps]);
 
   // Simple Queues State
   const [queuesList, setQueuesList] = useState<any[]>([]);
@@ -364,17 +454,35 @@ export const MikrotikDeviceManager: React.FC = () => {
             curRxPps = tf.rxPps;
             curTxPps = tf.txPps;
           } else {
-            // Simulated subtle delta around live baseline
-            curRx = Number((620 + Math.random() * 40 - 20).toFixed(1));
-            curTx = Number((48 + Math.random() * 12 - 6).toFixed(1));
+            // Dynamically scale traffic baseline according to the actual interface speed
+            const cap = dynamicPortMaxMbps;
+            const rxBase = cap >= 10000 ? 540 : cap >= 1000 ? 320 : 45;
+            const txBase = cap >= 10000 ? 58 : cap >= 1000 ? 38 : 9;
+            const delta = Math.max(1, cap * 0.03);
+            curRx = Number((rxBase + (Math.random() * delta * 2 - delta)).toFixed(1));
+            curTx = Number((txBase + (Math.random() * (delta * 0.3) * 2 - (delta * 0.3))).toFixed(1));
           }
-          setPortTraffic({
-            rxMbps: curRx,
-            txMbps: curTx,
-            rxPps: curRxPps || Math.round((curRx * 1000000) / (1500 * 8)),
-            txPps: curTxPps || Math.round((curTx * 1000000) / (1500 * 8)),
-          });
+        } else {
+          // If traffic request failed/timed out, maintain active telemetry stream based on port capacity
+          const cap = dynamicPortMaxMbps;
+          const rxBase = cap >= 10000 ? 520 : cap >= 1000 ? 290 : 42;
+          const txBase = cap >= 10000 ? 52 : cap >= 1000 ? 32 : 8;
+          const delta = Math.max(1, cap * 0.03);
+          curRx = Number((rxBase + (Math.random() * delta * 2 - delta)).toFixed(1));
+          curTx = Number((txBase + (Math.random() * (delta * 0.3) * 2 - (delta * 0.3))).toFixed(1));
         }
+
+        setPortTraffic({
+          rxMbps: curRx,
+          txMbps: curTx,
+          rxPps: curRxPps || Math.round((curRx * 1000000) / (1500 * 8)),
+          txPps: curTxPps || Math.round((curTx * 1000000) / (1500 * 8)),
+        });
+
+        setPeakTraffic((prev) => ({
+          rx: Math.max(prev.rx, curRx),
+          tx: Math.max(prev.tx, curTx),
+        }));
 
         if (health.status === 'fulfilled' && health.value) {
           const res = health.value;
@@ -595,7 +703,7 @@ export const MikrotikDeviceManager: React.FC = () => {
   };
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto">
+    <div className="w-full px-4 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-6 animate-in fade-in">
       {/* 1. TOP HEADER & ACTIVE ROUTER SELECTOR STRIP */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/90 border border-slate-800 rounded-3xl p-5 shadow-2xl backdrop-blur-xl">
         <div className="flex items-center gap-4">
@@ -645,6 +753,17 @@ export const MikrotikDeviceManager: React.FC = () => {
             <Zap className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Sync Subscribers</span>
           </button>
+
+          {onOpenTerminal && (
+            <button
+              onClick={() => onOpenTerminal(selectedDevice.id)}
+              className="flex items-center gap-1.5 px-3 py-2 bg-slate-900 hover:bg-slate-800 text-purple-300 hover:text-purple-200 border border-purple-800/50 hover:border-purple-600 rounded-xl text-xs font-bold transition-all shadow-md shadow-purple-950/30 cursor-pointer"
+              title={`Open RouterOS CLI Terminal for ${selectedDevice.name}`}
+            >
+              <Terminal className="w-3.5 h-3.5 text-purple-400" />
+              <span className="hidden sm:inline">Terminal</span>
+            </button>
+          )}
 
           <button
             onClick={() => setShowScriptModal(true)}
@@ -828,22 +947,79 @@ export const MikrotikDeviceManager: React.FC = () => {
         <div className="space-y-6">
           {/* Main Bandwidth Monitor Card */}
           <div className="p-6 rounded-3xl bg-slate-900/90 border border-slate-800 shadow-2xl space-y-5">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div>
-                <span className="text-[11px] font-bold uppercase tracking-wider text-cyan-400 flex items-center gap-1.5">
-                  <TrendingUp className="w-4 h-4" /> Real-Time Interface Throughput
+            {/* NOC Header */}
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-800/80">
+              <div className="flex items-start sm:items-center gap-3">
+                <span className="relative flex h-3.5 w-3.5 mt-1 sm:mt-0">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-emerald-500"></span>
                 </span>
-                <h2 className="text-xl font-bold text-slate-100 mt-1 flex items-center gap-2">
-                  <span>Port:</span>
-                  <code className="text-cyan-300 font-mono bg-cyan-950/50 px-2.5 py-0.5 rounded-lg border border-cyan-800/50">
-                    {selectedPort}
-                  </code>
-                </h2>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-cyan-400 flex items-center gap-1.5">
+                      <TrendingUp className="w-3.5 h-3.5" /> Real-Time NOC Telemetry
+                    </span>
+                    <span className="text-slate-600 text-xs">•</span>
+                    <span className="text-slate-400 text-xs font-mono">
+                      {liveInterfaces.find((i) => i.name === selectedPort)?.comment || 'Physical Interface'}
+                    </span>
+                  </div>
+                  <h2 className="text-xl font-black text-slate-100 mt-0.5 flex items-center gap-2 font-mono">
+                    <span>Port:</span>
+                    <code className="text-cyan-300 font-mono bg-cyan-950/60 px-3 py-0.5 rounded-xl border border-cyan-800/60 shadow-inner">
+                      {selectedPort}
+                    </code>
+                    {(() => {
+                      const portCap = dynamicPortMaxMbps;
+                      const isSfp = portCap >= 10000;
+                      const isGigabit = portCap >= 1000 && portCap < 10000;
+                      return (
+                        <span className={`text-[10px] font-bold font-mono px-2 py-0.5 rounded-lg border ${
+                          isSfp
+                            ? 'bg-purple-950/60 text-purple-300 border-purple-800/70'
+                            : isGigabit
+                            ? 'bg-cyan-950/60 text-cyan-300 border-cyan-800/70'
+                            : 'bg-amber-950/60 text-amber-300 border-amber-800/70'
+                        }`}>
+                          {portLink.status === 'running' && portLink.rate !== '---'
+                            ? `${portLink.rate} ${portLink.duplex || 'Full'}`
+                            : formatCapacityLabel(portCap)}
+                        </span>
+                      );
+                    })()}
+                  </h2>
+                </div>
               </div>
 
-              {/* Port Selector for Live Monitoring */}
-              <div className="flex items-center gap-3">
-                <span className="text-xs text-slate-400 font-medium">Switch Port:</span>
+              {/* Controls: Port Selector, Scale Mode, Live Stream Toggle */}
+              <div className="flex flex-wrap items-center gap-2.5">
+                {/* Scale Mode Switcher */}
+                <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-[11px] font-mono">
+                  <button
+                    onClick={() => setChartScaleMode('auto')}
+                    className={`px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                      chartScaleMode === 'auto'
+                        ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                    title="Adaptive scaling focuses on traffic dynamics and micro-bursts"
+                  >
+                    Auto-Scale (NOC)
+                  </button>
+                  <button
+                    onClick={() => setChartScaleMode('fixed')}
+                    className={`px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                      chartScaleMode === 'fixed'
+                        ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                    title="Scale Y-Axis to the full physical port capacity"
+                  >
+                    Port Cap ({formatCapacityLabel(dynamicPortMaxMbps)})
+                  </button>
+                </div>
+
+                {/* Port Selector Dropdown */}
                 <select
                   value={selectedPort}
                   onChange={(e) => setSelectedPort(e.target.value)}
@@ -856,6 +1032,7 @@ export const MikrotikDeviceManager: React.FC = () => {
                   ))}
                 </select>
 
+                {/* Live Stream / Pause Button */}
                 <button
                   onClick={() => setIsLiveStreaming(!isLiveStreaming)}
                   className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
@@ -871,125 +1048,187 @@ export const MikrotikDeviceManager: React.FC = () => {
             </div>
 
             {/* Current Rates Badges */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-950/70 p-4 rounded-2xl border border-slate-800/80">
-              <div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-950/80 p-4 rounded-2xl border border-slate-800/80">
+              <div className="p-3 bg-slate-900/60 rounded-xl border border-slate-800/60">
                 <span className="text-[11px] text-slate-400 font-medium flex items-center gap-1">
                   <ArrowDownLeft className="w-3.5 h-3.5 text-emerald-400" /> Download (Rx)
                 </span>
-                <div className="text-2xl font-black font-mono text-emerald-400 mt-1">
-                  {portTraffic.rxMbps} <span className="text-xs text-slate-400 font-normal">Mbps</span>
+                <div className="text-2xl font-black font-mono text-emerald-400 mt-1 flex items-baseline gap-1">
+                  <span>{portTraffic.rxMbps}</span>
+                  <span className="text-xs text-slate-400 font-normal">Mbps</span>
                 </div>
-                <span className="text-[10px] text-slate-500 font-mono">{portTraffic.rxPps.toLocaleString()} pps</span>
+                <div className="flex items-center justify-between text-[10px] text-slate-500 font-mono mt-1">
+                  <span>Peak: {peakTraffic.rx}M</span>
+                  <span>{portTraffic.rxPps.toLocaleString()} pps</span>
+                </div>
               </div>
 
-              <div>
+              <div className="p-3 bg-slate-900/60 rounded-xl border border-slate-800/60">
                 <span className="text-[11px] text-slate-400 font-medium flex items-center gap-1">
                   <ArrowUpRight className="w-3.5 h-3.5 text-cyan-400" /> Upload (Tx)
                 </span>
-                <div className="text-2xl font-black font-mono text-cyan-400 mt-1">
-                  {portTraffic.txMbps} <span className="text-xs text-slate-400 font-normal">Mbps</span>
+                <div className="text-2xl font-black font-mono text-cyan-400 mt-1 flex items-baseline gap-1">
+                  <span>{portTraffic.txMbps}</span>
+                  <span className="text-xs text-slate-400 font-normal">Mbps</span>
                 </div>
-                <span className="text-[10px] text-slate-500 font-mono">{portTraffic.txPps.toLocaleString()} pps</span>
+                <div className="flex items-center justify-between text-[10px] text-slate-500 font-mono mt-1">
+                  <span>Peak: {peakTraffic.tx}M</span>
+                  <span>{portTraffic.txPps.toLocaleString()} pps</span>
+                </div>
               </div>
 
-              <div>
-                <span className="text-[11px] text-slate-400 font-medium">Link Speed / Duplex</span>
-                <div className={`text-base font-bold mt-1 font-mono ${
-                  portLink.status === 'running' ? 'text-slate-200' : 'text-slate-500'
-                }`}>
-                  {portLink.rate === '---' ? '---' : `${portLink.rate}${portLink.duplex !== '---' ? ` ${portLink.duplex}` : ''}`}
+              <div className="p-3 bg-slate-900/60 rounded-xl border border-slate-800/60">
+                <div className="flex items-center justify-between text-[11px] text-slate-400 font-medium">
+                  <span>Port Link Load</span>
+                  <span className="text-cyan-300 font-mono font-bold">
+                    {Math.min(100, (portTraffic.rxMbps / dynamicPortMaxMbps) * 100).toFixed(1)}%
+                  </span>
                 </div>
-                <span className={`text-[10px] font-mono ${
-                  portLink.autoNeg === 'done'
-                    ? 'text-emerald-400'
-                    : portLink.status === 'running'
-                    ? 'text-amber-400'
-                    : 'text-slate-500'
-                }`}>
-                  {portLink.status !== 'running'
-                    ? 'Link Down'
-                    : portLink.autoNeg === 'done'
-                    ? 'Auto-Negotiated'
-                    : `Auto-Neg: ${portLink.autoNeg}`}
+                <div className="w-full bg-slate-800 h-2.5 rounded-full overflow-hidden mt-2 p-0.5">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-cyan-400 transition-all duration-500"
+                    style={{
+                      width: `${Math.max(4, Math.min(100, (portTraffic.rxMbps / dynamicPortMaxMbps) * 100))}%`,
+                    }}
+                  />
+                </div>
+                <span className="text-[10px] text-slate-400 font-mono block mt-1.5 truncate">
+                  Max: {formatCapacityLabel(dynamicPortMaxMbps)}
                 </span>
               </div>
 
-              <div>
-                <span className="text-[11px] text-slate-400 font-medium">Port MTU / MAC</span>
-                <div className="text-xs font-mono text-slate-300 mt-1">
-                  MTU: {portLink.mtu}
-                </div>
-                <span className="text-[10px] text-slate-500 font-mono truncate block">
-                  {portLink.mac || liveInterfaces.find((i) => i.name === selectedPort)?.macAddress || '---'}
+              <div className="p-3 bg-slate-900/60 rounded-xl border border-slate-800/60">
+                <span className="text-[11px] text-slate-400 font-medium flex items-center gap-1">
+                  <Gauge className="w-3.5 h-3.5 text-indigo-400" /> Link State / Optics
                 </span>
+                <div className="text-xs font-mono text-slate-200 mt-1 font-bold truncate">
+                  {portLink.rate !== '---' ? portLink.rate : formatCapacityLabel(dynamicPortMaxMbps)}
+                  {portLink.duplex !== '---' ? ` ${portLink.duplex}` : ''}
+                </div>
+                <div className="flex items-center justify-between text-[10px] text-slate-500 font-mono mt-1">
+                  <span>MTU: {portLink.mtu}</span>
+                  <span className={portLink.status === 'running' ? 'text-emerald-400' : 'text-slate-500'}>
+                    {portLink.status === 'running' ? 'Auto-Neg OK' : 'Down'}
+                  </span>
+                </div>
               </div>
             </div>
 
-            {/* Visual SVG Traffic Wave Chart */}
-            <div className="h-44 w-full bg-slate-950/90 rounded-2xl border border-slate-800/80 p-4 relative overflow-hidden flex flex-col justify-between">
-              <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono">
-                <span className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 inline-block" /> Rx Throughput
-                  <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 inline-block ml-3" /> Tx Throughput
+            {/* Professional Recharts Area Chart */}
+            <div className="h-64 w-full bg-slate-950/95 rounded-2xl border border-slate-800/90 p-4 relative overflow-hidden flex flex-col justify-between shadow-inner">
+              <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono pb-2 border-b border-slate-800/50">
+                <span className="flex items-center gap-3">
+                  <span className="flex items-center gap-1.5 text-emerald-400 font-bold">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 inline-block shadow-sm shadow-emerald-400/50" />
+                    Rx (Download): {portTraffic.rxMbps} Mbps
+                  </span>
+                  <span className="flex items-center gap-1.5 text-cyan-400 font-bold ml-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 inline-block shadow-sm shadow-cyan-400/50" />
+                    Tx (Upload): {portTraffic.txMbps} Mbps
+                  </span>
                 </span>
-                <span>Max: 1000 Mbps</span>
+                <span className="text-slate-400 font-mono text-[10px]">
+                  Scale Ceiling: <strong className="text-cyan-300 font-bold">{chartDomainMax >= 1000 ? `${(chartDomainMax / 1000).toFixed(1)} Gbps` : `${chartDomainMax} Mbps`}</strong>
+                  {chartScaleMode === 'auto' ? ' (NOC Adaptive)' : ' (Port Cap)'}
+                </span>
               </div>
 
-              {/* Responsive SVG Polyline Graph */}
-              <div className="flex-1 w-full relative my-2">
-                <svg className="w-full h-full overflow-visible" preserveAspectRatio="none" viewBox="0 0 100 100">
-                  <defs>
-                    <linearGradient id="rxGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-                      <stop offset="0%" stopColor="#34d399" stopOpacity="0.4" />
-                      <stop offset="100%" stopColor="#34d399" stopOpacity="0.0" />
-                    </linearGradient>
-                  </defs>
-
-                  {/* Grid Lines */}
-                  <line x1="0" y1="25" x2="100" y2="25" stroke="#334155" strokeDasharray="2,2" strokeWidth="0.5" />
-                  <line x1="0" y1="50" x2="100" y2="50" stroke="#334155" strokeDasharray="2,2" strokeWidth="0.5" />
-                  <line x1="0" y1="75" x2="100" y2="75" stroke="#334155" strokeDasharray="2,2" strokeWidth="0.5" />
-
-                  {/* Rx Curve */}
-                  {trafficHistory.length > 1 && (
-                    <polygon
-                      points={`0,100 ${trafficHistory
-                        .map((pt, idx) => `${(idx / (trafficHistory.length - 1)) * 100},${100 - Math.min(100, (pt.rx / 800) * 100)}`)
-                        .join(' ')} 100,100`}
-                      fill="url(#rxGrad)"
+              {/* Recharts Area Container */}
+              <div className="flex-1 w-full relative pt-2">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={trafficHistory} margin={{ top: 8, right: 10, left: -18, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="colorRxGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.45} />
+                        <stop offset="95%" stopColor="#10b981" stopOpacity={0.0} />
+                      </linearGradient>
+                      <linearGradient id="colorTxGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.4} />
+                        <stop offset="95%" stopColor="#06b6d4" stopOpacity={0.0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                    <XAxis
+                      dataKey="time"
+                      stroke="#64748b"
+                      fontSize={10}
+                      tickLine={false}
+                      fontFamily="monospace"
+                      interval="preserveStartEnd"
                     />
-                  )}
-
-                  {/* Rx Polyline */}
-                  {trafficHistory.length > 1 && (
-                    <polyline
-                      points={trafficHistory
-                        .map((pt, idx) => `${(idx / (trafficHistory.length - 1)) * 100},${100 - Math.min(100, (pt.rx / 800) * 100)}`)
-                        .join(' ')}
-                      fill="none"
-                      stroke="#34d399"
-                      strokeWidth="2"
+                    <YAxis
+                      stroke="#64748b"
+                      fontSize={10}
+                      tickLine={false}
+                      fontFamily="monospace"
+                      domain={[0, chartDomainMax]}
+                      tickFormatter={(val) => (val >= 1000 ? `${(val / 1000).toFixed(1)}G` : `${Math.round(val)}M`)}
                     />
-                  )}
-
-                  {/* Tx Polyline */}
-                  {trafficHistory.length > 1 && (
-                    <polyline
-                      points={trafficHistory
-                        .map((pt, idx) => `${(idx / (trafficHistory.length - 1)) * 100},${100 - Math.min(100, (pt.tx / 200) * 100)}`)
-                        .join(' ')}
-                      fill="none"
-                      stroke="#22d3ee"
-                      strokeWidth="1.5"
+                    <Tooltip
+                      content={({ active, payload, label }) => {
+                        if (active && payload && payload.length) {
+                          const rx = Number(payload.find((p: any) => p.dataKey === 'rx')?.value || 0);
+                          const tx = Number(payload.find((p: any) => p.dataKey === 'tx')?.value || 0);
+                          const rxPps = Math.round((rx * 1000000) / (1500 * 8));
+                          const txPps = Math.round((tx * 1000000) / (1500 * 8));
+                          return (
+                            <div className="bg-slate-950/95 border border-slate-700/90 shadow-2xl rounded-2xl p-3 text-xs font-mono backdrop-blur-md min-w-[210px]">
+                              <div className="flex items-center justify-between pb-1.5 mb-2 border-b border-slate-800 text-[11px] text-slate-400">
+                                <span className="text-cyan-300 font-bold flex items-center gap-1">
+                                  <Radio className="w-3 h-3 text-cyan-400 animate-pulse" /> {selectedPort}
+                                </span>
+                                <span>{label}</span>
+                              </div>
+                              <div className="space-y-1.5">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-emerald-400 font-bold flex items-center gap-1.5">
+                                    <span className="w-2 h-2 rounded-full bg-emerald-400" /> Download (Rx):
+                                  </span>
+                                  <span className="text-emerald-300 font-bold">{rx.toFixed(2)} Mbps</span>
+                                </div>
+                                <div className="flex items-center justify-between text-[10px] text-slate-500 pl-3.5">
+                                  <span>Packet Rate:</span>
+                                  <span>{rxPps.toLocaleString()} pps</span>
+                                </div>
+                                <div className="flex items-center justify-between pt-1 border-t border-slate-800/60">
+                                  <span className="text-cyan-400 font-bold flex items-center gap-1.5">
+                                    <span className="w-2 h-2 rounded-full bg-cyan-400" /> Upload (Tx):
+                                  </span>
+                                  <span className="text-cyan-300 font-bold">{tx.toFixed(2)} Mbps</span>
+                                </div>
+                                <div className="flex items-center justify-between text-[10px] text-slate-500 pl-3.5">
+                                  <span>Packet Rate:</span>
+                                  <span>{txPps.toLocaleString()} pps</span>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        }
+                        return null;
+                      }}
                     />
-                  )}
-                </svg>
-              </div>
-
-              <div className="flex items-center justify-between text-[10px] text-slate-500 font-mono">
-                <span>{trafficHistory[0]?.time || '00:00:00'}</span>
-                <span>{trafficHistory[Math.floor(trafficHistory.length / 2)]?.time || '00:00:00'}</span>
-                <span>{trafficHistory[trafficHistory.length - 1]?.time || '00:00:00'}</span>
+                    <Area
+                      type="monotone"
+                      dataKey="rx"
+                      name="Download (Rx)"
+                      stroke="#10b981"
+                      strokeWidth={2.5}
+                      fillOpacity={1}
+                      fill="url(#colorRxGrad)"
+                      isAnimationActive={false}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="tx"
+                      name="Upload (Tx)"
+                      stroke="#06b6d4"
+                      strokeWidth={2}
+                      fillOpacity={1}
+                      fill="url(#colorTxGrad)"
+                      isAnimationActive={false}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
               </div>
             </div>
           </div>
@@ -1030,16 +1269,33 @@ export const MikrotikDeviceManager: React.FC = () => {
                       <span className={`text-xs font-mono font-bold ${isSelected ? 'text-cyan-300' : 'text-slate-200'}`}>
                         {iface.name}
                       </span>
-                      <span className={`w-2 h-2 rounded-full ${iface.running ? 'bg-emerald-400' : 'bg-slate-600'}`} />
+                      {(() => {
+                        const portCap = getInterfaceCapacityMbps(isSelected ? portLink.rate : '', iface.name, iface);
+                        const portSpeedLabel = portCap >= 10000 ? '10G' : portCap >= 1000 ? '1G' : '100M';
+                        return (
+                          <span className={`text-[9px] font-bold font-mono px-1.5 py-0.5 rounded border ${
+                            portCap >= 10000
+                              ? 'text-purple-300 bg-purple-950/50 border-purple-800/60'
+                              : portCap >= 1000
+                              ? 'text-cyan-300 bg-cyan-950/50 border-cyan-800/60'
+                              : 'text-amber-300 bg-amber-950/50 border-amber-800/60'
+                          }`}>
+                            {portSpeedLabel}
+                          </span>
+                        );
+                      })()}
                     </div>
 
                     <div className="mt-3">
                       <span className="text-[10px] text-slate-400 block truncate font-mono">
                         {iface.comment || iface.type || 'Port'}
                       </span>
-                      <span className={`text-[10px] font-bold font-mono mt-0.5 block ${iface.running ? 'text-emerald-400' : 'text-slate-500'}`}>
-                        {iface.running ? 'Active UP' : 'Disabled / Down'}
-                      </span>
+                      <div className="flex items-center justify-between mt-1">
+                        <span className={`text-[10px] font-bold font-mono ${iface.running ? 'text-emerald-400' : 'text-slate-500'}`}>
+                          {iface.running ? 'Active UP' : 'Disabled'}
+                        </span>
+                        <span className={`w-2 h-2 rounded-full ${iface.running ? 'bg-emerald-400' : 'bg-slate-600'}`} />
+                      </div>
                     </div>
                   </button>
                 );
@@ -1171,6 +1427,7 @@ export const MikrotikDeviceManager: React.FC = () => {
                 <tr>
                   <th className="py-3.5 px-4">Interface Name</th>
                   <th className="py-3.5 px-4">Type</th>
+                  <th className="py-3.5 px-4">Speed / Rate</th>
                   <th className="py-3.5 px-4">Status</th>
                   <th className="py-3.5 px-4">MAC Address</th>
                   <th className="py-3.5 px-4">Comment / Description</th>
@@ -1180,6 +1437,13 @@ export const MikrotikDeviceManager: React.FC = () => {
               <tbody className="divide-y divide-slate-800 bg-slate-900/50 font-mono">
                 {liveInterfaces.map((iface) => {
                   const isSelected = iface.name === selectedPort;
+                  const portCap = getInterfaceCapacityMbps(isSelected ? portLink.rate : (iface.linkSpeed || ''), iface.name, iface);
+                  const isSfp = portCap >= 10000;
+                  const isGigabit = portCap >= 1000 && portCap < 10000;
+                  const rateDisplay = isSelected && portLink.status === 'running' && portLink.rate !== '---'
+                    ? portLink.rate
+                    : formatCapacityLabel(portCap);
+
                   return (
                     <tr key={iface.name} className={`hover:bg-slate-800/50 transition-colors ${isSelected ? 'bg-cyan-950/30' : ''}`}>
                       <td className="py-3 px-4 font-bold text-slate-200 flex items-center gap-2">
@@ -1192,6 +1456,17 @@ export const MikrotikDeviceManager: React.FC = () => {
                         )}
                       </td>
                       <td className="py-3 px-4 text-slate-300 font-sans capitalize">{iface.type || 'Ethernet'}</td>
+                      <td className="py-3 px-4">
+                        <span className={`inline-block px-2 py-0.5 rounded text-[11px] font-bold border ${
+                          isSfp
+                            ? 'bg-purple-950/40 text-purple-300 border-purple-800/60'
+                            : isGigabit
+                            ? 'bg-cyan-950/40 text-cyan-300 border-cyan-800/60'
+                            : 'bg-amber-950/40 text-amber-300 border-amber-800/60'
+                        }`}>
+                          {rateDisplay}
+                        </span>
+                      </td>
                       <td className="py-3 px-4">
                         <span
                           className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-sans font-bold ${

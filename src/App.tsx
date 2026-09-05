@@ -17,6 +17,7 @@ import { PlanManager } from './components/plans/PlanManager';
 import { CoverageAreaManager } from './components/network/CoverageAreaManager';
 import { NapBoxManager } from './components/network/NapBoxManager';
 import { MikrotikDeviceManager } from './components/network/MikrotikDeviceManager';
+import { MikrotikTerminalModal } from './components/network/MikrotikTerminalModal';
 import { RepairOrderList } from './components/repairs/RepairOrderList';
 import { RepairOrderModal } from './components/repairs/RepairOrderModal';
 import { ReminderCenter } from './components/reminders/ReminderCenter';
@@ -52,8 +53,14 @@ const MainLayout: React.FC = () => {
 
   const [showRepairModal, setShowRepairModal] = useState<boolean>(false);
   const [repairToEdit, setRepairToEdit] = useState<RepairOrder | null>(null);
+  const [showTerminalModal, setShowTerminalModal] = useState<boolean>(false);
+  const [terminalDeviceId, setTerminalDeviceId] = useState<string | undefined>(undefined);
 
   // Quick Action Handlers
+  const handleOpenTerminal = (deviceId?: string) => {
+    setTerminalDeviceId(deviceId);
+    setShowTerminalModal(true);
+  };
   const handleOpenPayment = (customerId?: string, invoiceId?: string) => {
     setPaymentCustomerId(customerId);
     setPaymentInvoiceId(invoiceId);
@@ -128,6 +135,7 @@ const MainLayout: React.FC = () => {
           onOpenPaymentModal={() => handleOpenPayment()}
           onOpenCustomerModal={() => handleOpenCustomerModal()}
           onOpenBatchBillingModal={() => setShowBatchBillingModal(true)}
+          onOpenTerminalModal={(devId) => handleOpenTerminal(devId)}
         />
 
         <main className="flex-1 overflow-y-auto bg-gradient-to-b from-slate-900 to-slate-950">
@@ -153,7 +161,7 @@ const MainLayout: React.FC = () => {
             />
           )}
 
-          {activeTab === 'mikrotik' && <MikrotikDeviceManager />}
+          {activeTab === 'mikrotik' && <MikrotikDeviceManager onOpenTerminal={handleOpenTerminal} />}
 
           {activeTab === 'radius' && <RadiusAaaManager />}
 
@@ -263,6 +271,16 @@ const MainLayout: React.FC = () => {
           onClose={() => {
             setShowRepairModal(false);
             setRepairToEdit(null);
+          }}
+        />
+      )}
+
+      {showTerminalModal && (
+        <MikrotikTerminalModal
+          initialDeviceId={terminalDeviceId}
+          onClose={() => {
+            setShowTerminalModal(false);
+            setTerminalDeviceId(undefined);
           }}
         />
       )}

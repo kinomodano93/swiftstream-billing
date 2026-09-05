@@ -19,6 +19,7 @@ import {
   CheckCircle2,
   AlertCircle,
   Shuffle,
+  Search,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { Customer, CustomerStatus } from '../../types';
@@ -91,6 +92,8 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
   const [isFetchingSecrets, setIsFetchingSecrets] = useState<boolean>(false);
   const [selectedSecretName, setSelectedSecretName] = useState<string>('');
   const [autoSyncMikrotik, setAutoSyncMikrotik] = useState<boolean>(true);
+  const [routerPasswordOverride, setRouterPasswordOverride] = useState<string>('');
+  const [secretSearchQuery, setSecretSearchQuery] = useState<string>('');
 
   // Hardware details
   const [selectedNapBoxId, setSelectedNapBoxId] = useState(
@@ -109,6 +112,18 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
   const selectedPlan = plans.find((p) => p.id === selectedPlanId) || defaultPlan;
   const selectedRouter = mikrotikDevices.find((d) => d.id === selectedMikrotikId) || defaultRouter;
   const currentNapBox = napBoxes.find((b) => b.id === selectedNapBoxId);
+
+  // Filtered secrets based on user search query
+  const filteredSecrets = fetchedSecrets.filter((s) => {
+    if (!secretSearchQuery.trim()) return true;
+    const q = secretSearchQuery.toLowerCase();
+    return (
+      s.name.toLowerCase().includes(q) ||
+      (s.profile && s.profile.toLowerCase().includes(q)) ||
+      (s.remoteAddress && s.remoteAddress.toLowerCase().includes(q)) ||
+      (s.comment && s.comment.toLowerCase().includes(q))
+    );
+  });
 
   // Keep PPPoE profile in sync with selected plan when in create mode
   useEffect(() => {
@@ -135,22 +150,27 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
   };
 
   // Fetch secrets directly from the selected MikroTik Router
-  const handleFetchSecrets = async () => {
+  const handleFetchSecrets = async (overridePass?: string) => {
     if (!selectedRouter) {
       showToast('warning', 'No Router Selected', 'Please select a target MikroTik router first.');
       return;
     }
     setIsFetchingSecrets(true);
+    const passToUse = overridePass !== undefined ? overridePass : (routerPasswordOverride || selectedRouter.password || '');
     try {
       const secrets = await fetchPppoeSecrets({
         ipAddress: selectedRouter.ipAddress,
         username: selectedRouter.username || 'admin',
-        password: selectedRouter.password || '',
-        port: selectedRouter.port || 80,
+        password: passToUse,
+        port: selectedRouter.port || 10988,
         useHttps: selectedRouter.useSsl,
       });
       setFetchedSecrets(secrets);
-      showToast('success', 'Secrets Discovered', `Discovered ${secrets.length} PPPoE secrets on ${selectedRouter.name} (${selectedRouter.ipAddress}).`);
+      if (secrets.length > 0) {
+        showToast('success', 'Secrets Discovered', `Discovered ${secrets.length} PPPoE secrets on ${selectedRouter.name} (${selectedRouter.ipAddress}).`);
+      } else {
+        showToast('info', 'No Secrets Found', `No PPPoE secrets found on ${selectedRouter.name}.`);
+      }
     } catch (err: any) {
       showToast('error', 'Fetch Failed', err?.message || 'Failed to query MikroTik secrets.');
     } finally {
@@ -167,24 +187,37 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
     setPppoeUsername(secret.name);
     if (secret.password && secret.password !== '••••••••') {
       setPppoePassword(secret.password);
+    } else if (!pppoePassword || pppoePassword === '••••••••') {
+      const randNum = Math.floor(1000 + Math.random() * 9000);
+      setPppoePassword(`Swift#${randNum}`);
     }
     if (secret.remoteAddress) {
       setIpAddress(secret.remoteAddress);
     }
     if (secret.profile) {
       setPppoeProfile(secret.profile);
-      // Attempt to auto-match plan speed
+      // Attempt to auto-match plan speed or name
+      const prof = secret.profile.toLowerCase();
       const matchedPlan = plans.find(
         (p) =>
-          secret.profile?.toLowerCase().includes(`${p.speedMbps}m`) ||
-          secret.profile?.toLowerCase().includes(p.name.toLowerCase())
+          prof.includes(`${p.speedMbps}m`) ||
+          prof.includes(p.name.toLowerCase()) ||
+          p.name.toLowerCase().includes(prof)
       );
       if (matchedPlan) {
         setSelectedPlanId(matchedPlan.id);
       }
     }
 
-    showToast('info', 'Secret Linked', `Loaded secret "${secret.name}" with profile "${secret.profile || 'default'}".`);
+    // Auto-populate full name from comment if currently empty
+    if (!fullName.trim() && secret.comment) {
+      const cleanName = secret.comment.split(/[-–|—(]/)[0].trim();
+      if (cleanName && cleanName.length >= 3) {
+        setFullName(cleanName);
+      }
+    }
+
+    showToast('info', 'Secret Linked', `Loaded secret "${secret.name}" (${secret.profile || 'default'}) - ${secret.remoteAddress || 'Auto IP'}.`);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -654,71 +687,196 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
                   <div>
                     <span className="text-[11px] font-bold text-purple-300 flex items-center gap-1.5">
                       <Zap className="w-3.5 h-3.5 text-purple-400" />
-                      Fetch Secrets from {selectedRouter?.name || 'Router'}
+                      Live Router PPPoE Secret Discovery
                     </span>
                     <p className="text-[11px] text-slate-400">
-                      Import existing PPPoE secrets directly from RouterOS <code>/ppp/secret</code>
+                      Query RouterOS <code>/ppp/secret</code> on {selectedRouter?.name || 'Router'} ({selectedRouter?.ipAddress})
                     </p>
                   </div>
 
-                  <button
-                    type="button"
-                    disabled={isFetchingSecrets}
-                    onClick={handleFetchSecrets}
-                    className="flex items-center justify-center gap-1.5 px-3.5 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-purple-600/20 cursor-pointer disabled:opacity-50"
-                  >
-                    {isFetchingSecrets ? (
-                      <>
-                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                        <span>Querying Router...</span>
-                      </>
-                    ) : (
-                      <>
-                        <RefreshCw className="w-3.5 h-3.5" />
-                        <span>Refresh Secrets</span>
-                      </>
-                    )}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={isFetchingSecrets}
+                      onClick={() => handleFetchSecrets()}
+                      className="flex items-center justify-center gap-1.5 px-3.5 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-purple-600/20 cursor-pointer disabled:opacity-50"
+                    >
+                      {isFetchingSecrets ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          <span>Querying RouterOS...</span>
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5" />
+                          <span>Fetch Secrets</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Optional Router REST Password Override */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-xl bg-slate-900/80 border border-purple-800/30 text-xs">
+                  <div>
+                    <label className="block text-slate-400 font-medium mb-1 flex items-center gap-1.5">
+                      <Key className="w-3 h-3 text-purple-400" />
+                      <span>Router REST Password (Optional Override)</span>
+                    </label>
+                    <input
+                      type="password"
+                      value={routerPasswordOverride}
+                      onChange={(e) => setRouterPasswordOverride(e.target.value)}
+                      placeholder={selectedRouter?.password ? '•••••••• (Using Stored Password)' : 'Enter router password if required'}
+                      className="w-full px-3 py-1.5 bg-slate-950 border border-slate-700 rounded-lg text-slate-200 font-mono text-xs focus:outline-none focus:border-purple-400"
+                    />
+                  </div>
+                  <div className="flex flex-col justify-end">
+                    <p className="text-[11px] text-slate-400">
+                      Target Gateway: <span className="font-mono text-purple-300 font-semibold">{selectedRouter?.ipAddress}:{selectedRouter?.port || 10988}</span>
+                    </p>
+                    <p className="text-[10px] text-slate-500">
+                      Zero CORS / Mixed Content enabled via backend REST bridge.
+                    </p>
+                  </div>
                 </div>
 
                 {fetchedSecrets.length > 0 ? (
                   <div className="space-y-3">
-                    <div>
-                      <label className="block text-slate-300 mb-1 font-semibold">Select Discovered Secret:</label>
-                      <select
-                        value={selectedSecretName}
-                        onChange={(e) => handleSelectExistingSecret(e.target.value)}
-                        className="w-full px-3.5 py-2 bg-slate-900 border border-purple-700/60 rounded-xl text-slate-100 font-mono text-xs focus:outline-none focus:border-purple-400"
-                      >
-                        <option value="">-- Choose a discovered PPPoE Secret --</option>
-                        {fetchedSecrets.map((sec) => (
-                          <option key={sec.name} value={sec.name}>
-                            {sec.name} | Profile: {sec.profile || 'default'} | IP: {sec.remoteAddress || 'Auto'} {sec.comment ? `(${sec.comment})` : ''}
-                          </option>
-                        ))}
-                      </select>
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <label className="block text-slate-300 font-semibold text-xs flex items-center gap-1.5">
+                        <span>Discovered Secrets ({filteredSecrets.length} of {fetchedSecrets.length}):</span>
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="text"
+                          value={secretSearchQuery}
+                          onChange={(e) => setSecretSearchQuery(e.target.value)}
+                          placeholder="Search secrets by user, IP, profile..."
+                          className="w-full sm:w-64 pl-8 pr-3 py-1 bg-slate-900 border border-purple-700/50 rounded-lg text-slate-200 placeholder-slate-500 font-mono text-xs focus:outline-none focus:border-purple-400"
+                        />
+                        <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      </div>
                     </div>
 
+                    {/* Quick Interactive Secret Cards List */}
+                    <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1 scrollbar-thin scrollbar-thumb-purple-900">
+                      {filteredSecrets.length === 0 ? (
+                        <div className="p-3 text-center text-slate-400 text-xs">
+                          No secrets matching "{secretSearchQuery}".
+                        </div>
+                      ) : (
+                        filteredSecrets.map((sec) => {
+                          const isSelected = selectedSecretName === sec.name;
+                          return (
+                            <div
+                              key={sec.name}
+                              onClick={() => handleSelectExistingSecret(sec.name)}
+                              className={`p-2.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between ${
+                                isSelected
+                                  ? 'bg-purple-900/40 border-purple-500 text-white shadow-sm ring-1 ring-purple-500/30'
+                                  : 'bg-slate-900/70 border-slate-800/80 text-slate-300 hover:border-purple-700/60 hover:bg-slate-900'
+                              }`}
+                            >
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="font-mono font-bold text-xs text-purple-300 truncate">
+                                    {sec.name}
+                                  </span>
+                                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-800/50 font-mono">
+                                    {sec.profile || 'default'}
+                                  </span>
+                                  {sec.remoteAddress && (
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">
+                                      {sec.remoteAddress}
+                                    </span>
+                                  )}
+                                  {sec.disabled && (
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-950 text-rose-300 border border-rose-800/50 font-mono">
+                                      Disabled
+                                    </span>
+                                  )}
+                                </div>
+                                {sec.comment && (
+                                  <p className="text-[11px] text-slate-400 truncate mt-0.5">
+                                    {sec.comment}
+                                  </p>
+                                )}
+                              </div>
+                              <div className="shrink-0 ml-2">
+                                {isSelected ? (
+                                  <span className="inline-flex items-center gap-1 text-[11px] text-emerald-400 font-bold bg-emerald-950/80 px-2.5 py-1 rounded-lg border border-emerald-800/60">
+                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                                    Linked
+                                  </span>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleSelectExistingSecret(sec.name);
+                                    }}
+                                    className="px-2.5 py-1 text-[10px] font-semibold bg-purple-900/40 hover:bg-purple-800 text-purple-200 rounded-lg border border-purple-700/50 transition-colors"
+                                  >
+                                    Select & Fill
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+
+                    {/* Summary of Selected Secret */}
                     {selectedSecretName && (
-                      <div className="p-3 rounded-xl bg-slate-900/80 border border-purple-800/40 text-xs font-mono text-slate-300 space-y-1">
+                      <div className="p-3.5 rounded-xl bg-purple-950/60 border border-purple-700/60 text-xs font-mono text-slate-300 space-y-1.5 animate-in fade-in">
+                        <div className="flex justify-between items-center text-emerald-400 font-bold mb-1 pb-1 border-b border-purple-800/40">
+                          <span className="flex items-center gap-1.5">
+                            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                            Secret Successfully Linked & Form Auto-Populated
+                          </span>
+                          <span className="text-[10px] bg-emerald-950 text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-800 font-sans">
+                            Ready
+                          </span>
+                        </div>
                         <div className="flex justify-between">
-                          <span className="text-slate-400">Linked User:</span>
+                          <span className="text-slate-400">PPPoE User:</span>
                           <span className="text-purple-300 font-bold">{pppoeUsername}</span>
                         </div>
                         <div className="flex justify-between">
-                          <span className="text-slate-400">Target IP:</span>
-                          <span className="text-cyan-300">{ipAddress}</span>
+                          <span className="text-slate-400">Framed IP:</span>
+                          <span className="text-cyan-300 font-bold">{ipAddress}</span>
                         </div>
                         <div className="flex justify-between">
-                          <span className="text-slate-400">Profile / Speed:</span>
+                          <span className="text-slate-400">RouterOS Profile:</span>
                           <span className="text-emerald-300">{pppoeProfile}</span>
                         </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-slate-400">Matched Plan:</span>
+                          <span className="text-amber-300 font-sans font-semibold">{selectedPlan?.name} ({selectedPlan?.speedMbps} Mbps)</span>
+                        </div>
+                        {fullName && (
+                          <div className="flex justify-between items-center">
+                            <span className="text-slate-400">Customer Name:</span>
+                            <span className="text-slate-200 font-sans font-semibold">{fullName}</span>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
                 ) : (
-                  <div className="text-center py-4 text-slate-400 text-xs space-y-2">
-                    <p>No secrets loaded yet. Click <strong>Refresh Secrets</strong> to query the router.</p>
+                  <div className="text-center py-6 text-slate-400 text-xs space-y-3 bg-slate-900/40 rounded-xl border border-slate-800/80">
+                    <p>No secrets loaded yet. Click below to query the router or load discovered secrets.</p>
+                    <button
+                      type="button"
+                      disabled={isFetchingSecrets}
+                      onClick={() => handleFetchSecrets()}
+                      className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-purple-600/20 cursor-pointer inline-flex items-center gap-1.5"
+                    >
+                      {isFetchingSecrets ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                      <span>Fetch Secrets from {selectedRouter?.name || 'Router'}</span>
+                    </button>
                   </div>
                 )}
               </div>
