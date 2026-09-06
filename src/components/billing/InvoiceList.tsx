@@ -43,6 +43,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
   const {
     invoices,
     payments,
+    paymentSubmissions,
     customers,
     businessProfile,
     deleteInvoice,
@@ -50,7 +51,11 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
     runDailyGraceAudit,
     searchTerm,
     setSearchTerm,
+    setActiveTab,
+    hasPermission,
   } = useApp();
+
+  const pendingProofsCount = paymentSubmissions.filter((s) => s.status === 'pending_review').length;
 
   const [activeBillingTab, setActiveBillingTab] = useState<'invoices' | 'remittances' | 'grace_audit'>('invoices');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -160,6 +165,33 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
         </div>
       </div>
 
+      {/* Pending Proofs Action Banner */}
+      {pendingProofsCount > 0 && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3.5 p-4 rounded-2xl bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-slate-900 border border-amber-500/30 text-amber-200 animate-in fade-in shadow-lg shadow-amber-500/5">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0">
+              <Clock className="w-5 h-5 animate-pulse" />
+            </div>
+            <div>
+              <h4 className="text-sm font-bold text-amber-100 flex items-center gap-2 flex-wrap">
+                <span>{pendingProofsCount} Online Payment {pendingProofsCount === 1 ? 'Proof' : 'Proofs'} Awaiting Review</span>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-500/20 text-amber-300 border border-amber-500/30">Action Needed</span>
+              </h4>
+              <p className="text-xs text-amber-300/80 mt-0.5">
+                Subscribers uploaded GCash / Maya proof screenshots & reference numbers from the Client Portal.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setActiveTab('verification_queue')}
+            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-bold transition-all shadow-lg shadow-amber-500/20 hover:scale-105 shrink-0"
+          >
+            <CheckCircle2 className="w-4 h-4" />
+            <span>Open Verification Queue ({pendingProofsCount})</span>
+          </button>
+        </div>
+      )}
+
       {/* Sub-Navigation Tabs */}
       <div className="flex flex-wrap items-center gap-2 border-b border-slate-800 pb-3 text-xs">
         <button
@@ -184,6 +216,20 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
         >
           <DollarSign className="w-4 h-4" />
           <span>💰 Daily Admin Remittance & Drawer</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('verification_queue')}
+          className="flex items-center gap-2 px-3.5 py-2 rounded-xl font-bold transition-all bg-slate-900/60 text-amber-300 border border-amber-500/30 hover:bg-amber-500/10 hover:border-amber-500/50 ml-auto"
+          title="Direct link to Cashier Proof Verification Queue"
+        >
+          <CheckCircle2 className="w-4 h-4 text-amber-400" />
+          <span>Online Proofs Queue</span>
+          {pendingProofsCount > 0 && (
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-500 text-slate-950 animate-pulse">
+              {pendingProofsCount}
+            </span>
+          )}
         </button>
       </div>
 
@@ -422,13 +468,15 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
                             </button>
                           )}
 
-                          <button
-                            onClick={() => setInvoiceToDelete(inv)}
-                            className="p-1.5 bg-slate-800 text-rose-400 hover:bg-rose-600 hover:text-white rounded-lg transition-colors cursor-pointer"
-                            title="Delete Invoice"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          {hasPermission('canDeleteInvoice') && (
+                            <button
+                              onClick={() => setInvoiceToDelete(inv)}
+                              className="p-1.5 bg-slate-800 text-rose-400 hover:bg-rose-600 hover:text-white rounded-lg transition-colors cursor-pointer"
+                              title="Delete Invoice"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>

@@ -7,6 +7,7 @@ import {
   writeBatch,
   getDocs,
   Unsubscribe,
+  deleteField,
 } from 'firebase/firestore';
 import { ref, uploadString, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../config/firebase';
@@ -80,6 +81,32 @@ export const subscribeToCollection = <T extends { id: string }>(
 };
 
 /**
+ * Sanitizes documents before writing to Cloud Firestore.
+ * Ensures subscriber PPPoE secrets / passwords are NEVER stored in Firebase Cloud storage,
+ * and purges any legacy cloud fields via deleteField().
+ */
+export const sanitizeDocForFirestore = <T extends { id: string }>(
+  collectionName: string,
+  data: T
+): Record<string, any> => {
+  if (collectionName === COLLECTIONS.CUSTOMERS) {
+    const cust = data as unknown as Customer;
+    if (cust.network) {
+      const { pppoePassword, ...safeNetwork } = cust.network;
+      return {
+        ...cust,
+        network: {
+          ...safeNetwork,
+          // Explicitly delete any pre-existing cloud field in Firestore on merge
+          pppoePassword: deleteField(),
+        },
+      };
+    }
+  }
+  return data as Record<string, any>;
+};
+
+/**
  * Saves or merges a single document in Firestore
  */
 export const saveFirestoreDoc = async <T extends { id: string }>(
@@ -88,7 +115,8 @@ export const saveFirestoreDoc = async <T extends { id: string }>(
 ): Promise<void> => {
   try {
     const docRef = doc(db, collectionName, data.id);
-    await setDoc(docRef, data, { merge: true });
+    const sanitized = sanitizeDocForFirestore(collectionName, data);
+    await setDoc(docRef, sanitized, { merge: true });
   } catch (error) {
     console.warn(`Firestore write error on [${collectionName}/${data.id}]:`, error);
   }
@@ -172,7 +200,8 @@ export const seedFirestoreFromLocalData = async (
         const batch = writeBatch(db);
         chunk.forEach((item) => {
           const docRef = doc(db, colName, item.id);
-          batch.set(docRef, item, { merge: true });
+          const sanitized = sanitizeDocForFirestore(colName, item);
+          batch.set(docRef, sanitized, { merge: true });
         });
         await batch.commit();
         totalUploaded += chunk.length;

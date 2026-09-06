@@ -41,6 +41,7 @@ export const CustomerList: React.FC<CustomerListProps> = ({
     plans,
     napBoxes,
     setActiveTab,
+    hasPermission,
   } = useApp();
 
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -391,13 +392,15 @@ export const CustomerList: React.FC<CustomerListProps> = ({
                             <Wifi className="w-3.5 h-3.5" />
                           </button>
 
-                          <button
-                            onClick={() => setCustomerToDelete(customer)}
-                            className="p-1.5 bg-slate-800 text-rose-400 hover:bg-rose-600 hover:text-white rounded-lg transition-colors cursor-pointer"
-                            title="Delete Subscriber"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          {hasPermission('canDeleteCustomer') && (
+                            <button
+                              onClick={() => setCustomerToDelete(customer)}
+                              className="p-1.5 bg-slate-800 text-rose-400 hover:bg-rose-600 hover:text-white rounded-lg transition-colors cursor-pointer"
+                              title="Delete Subscriber"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>

@@ -84,6 +84,11 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
     addRepairOrder,
     logout,
     currentAuthUser,
+    staffUsers,
+    openAuthModal,
+    setActiveTab,
+    setSystemRole,
+    showToast,
   } = useApp();
 
   // Selected Subscriber State (Session)
@@ -202,6 +207,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
     setLoginError('');
     const cleanInput = loginInput.trim().toLowerCase();
 
+    // 1. Check registered subscribers
     const matched = customers.find(
       (c) =>
         c.accountNo.toLowerCase() === cleanInput ||
@@ -212,11 +218,37 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
     if (matched) {
       setCurrentCustomerId(matched.id);
       setLoginInput('');
-    } else {
-      setLoginError(
-        'Subscriber not found. Please enter your Account Number (e.g. SWIFT-2026-001) or Registered Mobile Number.'
-      );
+      return;
     }
+
+    // 2. Check staff directory (Cashier, Technician, Admin)
+    const staffMatch = staffUsers.find(
+      (s) =>
+        s.email.toLowerCase().trim() === cleanInput ||
+        s.fullName.toLowerCase().includes(cleanInput) ||
+        (s.mobile && s.mobile.replace(/[^0-9]/g, '') === cleanInput.replace(/[^0-9]/g, ''))
+    );
+
+    if (staffMatch) {
+      if (staffMatch.status === 'suspended') {
+        setLoginError(`Staff account for ${staffMatch.fullName} is suspended. Please contact the Administrator.`);
+        return;
+      }
+
+      setLoginError('');
+      setLoginInput('');
+      showToast(
+        'info',
+        'Staff Account Detected',
+        `Recognized ${staffMatch.fullName} (${staffMatch.role.toUpperCase()}). Please enter your password to sign in.`
+      );
+      openAuthModal('signin', staffMatch.email);
+      return;
+    }
+
+    setLoginError(
+      'Subscriber not found. Please enter your Account Number (e.g. SWIFT-2026-001) or Registered Mobile Number.'
+    );
   };
 
   // Quick Demo Account Select
@@ -597,15 +629,52 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
               </div>
             </div>
 
-            <button
-              onClick={onExitToHome}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-semibold border border-slate-700 transition-colors cursor-pointer"
-            >
-              <Globe className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Return to Home Page</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => openAuthModal('signin')}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-950/80 hover:bg-cyan-900/90 text-cyan-300 hover:text-cyan-100 rounded-xl text-xs font-semibold border border-cyan-800/70 transition-colors cursor-pointer shadow-sm"
+                title="Cashier, Technician & Admin Sign In"
+              >
+                <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Staff & Cashier Sign In</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={onExitToHome}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-semibold border border-slate-700 transition-colors cursor-pointer"
+              >
+                <Globe className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Return to Home Page</span>
+              </button>
+            </div>
           </div>
         </header>
+
+        {/* Active Staff Session Banner */}
+        {currentAuthUser && (currentAuthUser.role === 'cashier' || currentAuthUser.role === 'admin' || currentAuthUser.role === 'technician' || currentAuthUser.role === 'tech') && (
+          <div className="bg-gradient-to-r from-cyan-950 via-slate-900 to-blue-950 border-b border-cyan-800/60 py-2.5 px-4 sm:px-6 text-xs flex items-center justify-between text-cyan-200">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-cyan-400 shrink-0" />
+              <span>
+                Logged in as <strong className="text-white">{currentAuthUser.displayName || currentAuthUser.email}</strong> ({currentAuthUser.role.toUpperCase()}).
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                const sysRole = currentAuthUser.role === 'tech' ? 'technician' : currentAuthUser.role;
+                setSystemRole(sysRole as any);
+                setActiveTab('dashboard');
+              }}
+              className="flex items-center gap-1.5 px-3 py-1 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-xs font-bold transition-all shadow-md shadow-cyan-600/25 cursor-pointer"
+            >
+              <span>Go to {currentAuthUser.role === 'cashier' ? 'Cashier Operations' : 'Admin Console'}</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
 
         {/* Login Hero Section */}
         <div className="flex-1 flex flex-col items-center justify-center p-6 max-w-xl mx-auto w-full space-y-8 text-center">
@@ -656,6 +725,19 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                 <span>Access My Subscriber Portal</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
+
+              {/* Staff & Cashier Link */}
+              <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs">
+                <span className="text-slate-400">Employee or Cashier?</span>
+                <button
+                  type="button"
+                  onClick={() => openAuthModal('signin')}
+                  className="text-cyan-400 hover:text-cyan-300 font-semibold flex items-center gap-1 cursor-pointer transition-colors"
+                >
+                  <span>Sign In to Staff Console</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </form>
           </div>
 

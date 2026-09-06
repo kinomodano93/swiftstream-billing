@@ -731,18 +731,8 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({ on
         setQueuesList(res);
         showToast('success', 'Queues Synced', `Fetched ${res.length} simple queues from router.`);
       } else {
-        // Fallback demo queues based on customers
-        const demoQ = customers.slice(0, 8).map((c, idx) => ({
-          name: `queue_${c.accountNo.toLowerCase()}`,
-          target: c.network.ipAddress || `10.200.14.${idx + 10}`,
-          'max-limit': `${c.monthlyFee > 1500 ? '100M' : '50M'}/${c.monthlyFee > 1500 ? '100M' : '50M'}`,
-          rate: '0M/0M',
-          dropped: '0/0',
-          dynamic: 'true',
-          disabled: 'false',
-        }));
-        setQueuesList(demoQ);
-        showToast('info', 'Queues Ready', `Active queues loaded.`);
+        setQueuesList([]);
+        showToast('info', 'No Queues Found', 'No active simple queues returned by router.');
       }
     } catch (_) {
       showToast('error', 'Queue Sync Error', 'Could not retrieve queues from router.');

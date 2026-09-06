@@ -156,6 +156,28 @@ export const PaymentTerminalModal: React.FC<PaymentTerminalModalProps> = ({
 
               {unpaidInvoices.length > 0 ? (
                 <div className="space-y-1.5">
+                  <label
+                    className={`flex items-center justify-between p-2.5 rounded-xl border cursor-pointer transition-colors ${
+                      selectedInvoiceId === ''
+                        ? 'bg-cyan-950/40 border-cyan-500/60 text-cyan-300'
+                        : 'bg-slate-900/80 border-slate-800 text-slate-300 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="radio"
+                        name="invoiceRadio"
+                        checked={selectedInvoiceId === ''}
+                        onChange={() => setSelectedInvoiceId('')}
+                        className="text-cyan-600 focus:ring-0"
+                      />
+                      <span className="font-semibold text-cyan-400">⚡ Auto-settle oldest invoices (FIFO)</span>
+                    </div>
+                    <span className="font-mono font-bold text-slate-300">
+                      {formatCurrency(selectedCustomer.balance)}
+                    </span>
+                  </label>
+
                   {unpaidInvoices.map((inv) => (
                     <label
                       key={inv.id}

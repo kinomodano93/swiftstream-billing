@@ -1,3 +1,165 @@
+export type SystemRole = 'admin' | 'cashier' | 'technician';
+
+export interface SystemRoleMeta {
+  role: SystemRole;
+  label: string;
+  badge: string;
+  description: string;
+  color: string;
+  badgeBg: string;
+  badgeBorder: string;
+  textColor: string;
+  iconName: string;
+}
+
+export const SYSTEM_ROLES_CONFIG: Record<SystemRole, SystemRoleMeta> = {
+  admin: {
+    role: 'admin',
+    label: 'Administrator',
+    badge: 'Super Admin',
+    description: 'Full system oversight, financial P&L, network infrastructure, and system settings.',
+    color: 'from-purple-600 to-indigo-600',
+    badgeBg: 'bg-purple-500/10',
+    badgeBorder: 'border-purple-500/30',
+    textColor: 'text-purple-400',
+    iconName: 'ShieldCheck',
+  },
+  cashier: {
+    role: 'cashier',
+    label: 'Cashier / Billing Desk',
+    badge: 'Counter POS',
+    description: 'Subscriber collections, payment proofs, invoice management, official receipts, and remittance.',
+    color: 'from-emerald-600 to-teal-600',
+    badgeBg: 'bg-emerald-500/10',
+    badgeBorder: 'border-emerald-500/30',
+    textColor: 'text-emerald-400',
+    iconName: 'CreditCard',
+  },
+  technician: {
+    role: 'technician',
+    label: 'Field Technician',
+    badge: 'NOC / Field Tech',
+    description: 'Fiber GIS map, NAP closures, ONT/GenieACS provisioning, installation logger, and repairs.',
+    color: 'from-amber-500 to-orange-600',
+    badgeBg: 'bg-amber-500/10',
+    badgeBorder: 'border-amber-500/30',
+    textColor: 'text-amber-400',
+    iconName: 'Wrench',
+  },
+};
+
+export interface StaffUser {
+  id: string;
+  fullName: string;
+  email: string;
+  mobile?: string;
+  role: SystemRole;
+  status: 'active' | 'suspended';
+  initialPassword?: string;
+  notes?: string;
+  avatarUrl?: string;
+  lastLoginAt?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface RolePermissions {
+  allowedTabs: string[];
+  canDeleteCustomer: boolean;
+  canDeleteInvoice: boolean;
+  canDeletePayment: boolean;
+  canAccessFinancials: boolean;
+  canAccessNetworkConfig: boolean;
+  canAccessSystemSettings: boolean;
+  canManagePlans: boolean;
+  canExecuteRouterCli: boolean;
+  canAccessVerificationQueue: boolean;
+  canManageStaff: boolean;
+}
+
+export const ROLE_PERMISSIONS: Record<SystemRole, RolePermissions> = {
+  admin: {
+    allowedTabs: [
+      'dashboard',
+      'customers',
+      'applications',
+      'field_ops',
+      'repairs',
+      'billing',
+      'payments',
+      'verification_queue',
+      'plans',
+      'reports',
+      'mikrotik',
+      'radius',
+      'genieacs',
+      'ipoe_dhcp',
+      'network',
+      'coverage',
+      'reminders',
+      'staff_users',
+      'settings',
+    ],
+    canDeleteCustomer: true,
+    canDeleteInvoice: true,
+    canDeletePayment: true,
+    canAccessFinancials: true,
+    canAccessNetworkConfig: true,
+    canAccessSystemSettings: true,
+    canManagePlans: true,
+    canExecuteRouterCli: true,
+    canAccessVerificationQueue: true,
+    canManageStaff: true,
+  },
+  cashier: {
+    allowedTabs: [
+      'dashboard',
+      'customers',
+      'applications',
+      'billing',
+      'payments',
+      'verification_queue',
+      'plans',
+      'reminders',
+    ],
+    canDeleteCustomer: false,
+    canDeleteInvoice: false,
+    canDeletePayment: false,
+    canAccessFinancials: false,
+    canAccessNetworkConfig: false,
+    canAccessSystemSettings: false,
+    canManagePlans: false,
+    canExecuteRouterCli: false,
+    canAccessVerificationQueue: true,
+    canManageStaff: false,
+  },
+  technician: {
+    allowedTabs: [
+      'dashboard',
+      'field_ops',
+      'customers',
+      'repairs',
+      'network',
+      'coverage',
+      'mikrotik',
+      'radius',
+      'genieacs',
+      'ipoe_dhcp',
+      'reminders',
+    ],
+    canDeleteCustomer: false,
+    canDeleteInvoice: false,
+    canDeletePayment: false,
+    canAccessFinancials: false,
+    canAccessNetworkConfig: true,
+    canAccessSystemSettings: false,
+    canManagePlans: false,
+    canExecuteRouterCli: false,
+    canAccessVerificationQueue: false,
+    canManageStaff: false,
+  },
+};
+
 export type CustomerStatus = 'active' | 'overdue' | 'suspended' | 'disconnected' | 'pending_install' | 'pending_approval';
 
 export type InvoiceStatus = 'unpaid' | 'paid' | 'partially_paid' | 'overdue' | 'cancelled';

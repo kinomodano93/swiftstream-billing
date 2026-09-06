@@ -44,33 +44,40 @@ export const PlanDistributionChart: React.FC = () => {
         </span>
       </div>
 
-      <div className="h-64 w-full">
-        <ResponsiveContainer width="100%" height="100%">
-          <PieChart>
-            <Pie
-              data={data}
-              cx="50%"
-              cy="50%"
-              innerRadius={55}
-              outerRadius={80}
-              paddingAngle={4}
-              dataKey="value"
-            >
-              {data.map((entry, index) => (
-                <Cell key={`cell-${index}`} fill={entry.color} stroke="#0f172a" strokeWidth={2} />
-              ))}
-            </Pie>
-            <Tooltip content={<CustomTooltip />} />
-            <Legend
-              wrapperStyle={{ fontSize: '10px', paddingTop: '4px' }}
-              layout="horizontal"
-              verticalAlign="bottom"
-              align="center"
-              formatter={(value) => <span className="text-slate-300">{value}</span>}
-            />
-          </PieChart>
-        </ResponsiveContainer>
-      </div>
+      {data.length === 0 ? (
+        <div className="h-64 flex flex-col items-center justify-center text-slate-500 text-xs text-center">
+          <p>No customer plan data found.</p>
+          <p className="text-[11px] text-slate-600 mt-0.5">Subscribed customer lines will appear here.</p>
+        </div>
+      ) : (
+        <div className="h-64 w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <PieChart>
+              <Pie
+                data={data}
+                cx="50%"
+                cy="50%"
+                innerRadius={55}
+                outerRadius={80}
+                paddingAngle={4}
+                dataKey="value"
+              >
+                {data.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={entry.color} stroke="#0f172a" strokeWidth={2} />
+                ))}
+              </Pie>
+              <Tooltip content={<CustomTooltip />} />
+              <Legend
+                wrapperStyle={{ fontSize: '10px', paddingTop: '4px' }}
+                layout="horizontal"
+                verticalAlign="bottom"
+                align="center"
+                formatter={(value) => <span className="text-slate-300">{value}</span>}
+              />
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
+      )}
     </div>
   );
 };

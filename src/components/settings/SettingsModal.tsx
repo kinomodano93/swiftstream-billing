@@ -3,6 +3,7 @@ import {
   Settings,
   Building2,
   User,
+  Users,
   MapPin,
   CreditCard,
   Key,
@@ -52,6 +53,7 @@ import { sendTelegramStaffAlert, sendDiscordStaffAlert, testWebhookIntegration }
 import { XenditGatewaySettings } from './XenditGatewaySettings';
 import { FirebaseSettingsCard } from './FirebaseSettingsCard';
 import { SsoWhitelistSettingsCard } from './SsoWhitelistSettingsCard';
+import { StaffUserManager } from '../users/StaffUserManager';
 import { LAGONOY_BARANGAYS } from '../network/CoverageAreaManager';
 
 export const SettingsModal: React.FC = () => {
@@ -65,9 +67,10 @@ export const SettingsModal: React.FC = () => {
     resetToDefault,
     theme,
     setTheme,
+    staffUsers,
   } = useApp();
 
-  const [activeTab, setActiveTab] = useState<'profile' | 'payments' | 'firebase' | 'sso' | 'api' | 'audit' | 'backup'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'payments' | 'staff' | 'firebase' | 'sso' | 'api' | 'audit' | 'backup'>('profile');
 
   // Business state
   const [businessName, setBusinessName] = useState(businessProfile.name);
@@ -481,6 +484,7 @@ export const SettingsModal: React.FC = () => {
         {[
           { id: 'profile', label: 'Company & Representative', icon: Building2 },
           { id: 'payments', label: 'Payment Gateways & QR', icon: CreditCard },
+          { id: 'staff', label: `Staff & System Roles (${staffUsers.length})`, icon: Users },
           { id: 'firebase', label: 'Cloud Firestore Sync', icon: Cloud },
           { id: 'sso', label: 'SSO & Admin Whitelist', icon: ShieldCheck },
           { id: 'api', label: 'API, AI & SMTP Server', icon: Key },
@@ -505,6 +509,13 @@ export const SettingsModal: React.FC = () => {
           );
         })}
       </div>
+
+      {/* Staff & System Roles Tab */}
+      {activeTab === 'staff' && (
+        <div className="-mx-3 sm:-mx-6 -mt-3">
+          <StaffUserManager />
+        </div>
+      )}
 
       {/* Tab 1: Profile & Location */}
       {activeTab === 'profile' && (

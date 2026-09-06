@@ -295,7 +295,7 @@ export const FinancialReports: React.FC = () => {
       ['TOTAL GROSS OPERATING INFLOW (REVENUE)', totalCollections],
       [''],
       ['Total Billed Invoices', totalBilled],
-      ['Collection Efficiency Rate', `${totalBilled > 0 ? ((totalCollections / totalBilled) * 100).toFixed(1) : '100'}%`],
+      ['Collection Efficiency Rate', `${totalBilled > 0 ? ((totalCollections / totalBilled) * 100).toFixed(1) : '0.0'}%`],
       [''],
       ['OPERATING EXPENSES (OPEX) BREAKDOWN'],
       ...Object.entries(EXPENSE_CATEGORY_CONFIG).map(([catKey, cfg]) => {
@@ -461,7 +461,7 @@ export const FinancialReports: React.FC = () => {
           <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1 border-t border-slate-800/80">
             <span>Collection Efficiency</span>
             <span className="font-mono text-cyan-400 font-semibold">
-              {totalBilled > 0 ? `${((totalCollections / totalBilled) * 100).toFixed(1)}%` : '100%'}
+              {totalBilled > 0 ? `${((totalCollections / totalBilled) * 100).toFixed(1)}%` : '0.0%'}
             </span>
           </div>
         </div>
@@ -533,7 +533,7 @@ export const FinancialReports: React.FC = () => {
                   <p className="text-xs text-slate-400">Statement of gross inflows versus operational expenditures</p>
                 </div>
                 <span className="font-mono text-xs text-slate-400 bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-800">
-                  Fiscal Period: August 2026
+                  Fiscal Period: {new Date().toLocaleString('en-US', { month: 'long', year: 'numeric' })}
                 </span>
               </div>
 
@@ -560,6 +560,12 @@ export const FinancialReports: React.FC = () => {
                     <span>2. Operating Expenses (OPEX)</span>
                     <span className="text-amber-400">({formatCurrency(totalExpenses)})</span>
                   </div>
+
+                  {totalExpenses === 0 && (
+                    <div className="pl-4 py-2 text-slate-500 italic">
+                      No operating expenses recorded for this fiscal period.
+                    </div>
+                  )}
 
                   {Object.entries(EXPENSE_CATEGORY_CONFIG).map(([catKey, cfg]) => {
                     const catTotal = expenses
@@ -621,27 +627,35 @@ export const FinancialReports: React.FC = () => {
                 <p className="text-xs text-slate-400 mt-1">Breakdown of operational expenditures</p>
 
                 <div className="space-y-3 mt-4 text-xs">
-                  {Object.entries(EXPENSE_CATEGORY_CONFIG).map(([catKey, cfg]) => {
-                    const catTotal = expenses
-                      .filter((e) => e.category === catKey)
-                      .reduce((s, e) => s + e.amount, 0);
-                    const pct = totalExpenses > 0 ? Math.round((catTotal / totalExpenses) * 100) : 0;
-                    if (catTotal === 0) return null;
+                  {totalExpenses === 0 ? (
+                    <div className="py-8 text-center text-slate-500 text-xs">
+                      <Receipt className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                      <p>No operating expenses recorded yet.</p>
+                      <p className="text-[11px] text-slate-600 mt-0.5">Click "Record New Expense" to log vouchers.</p>
+                    </div>
+                  ) : (
+                    Object.entries(EXPENSE_CATEGORY_CONFIG).map(([catKey, cfg]) => {
+                      const catTotal = expenses
+                        .filter((e) => e.category === catKey)
+                        .reduce((s, e) => s + e.amount, 0);
+                      const pct = totalExpenses > 0 ? Math.round((catTotal / totalExpenses) * 100) : 0;
+                      if (catTotal === 0) return null;
 
-                    return (
-                      <div key={catKey} className="space-y-1">
-                        <div className="flex justify-between text-slate-300">
-                          <span className="text-slate-400">{cfg.label}</span>
-                          <span className="font-mono font-bold text-slate-200">
-                            {formatCurrency(catTotal)} ({pct}%)
-                          </span>
+                      return (
+                        <div key={catKey} className="space-y-1">
+                          <div className="flex justify-between text-slate-300">
+                            <span className="text-slate-400">{cfg.label}</span>
+                            <span className="font-mono font-bold text-slate-200">
+                              {formatCurrency(catTotal)} ({pct}%)
+                            </span>
+                          </div>
+                          <div className="h-2 w-full bg-slate-950 rounded-full overflow-hidden">
+                            <div className={`h-full ${cfg.color} rounded-full transition-all`} style={{ width: `${pct}%` }} />
+                          </div>
                         </div>
-                        <div className="h-2 w-full bg-slate-950 rounded-full overflow-hidden">
-                          <div className={`h-full ${cfg.color} rounded-full transition-all`} style={{ width: `${pct}%` }} />
-                        </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })
+                  )}
                 </div>
               </div>
 
@@ -668,7 +682,7 @@ export const FinancialReports: React.FC = () => {
               <span className="text-[11px] font-medium text-slate-400">Collection Efficiency</span>
               <div className="flex items-baseline justify-between">
                 <h4 className="text-lg font-bold font-mono text-emerald-400">
-                  {totalBilled > 0 ? `${((totalCollections / totalBilled) * 100).toFixed(1)}%` : '100%'}
+                  {totalBilled > 0 ? `${((totalCollections / totalBilled) * 100).toFixed(1)}%` : '0.0%'}
                 </h4>
                 <span className="text-[10px] text-slate-500">Target: &gt;90%</span>
               </div>
@@ -854,31 +868,39 @@ export const FinancialReports: React.FC = () => {
               </span>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="p-4 rounded-2xl bg-slate-950/60 border border-emerald-500/30">
-                <span className="text-[11px] font-bold text-emerald-400 uppercase">Current (Not Yet Due)</span>
-                <h4 className="text-xl font-bold text-slate-100 font-mono mt-1">{formatCurrency(currentDue)}</h4>
-                <span className="text-[10px] text-slate-500">Normal billing period cycle</span>
+            {totalOutstandingAR === 0 ? (
+              <div className="py-8 text-center text-slate-500 text-xs bg-slate-950/40 rounded-2xl border border-slate-800">
+                <CheckCircle2 className="w-8 h-8 text-emerald-400 mx-auto mb-2 opacity-80" />
+                <p className="text-slate-200 font-semibold">Zero Outstanding Receivables</p>
+                <p className="text-[11px] text-slate-500 mt-0.5">All customer accounts are fully settled with no overdue balances.</p>
               </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="p-4 rounded-2xl bg-slate-950/60 border border-emerald-500/30">
+                  <span className="text-[11px] font-bold text-emerald-400 uppercase">Current (Not Yet Due)</span>
+                  <h4 className="text-xl font-bold text-slate-100 font-mono mt-1">{formatCurrency(currentDue)}</h4>
+                  <span className="text-[10px] text-slate-500">Normal billing period cycle</span>
+                </div>
 
-              <div className="p-4 rounded-2xl bg-slate-950/60 border border-amber-500/30">
-                <span className="text-[11px] font-bold text-amber-400 uppercase">1 - 30 Days Overdue</span>
-                <h4 className="text-xl font-bold text-slate-100 font-mono mt-1">{formatCurrency(aging1to30)}</h4>
-                <span className="text-[10px] text-slate-500">Grace period active</span>
-              </div>
+                <div className="p-4 rounded-2xl bg-slate-950/60 border border-amber-500/30">
+                  <span className="text-[11px] font-bold text-amber-400 uppercase">1 - 30 Days Overdue</span>
+                  <h4 className="text-xl font-bold text-slate-100 font-mono mt-1">{formatCurrency(aging1to30)}</h4>
+                  <span className="text-[10px] text-slate-500">Grace period active</span>
+                </div>
 
-              <div className="p-4 rounded-2xl bg-slate-950/60 border border-orange-500/30">
-                <span className="text-[11px] font-bold text-orange-400 uppercase">31 - 60 Days Overdue</span>
-                <h4 className="text-xl font-bold text-slate-100 font-mono mt-1">{formatCurrency(aging31to60)}</h4>
-                <span className="text-[10px] text-slate-500">Notice sent / for suspension</span>
-              </div>
+                <div className="p-4 rounded-2xl bg-slate-950/60 border border-orange-500/30">
+                  <span className="text-[11px] font-bold text-orange-400 uppercase">31 - 60 Days Overdue</span>
+                  <h4 className="text-xl font-bold text-slate-100 font-mono mt-1">{formatCurrency(aging31to60)}</h4>
+                  <span className="text-[10px] text-slate-500">Notice sent / for suspension</span>
+                </div>
 
-              <div className="p-4 rounded-2xl bg-slate-950/60 border border-rose-500/30">
-                <span className="text-[11px] font-bold text-rose-400 uppercase">60+ Days Overdue (At Risk)</span>
-                <h4 className="text-xl font-bold text-rose-400 font-mono mt-1">{formatCurrency(aging60Plus)}</h4>
-                <span className="text-[10px] text-slate-500">Line suspended / pull-out</span>
+                <div className="p-4 rounded-2xl bg-slate-950/60 border border-rose-500/30">
+                  <span className="text-[11px] font-bold text-rose-400 uppercase">60+ Days Overdue (At Risk)</span>
+                  <h4 className="text-xl font-bold text-rose-400 font-mono mt-1">{formatCurrency(aging60Plus)}</h4>
+                  <span className="text-[10px] text-slate-500">Line suspended / pull-out</span>
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
       )}
@@ -889,34 +911,44 @@ export const FinancialReports: React.FC = () => {
           <h3 className="font-bold text-sm text-slate-100">Payment Gateway Allocation</h3>
           <p className="text-xs text-slate-400">Share of collected revenue across customer payment gateways</p>
 
-          <div className="space-y-3 text-xs pt-2">
-            {[
-              { label: 'GCash App Transfers & QR Code', method: 'gcash', color: 'bg-cyan-500' },
-              { label: 'Cash Counter (Shop Desk)', method: 'cash', color: 'bg-emerald-500' },
-              { label: 'Maya (PayMaya)', method: 'maya', color: 'bg-purple-500' },
-              { label: 'Bank Transfer & Checks', method: 'bank_transfer', color: 'bg-amber-500' },
-            ].map((channel) => {
-              const subtotal = payments
-                .filter((p) => p.paymentMethod === channel.method || (channel.method === 'bank_transfer' && p.paymentMethod === 'check'))
-                .reduce((s, p) => s + p.amount, 0);
+          {totalCollections === 0 ? (
+            <div className="py-8 text-center text-slate-500 text-xs">
+              <CreditCard className="w-8 h-8 mx-auto mb-2 opacity-30" />
+              <p>No payments collected yet.</p>
+              <p className="text-[11px] text-slate-600 mt-0.5">
+                Recorded subscriber payments will be allocated by gateway here.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3 text-xs pt-2">
+              {[
+                { label: 'GCash App Transfers & QR Code', method: 'gcash', color: 'bg-cyan-500' },
+                { label: 'Cash Counter (Shop Desk)', method: 'cash', color: 'bg-emerald-500' },
+                { label: 'Maya (PayMaya)', method: 'maya', color: 'bg-purple-500' },
+                { label: 'Bank Transfer & Checks', method: 'bank_transfer', color: 'bg-amber-500' },
+              ].map((channel) => {
+                const subtotal = payments
+                  .filter((p) => p.paymentMethod === channel.method || (channel.method === 'bank_transfer' && p.paymentMethod === 'check'))
+                  .reduce((s, p) => s + p.amount, 0);
 
-              const pct = totalCollections > 0 ? Math.round((subtotal / totalCollections) * 100) : 0;
+                const pct = totalCollections > 0 ? Math.round((subtotal / totalCollections) * 100) : 0;
 
-              return (
-                <div key={channel.method} className="space-y-1">
-                  <div className="flex justify-between text-slate-300">
-                    <span>{channel.label}</span>
-                    <span className="font-mono font-bold text-slate-100">
-                      {formatCurrency(subtotal)} ({pct}%)
-                    </span>
+                return (
+                  <div key={channel.method} className="space-y-1">
+                    <div className="flex justify-between text-slate-300">
+                      <span>{channel.label}</span>
+                      <span className="font-mono font-bold text-slate-100">
+                        {formatCurrency(subtotal)} ({pct}%)
+                      </span>
+                    </div>
+                    <div className="h-2 w-full bg-slate-950 rounded-full overflow-hidden">
+                      <div className={`h-full ${channel.color} rounded-full`} style={{ width: `${pct}%` }} />
+                    </div>
                   </div>
-                  <div className="h-2 w-full bg-slate-950 rounded-full overflow-hidden">
-                    <div className={`h-full ${channel.color} rounded-full`} style={{ width: `${pct}%` }} />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 

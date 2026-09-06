@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Search,
   Plus,
@@ -21,8 +21,11 @@ import {
   Sun,
   Moon,
   Terminal,
+  ShieldCheck,
+  Wrench,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { SystemRole, SYSTEM_ROLES_CONFIG } from '../../types';
 
 interface HeaderProps {
   onOpenPaymentModal: () => void;
@@ -52,7 +55,10 @@ export const Header: React.FC<HeaderProps> = ({
     toggleMobileMenu,
     theme,
     toggleTheme,
+    systemRole,
   } = useApp();
+
+  const currentRoleMeta = SYSTEM_ROLES_CONFIG[systemRole] || SYSTEM_ROLES_CONFIG.admin;
 
   const currentDateStr = new Intl.DateTimeFormat('en-US', {
     weekday: 'short',
@@ -122,25 +128,30 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Right Action Buttons */}
       <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0 ml-2">
-        <button
-          onClick={onOpenPaymentModal}
-          className="flex items-center gap-1.5 px-2.5 sm:px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-emerald-600/20 transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
-          title="Collect Payment (POS)"
-        >
-          <CreditCard className="w-3.5 h-3.5" />
-          <span className="hidden xs:inline sm:inline">Collect</span>
-        </button>
+        {/* Collect Payment (POS) - Hidden for technician */}
+        {systemRole !== 'technician' && (
+          <button
+            onClick={onOpenPaymentModal}
+            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-emerald-600/20 transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
+            title="Collect Payment (POS)"
+          >
+            <CreditCard className="w-3.5 h-3.5" />
+            <span className="hidden xs:inline sm:inline">Collect</span>
+          </button>
+        )}
 
-        {/* MikroTik RouterOS Live Terminal Button */}
-        <button
-          type="button"
-          onClick={() => onOpenTerminalModal?.(coreRouter?.id)}
-          className="flex items-center gap-1.5 px-2.5 sm:px-3 py-2 bg-slate-900 hover:bg-slate-800 text-purple-300 hover:text-purple-200 border border-purple-800/50 hover:border-purple-500/60 rounded-xl text-xs font-semibold shadow-md shadow-purple-950/40 transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
-          title={`Open MikroTik RouterOS CLI Terminal (${coreRouter?.name || 'Gateway'})`}
-        >
-          <Terminal className="w-3.5 h-3.5 text-purple-400" />
-          <span className="hidden xs:inline sm:inline">Terminal</span>
-        </button>
+        {/* MikroTik RouterOS Live Terminal Button - Hidden for cashier */}
+        {systemRole !== 'cashier' && (
+          <button
+            type="button"
+            onClick={() => onOpenTerminalModal?.(coreRouter?.id)}
+            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-2 bg-slate-900 hover:bg-slate-800 text-purple-300 hover:text-purple-200 border border-purple-800/50 hover:border-purple-500/60 rounded-xl text-xs font-semibold shadow-md shadow-purple-950/40 transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
+            title={`Open MikroTik RouterOS CLI Terminal (${coreRouter?.name || 'Gateway'})`}
+          >
+            <Terminal className="w-3.5 h-3.5 text-purple-400" />
+            <span className="hidden xs:inline sm:inline">Terminal</span>
+          </button>
+        )}
 
         <button
           onClick={onOpenCustomerModal}
@@ -150,6 +161,20 @@ export const Header: React.FC<HeaderProps> = ({
           <Plus className="w-3.5 h-3.5" />
           <span className="hidden xs:inline sm:inline">New Client</span>
         </button>
+
+        {/* System Role Indicator (Read-only, governed by authenticated account) */}
+        <div
+          className={`flex items-center gap-1.5 sm:gap-2 px-2.5 py-1.5 rounded-xl border text-xs font-semibold select-none ${currentRoleMeta.badgeBg} ${currentRoleMeta.badgeBorder} ${currentRoleMeta.textColor}`}
+          title={`Current System Role: ${currentRoleMeta.label}`}
+        >
+          {systemRole === 'admin' && <ShieldCheck className="w-4 h-4 text-purple-400 flex-shrink-0" />}
+          {systemRole === 'cashier' && <CreditCard className="w-4 h-4 text-emerald-400 flex-shrink-0" />}
+          {systemRole === 'technician' && <Wrench className="w-4 h-4 text-amber-400 flex-shrink-0" />}
+          <div className="hidden sm:flex flex-col text-left leading-none">
+            <span className="text-[9px] uppercase font-mono tracking-wider opacity-75">Role</span>
+            <span className="font-bold text-[11px]">{currentRoleMeta.badge}</span>
+          </div>
+        </div>
 
         {/* Theme Toggle (Dark / Light Mode) */}
         <button

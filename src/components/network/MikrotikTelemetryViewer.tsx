@@ -424,13 +424,7 @@ export const MikrotikTelemetryViewer: React.FC<MikrotikTelemetryViewerProps> = (
     usagePercent: number;
     dynamic: boolean;
     comment?: string;
-  }>>([
-    { id: '1', name: 'pppoe_user_01', target: '192.168.10.15/32', maxLimit: '50M/50M', rate: '14.2M/3.1M', rxRateMbps: 14.2, txRateMbps: 3.1, rxLimitMbps: 50, txLimitMbps: 50, dropped: '0/0', droppedCount: 0, usagePercent: 28, dynamic: true, comment: 'Plan-50M • Juan Dela Cruz' },
-    { id: '2', name: 'pppoe_user_02', target: '192.168.10.18/32', maxLimit: '25M/25M', rate: '24.8M/18.2M', rxRateMbps: 24.8, txRateMbps: 18.2, rxLimitMbps: 25, txLimitMbps: 25, dropped: '14/0', droppedCount: 14, usagePercent: 99, dynamic: true, comment: 'Plan-25M • Maria Santos (Near Limit)' },
-    { id: '3', name: 'pppoe_user_03', target: '192.168.10.22/32', maxLimit: '100M/100M', rate: '42.5M/8.9M', rxRateMbps: 42.5, txRateMbps: 8.9, rxLimitMbps: 100, txLimitMbps: 100, dropped: '0/0', droppedCount: 0, usagePercent: 42, dynamic: true, comment: 'Plan-100M • Brgy Hall POP' },
-    { id: '4', name: 'pppoe_user_04', target: '192.168.10.29/32', maxLimit: '35M/35M', rate: '3.2M/0.8M', rxRateMbps: 3.2, txRateMbps: 0.8, rxLimitMbps: 35, txLimitMbps: 35, dropped: '0/0', droppedCount: 0, usagePercent: 9, dynamic: true, comment: 'Plan-35M • Pedro Reyes' },
-    { id: '5', name: 'pppoe_user_05', target: '192.168.10.34/32', maxLimit: '50M/50M', rate: '48.9M/12.4M', rxRateMbps: 48.9, txRateMbps: 12.4, rxLimitMbps: 50, txLimitMbps: 50, dropped: '8/0', droppedCount: 8, usagePercent: 98, dynamic: true, comment: 'Plan-50M • Elena Gomez' },
-  ]);
+  }>>([]);
 
   // Dynamic live state from router matching CCR Cloud Core Router architecture
   const [liveStats, setLiveStats] = useState({
@@ -1943,8 +1937,13 @@ export const MikrotikTelemetryViewer: React.FC<MikrotikTelemetryViewerProps> = (
 
           {/* Simple Queues Grid */}
           <div className="space-y-2.5">
-            {simpleQueues
-              .filter((q) => {
+            {simpleQueues.length === 0 ? (
+              <div className="p-8 rounded-2xl bg-slate-950/40 border border-slate-800/80 text-center text-slate-500 text-xs">
+                No active simple queues on this router. Queues will dynamically appear as subscribers connect via PPPoE or IPoE.
+              </div>
+            ) : (
+              simpleQueues
+                .filter((q) => {
                 if (!queueSearchTerm) return true;
                 const term = queueSearchTerm.toLowerCase();
                 return (
@@ -2029,7 +2028,7 @@ export const MikrotikTelemetryViewer: React.FC<MikrotikTelemetryViewerProps> = (
                     </div>
                   </div>
                 );
-              })}
+              }))}
           </div>
         </div>
       )}

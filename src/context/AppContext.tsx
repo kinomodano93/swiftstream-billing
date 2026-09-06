@@ -27,18 +27,30 @@ import {
   RepairOrder,
   CoverageArea,
   CoverageStatus,
+  SystemRole,
+  SYSTEM_ROLES_CONFIG,
+  ROLE_PERMISSIONS,
+  RolePermissions,
+  StaffUser,
 } from '../types';
 import {
   exportAllDataAsJson,
   loadStoredData,
   resetAllDataToDefault,
   saveToStorage,
+  setStoredStaffUsers,
   STORAGE_KEYS,
 } from '../data/storage';
-import { initialPlans, initialBusinessProfile, initialCoverageAreas } from '../data/initialData';
+import { initialPlans, initialBusinessProfile, initialCoverageAreas, initialStaffUsers } from '../data/initialData';
 import { generateId } from '../utils/formatters';
 import { generateReminderMessage, sendMockNotification } from '../utils/smsSender';
-import { fetchFullRouterTelemetry } from '../services/mikrotikApiService';
+import {
+  fetchFullRouterTelemetry,
+  isolateOverdueSubscriber,
+  reconnectSubscriber,
+  saveOrUpdatePppoeSecret,
+  MikrotikCredentials,
+} from '../services/mikrotikApiService';
 import { generateHtmlInvoiceEmail, sendSmtpEmail } from '../utils/smtpService';
 import { sendTelegramStaffAlert, sendDiscordStaffAlert } from '../utils/webhookService';
 import {
@@ -48,7 +60,14 @@ import {
   deleteFirestoreDoc,
   purgeFirestoreCollections,
 } from '../services/firestoreService';
-import { AppUserProfile, subscribeToAuth, signOutUser, syncCustomerApprovalToUser } from '../services/authService';
+import {
+  AppUserProfile,
+  subscribeToAuth,
+  signOutUser,
+  syncCustomerApprovalToUser,
+  getAuthorizedAdminEmails,
+  saveAuthorizedAdminEmails,
+} from '../services/authService';
 import {
   executePaymentWebhookPipeline,
   PaymentWebhookEvent,
@@ -68,8 +87,15 @@ interface AppContextType {
   setCurrentAuthUser: (user: AppUserProfile | null) => void;
   isAuthModalOpen: boolean;
   authModalMode: 'signin' | 'signup' | 'forgot';
-  openAuthModal: (mode?: 'signin' | 'signup' | 'forgot') => void;
+  authModalEmail: string;
+  openAuthModal: (mode?: 'signin' | 'signup' | 'forgot', initialEmail?: string) => void;
   closeAuthModal: () => void;
+
+  // System Role & RBAC
+  systemRole: SystemRole;
+  setSystemRole: (role: SystemRole) => void;
+  canAccessTab: (tabId: string) => boolean;
+  hasPermission: (perm: keyof RolePermissions) => boolean;
 
   // State
   businessProfile: BusinessProfile;
@@ -108,8 +134,8 @@ interface AppContextType {
   logout: () => void;
 
   // Customer Actions
-  addCustomer: (customer: Omit<Customer, 'id' | 'createdAt' | 'updatedAt'>) => Customer;
-  updateCustomer: (id: string, updates: Partial<Customer>) => void;
+  addCustomer: (customer: Omit<Customer, 'id' | 'createdAt' | 'updatedAt'>, options?: { skipMikrotikSync?: boolean }) => Customer;
+  updateCustomer: (id: string, updates: Partial<Customer>, options?: { skipMikrotikSync?: boolean }) => void;
   deleteCustomer: (id: string) => void;
   toggleCustomerStatus: (id: string, newStatus: CustomerStatus) => void;
   addCustomerWalletCredit: (customerId: string, amount: number, notes?: string) => void;
@@ -226,6 +252,13 @@ interface AppContextType {
   logAuditEvent: (event: Omit<AuditLog, 'id' | 'timestamp'>) => void;
   clearAuditLogs: () => void;
 
+  // Staff Users & Role Management
+  staffUsers: StaffUser[];
+  addStaffUser: (user: Omit<StaffUser, 'id' | 'createdAt'>) => Promise<StaffUser>;
+  updateStaffUser: (id: string, updates: Partial<StaffUser>) => Promise<void>;
+  deleteStaffUser: (id: string) => Promise<void>;
+  toggleStaffUserStatus: (id: string) => Promise<void>;
+
   // Business Profile & System
   updateBusinessProfile: (updates: Partial<BusinessProfile>) => void;
   exportData: () => void;
@@ -239,6 +272,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const initial = loadStoredData();
 
   const [businessProfile, setBusinessProfile] = useState<BusinessProfile>(initial.businessProfile);
+  const [staffUsers, setStaffUsers] = useState<StaffUser[]>(initial.staffUsers || []);
   const [customers, setCustomers] = useState<Customer[]>(initial.customers);
   const [invoices, setInvoices] = useState<Invoice[]>(initial.invoices);
   const [payments, setPayments] = useState<Payment[]>(initial.payments);
@@ -259,7 +293,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     initial.coverageAreas && initial.coverageAreas.length > 0 ? initial.coverageAreas : initialCoverageAreas
   );
 
-  const [activeTab, setActiveTab] = useState<string>('home');
+  const [activeTab, setActiveTab] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem('swiftstream_active_tab');
+      if (saved) return saved;
+    } catch {}
+    return 'dashboard';
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('swiftstream_active_tab', activeTab);
+    } catch {}
+  }, [activeTab]);
+
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [notifications, setNotifications] = useState<ToastNotification[]>([]);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
@@ -300,14 +347,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [currentAuthUser, setCurrentAuthUser] = useState<AppUserProfile | null>(null);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
   const [authModalMode, setAuthModalMode] = useState<'signin' | 'signup' | 'forgot'>('signin');
+  const [authModalEmail, setAuthModalEmail] = useState<string>('');
 
-  const openAuthModal = (mode: 'signin' | 'signup' | 'forgot' = 'signin') => {
+  const openAuthModal = (mode: 'signin' | 'signup' | 'forgot' = 'signin', initialEmail: string = '') => {
     setAuthModalMode(mode);
+    setAuthModalEmail(initialEmail);
     setIsAuthModalOpen(true);
   };
 
   const closeAuthModal = () => {
     setIsAuthModalOpen(false);
+    setAuthModalEmail('');
   };
 
   // Subscribe to Firebase Auth changes
@@ -317,6 +367,63 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
     return () => unsubAuth();
   }, []);
+
+  // System Role State (admin, cashier, technician)
+  const [systemRole, setSystemRoleState] = useState<SystemRole>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.SYSTEM_ROLE);
+      if (saved === 'admin' || saved === 'cashier' || saved === 'technician') {
+        return saved as SystemRole;
+      }
+    } catch (_) {}
+    return 'admin';
+  });
+
+  const setSystemRole = (role: SystemRole) => {
+    // Security restriction: When a user is logged in, their role is locked to their verified authenticated role
+    if (currentAuthUser && currentAuthUser.role !== 'admin' && role !== currentAuthUser.role) {
+      console.warn(`[Security Policy] Blocked attempt to elevate role to ${role} for user ${currentAuthUser.email}`);
+      return;
+    }
+    setSystemRoleState(role);
+    try {
+      localStorage.setItem(STORAGE_KEYS.SYSTEM_ROLE, role);
+    } catch (_) {}
+  };
+
+  // Synchronize role from currentAuthUser when authenticated
+  useEffect(() => {
+    if (currentAuthUser?.role) {
+      if (currentAuthUser.role === 'admin') setSystemRoleState('admin');
+      else if (currentAuthUser.role === 'cashier') setSystemRoleState('cashier');
+      else if (currentAuthUser.role === 'technician' || currentAuthUser.role === 'tech') setSystemRoleState('technician');
+    }
+  }, [currentAuthUser]);
+
+  const canAccessTab = (tabId: string): boolean => {
+    const permissions = ROLE_PERMISSIONS[systemRole];
+    return permissions ? permissions.allowedTabs.includes(tabId) : true;
+  };
+
+  const hasPermission = (perm: keyof RolePermissions): boolean => {
+    const permissions = ROLE_PERMISSIONS[systemRole];
+    if (!permissions) return true;
+    return Boolean(permissions[perm]);
+  };
+
+  // If activeTab is disallowed for current role, automatically navigate to role's primary landing view
+  useEffect(() => {
+    const perms = ROLE_PERMISSIONS[systemRole];
+    if (perms && activeTab !== 'home' && activeTab !== 'portal' && !perms.allowedTabs.includes(activeTab)) {
+      if (systemRole === 'cashier') {
+        setActiveTab('dashboard');
+      } else if (systemRole === 'technician') {
+        setActiveTab('field_ops');
+      } else {
+        setActiveTab('dashboard');
+      }
+    }
+  }, [systemRole, activeTab]);
 
   const logout = async () => {
     try {
@@ -422,13 +529,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setCustomers(uniqueList);
     });
     const unsubInvoices = subscribeToCollection<Invoice>(COLLECTIONS.INVOICES, (data) => {
-      setInvoices(data || []);
+      if (data && data.length > 0) {
+        setInvoices(data);
+      }
     });
     const unsubPayments = subscribeToCollection<Payment>(COLLECTIONS.PAYMENTS, (data) => {
-      setPayments(data || []);
+      if (data && data.length > 0) {
+        setPayments(data);
+      }
     });
     const unsubSubmissions = subscribeToCollection<PaymentSubmission>(COLLECTIONS.PAYMENT_SUBMISSIONS, (data) => {
-      setPaymentSubmissions(data || []);
+      if (data && data.length > 0) {
+        setPaymentSubmissions(data);
+      }
     });
     const unsubPlans = subscribeToCollection<Plan>(COLLECTIONS.PLANS, (data) => {
       if (data && data.length > 0) setPlans(data);
@@ -437,7 +550,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (data && data.length > 0) setCoverageAreas(data);
     });
     const unsubRepairOrders = subscribeToCollection<RepairOrder>(COLLECTIONS.REPAIR_ORDERS, (data) => {
-      setRepairOrders(data || []);
+      if (data && data.length > 0) {
+        setRepairOrders(data);
+      }
     });
     const unsubNapBoxes = subscribeToCollection<NapBox>(COLLECTIONS.NAP_BOXES, (data) => {
       setNapBoxes(data || []);
@@ -497,8 +612,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setNotifications((prev) => prev.filter((n) => n.id !== id));
   };
 
+  const getRouterCredsForCustomer = (customer: Customer): MikrotikCredentials | null => {
+    const router =
+      mikrotikDevices.find((d) => d.id === customer.network?.mikrotikDeviceId || d.name === customer.network?.mikrotikDeviceId) ||
+      mikrotikDevices.find((d) => d.role === 'core_pppoe') ||
+      mikrotikDevices[0];
+    if (!router) return null;
+    return {
+      id: router.id,
+      name: router.name,
+      ipAddress: router.remoteAddress || router.ipAddress || 'remote.oxapsph.com',
+      port: router.port || router.webfigPort || router.apiPort || 10988,
+      username: router.username || 'admin',
+      password: router.password || '',
+      useHttps: router.useSsl,
+    };
+  };
+
   // --- Customer Operations ---
-  const addCustomer = (customerData: Omit<Customer, 'id' | 'createdAt' | 'updatedAt'>): Customer => {
+  const addCustomer = (
+    customerData: Omit<Customer, 'id' | 'createdAt' | 'updatedAt'>,
+    options?: { skipMikrotikSync?: boolean }
+  ): Customer => {
     const newCustomer: Customer = {
       ...customerData,
       id: generateId('CUST'),
@@ -508,6 +643,49 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setCustomers((prev) => [newCustomer, ...prev]);
     saveFirestoreDoc(COLLECTIONS.CUSTOMERS, newCustomer);
+
+    // Save PPPoE secret directly into MikroTik router hardware (excluded from cloud Firestore)
+    const routerCreds = getRouterCredsForCustomer(newCustomer);
+    if (!options?.skipMikrotikSync && routerCreds && newCustomer.network?.pppoeUsername) {
+      const plan = plans.find((p) => p.id === newCustomer.planId) || plans[0];
+      saveOrUpdatePppoeSecret(routerCreds, {
+        name: newCustomer.network.pppoeUsername,
+        password: customerData.network?.pppoePassword || 'swift1234',
+        service: 'pppoe',
+        profile: newCustomer.network.pppoeProfile || `Plan-${plan?.speedMbps || 25}M`,
+        remoteAddress: newCustomer.network.ipAddress,
+        comment: `${newCustomer.fullName} - ${newCustomer.accountNo}`,
+        disabled: newCustomer.status === 'suspended' || newCustomer.status === 'disconnected',
+        speedMbps: plan?.speedMbps || 25,
+        accountNo: newCustomer.accountNo,
+      })
+        .then((res) => {
+          if (res.success) {
+            logAuditEvent({
+              userName: 'MikroTik Hardware Controller',
+              action: 'MIKROTIK_SECRET_PROVISIONED',
+              category: 'network',
+              severity: 'info',
+              details: `PPPoE secret saved directly into MikroTik router hardware for ${newCustomer.fullName} (${newCustomer.network.pppoeUsername}). ${res.message}`,
+              status: 'success',
+            });
+          } else {
+            showToast('warning', 'MikroTik Sync Notice', res.message || 'Router rejected PPPoE secret provisioning.');
+            logAuditEvent({
+              userName: 'MikroTik Hardware Controller',
+              action: 'MIKROTIK_SECRET_PROVISIONED',
+              category: 'network',
+              severity: 'warning',
+              details: `MikroTik rejected PPPoE provisioning for ${newCustomer.fullName}: ${res.message}`,
+              status: 'failed',
+            });
+          }
+        })
+        .catch((err) => {
+          console.warn('[MikroTik Provisioning Error]', err);
+          showToast('error', 'MikroTik Sync Error', err?.message || 'Could not communicate with MikroTik device.');
+        });
+    }
 
     // If assigned to a NAP box, update the port status
     if (newCustomer.network.napBoxId && newCustomer.network.napPortNumber) {
@@ -547,17 +725,81 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return newCustomer;
   };
 
-  const updateCustomer = (id: string, updates: Partial<Customer>) => {
+  const updateCustomer = (
+    id: string,
+    updates: Partial<Customer>,
+    options?: { skipMikrotikSync?: boolean }
+  ) => {
+    let updatedCustomerObj: Customer | null = null;
+
     setCustomers((prev) =>
       prev.map((c) => {
         if (c.id === id) {
           const updated = { ...c, ...updates, updatedAt: new Date().toISOString() };
+          updatedCustomerObj = updated;
           saveFirestoreDoc(COLLECTIONS.CUSTOMERS, updated);
           return updated;
         }
         return c;
       })
     );
+
+    // If network credentials, plan, or subscriber status changed, push live update directly to MikroTik device
+    if (updatedCustomerObj) {
+      const updatedCust = updatedCustomerObj as Customer;
+      const routerCreds = getRouterCredsForCustomer(updatedCust);
+
+      const hasNetworkChange = !!(
+        updates.network ||
+        updates.planId ||
+        updates.status ||
+        updates.fullName
+      );
+
+      if (!options?.skipMikrotikSync && routerCreds && updatedCust.network?.pppoeUsername && hasNetworkChange) {
+        const plan = plans.find((p) => p.id === updatedCust.planId) || plans[0];
+        const newPassword = updates.network?.pppoePassword;
+
+        saveOrUpdatePppoeSecret(routerCreds, {
+          name: updatedCust.network.pppoeUsername,
+          password: newPassword, // only updates password on router if provided
+          service: 'pppoe',
+          profile: updatedCust.network.pppoeProfile || `Plan-${plan?.speedMbps || 25}M`,
+          remoteAddress: updatedCust.network.ipAddress,
+          comment: `${updatedCust.fullName} - ${updatedCust.accountNo}`,
+          disabled: updatedCust.status === 'suspended' || updatedCust.status === 'disconnected',
+          speedMbps: plan?.speedMbps || 25,
+          accountNo: updatedCust.accountNo,
+        })
+          .then((res) => {
+            if (res.success) {
+              logAuditEvent({
+                userName: 'MikroTik Hardware Controller',
+                action: 'MIKROTIK_SECRET_UPDATED',
+                category: 'network',
+                severity: 'info',
+                details: `PPPoE secret directly updated on MikroTik router hardware for ${updatedCust.fullName} (${updatedCust.network.pppoeUsername}). ${res.message}`,
+                status: 'success',
+              });
+            } else {
+              showToast('warning', 'MikroTik Sync Notice', res.message || 'Router rejected PPPoE secret update.');
+              logAuditEvent({
+                userName: 'MikroTik Hardware Controller',
+                action: 'MIKROTIK_SECRET_UPDATED',
+                category: 'network',
+                severity: 'warning',
+                details: `MikroTik rejected PPPoE secret update for ${updatedCust.fullName}: ${res.message}`,
+                status: 'failed',
+              });
+            }
+          })
+          .catch((err) => {
+            console.warn('[MikroTik Update Error]', err);
+            showToast('error', 'MikroTik Sync Error', err?.message || 'Could not communicate with MikroTik device.');
+          });
+      }
+    }
+
     showToast('info', 'Customer Updated', 'Subscriber profile details have been saved.');
     logAuditEvent({
       userName: 'Admin Leonardo Flojo',
@@ -605,6 +847,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const toggleCustomerStatus = (id: string, newStatus: CustomerStatus) => {
+    const targetCustomer = customers.find((c) => c.id === id);
+
     setCustomers((prev) =>
       prev.map((c) => {
         if (c.id === id) {
@@ -624,10 +868,48 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return c;
       })
     );
+
+    // Live RouterOS isolation/reconnection execution
+    if (targetCustomer) {
+      const routerCreds = getRouterCredsForCustomer(targetCustomer);
+      if (routerCreds) {
+        if (newStatus === 'suspended') {
+          isolateOverdueSubscriber(routerCreds, targetCustomer)
+            .then((res) => {
+              logAuditEvent({
+                userName: 'System Router Controller',
+                action: 'SUBSCRIBER_LINE_ISOLATED',
+                category: 'network',
+                severity: 'warning',
+                details: `MikroTik line isolated for ${targetCustomer.fullName} (${targetCustomer.network?.pppoeUsername || targetCustomer.accountNo}). Details: ${res.details}`,
+                status: 'success',
+              });
+            })
+            .catch((err) => console.warn('[MikroTik Isolate Error]', err));
+        } else if (newStatus === 'active') {
+          const plan = plans.find((p) => p.id === targetCustomer.planId) || plans[0];
+          if (plan) {
+            reconnectSubscriber(routerCreds, targetCustomer, plan)
+              .then((res) => {
+                logAuditEvent({
+                  userName: 'System Router Controller',
+                  action: 'SUBSCRIBER_LINE_RESTORED',
+                  category: 'network',
+                  severity: 'info',
+                  details: `MikroTik line reactivated for ${targetCustomer.fullName}. Details: ${res.details}`,
+                  status: 'success',
+                });
+              })
+              .catch((err) => console.warn('[MikroTik Reconnect Error]', err));
+          }
+        }
+      }
+    }
+
     showToast(
       'info',
       'Status Changed',
-      `Subscriber status set to ${newStatus.toUpperCase()}.${newStatus === 'active' ? ' Mikrotik line activated.' : ' Line disabled.'}`
+      `Subscriber status set to ${newStatus.toUpperCase()}.${newStatus === 'active' ? ' Mikrotik line activated.' : ' Line isolated.'}`
     );
   };
 
@@ -635,12 +917,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const customer = customers.find((c) => c.id === id);
     if (!customer) return;
 
+    const routerCreds = getRouterCredsForCustomer(customer);
+    const plan = plans.find((p) => p.id === customer.planId) || plans[0];
+
+    if (routerCreds && customer.network?.pppoeUsername) {
+      saveOrUpdatePppoeSecret(routerCreds, {
+        name: customer.network.pppoeUsername,
+        password: customer.network.pppoePassword,
+        service: 'pppoe',
+        profile: customer.network.pppoeProfile || `Plan-${plan?.speedMbps || 25}M`,
+        remoteAddress: customer.network.ipAddress,
+        comment: `${customer.fullName} - ${customer.accountNo}`,
+        disabled: customer.status === 'suspended' || customer.status === 'disconnected',
+        speedMbps: plan?.speedMbps || 25,
+        accountNo: customer.accountNo,
+      })
+        .then((res) => {
+          showToast(
+            res.success ? 'success' : 'warning',
+            res.success ? 'MikroTik Synced' : 'Sync Warning',
+            res.message || `PPPoE secret for "${customer.network.pppoeUsername}" pushed to MikroTik.`
+          );
+        })
+        .catch((err) => {
+          showToast('error', 'Sync Failed', err.message || 'Could not communicate with MikroTik device.');
+        });
+    }
+
     setCustomers((prev) =>
       prev.map((c) =>
         c.id === id ? { ...c, network: { ...c.network, isMikrotikSynced: true }, updatedAt: new Date().toISOString() } : c
       )
     );
-    showToast('success', 'Mikrotik Synced', `PPPoE user ${customer.network.pppoeUsername} synced with RouterOS.`);
   };
 
   const provisionSubscriber = (
@@ -752,13 +1060,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     setInvoices((prev) => [newInvoice, ...prev]);
+    saveFirestoreDoc(COLLECTIONS.INVOICES, newInvoice);
 
     // Recalculate customer balance
     setCustomers((prev) =>
       prev.map((c) => {
         if (c.id === newInvoice.customerId) {
           const newBalance = c.balance + newInvoice.balanceDue;
-          return { ...c, balance: newBalance, updatedAt: new Date().toISOString() };
+          const updatedCust = { ...c, balance: newBalance, updatedAt: new Date().toISOString() };
+          saveFirestoreDoc(COLLECTIONS.CUSTOMERS, updatedCust);
+          return updatedCust;
         }
         return c;
       })
@@ -769,7 +1080,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateInvoice = (id: string, updates: Partial<Invoice>) => {
-    setInvoices((prev) => prev.map((inv) => (inv.id === id ? { ...inv, ...updates } : inv)));
+    setInvoices((prev) =>
+      prev.map((inv) => {
+        if (inv.id === id) {
+          const updated = { ...inv, ...updates };
+          saveFirestoreDoc(COLLECTIONS.INVOICES, updated);
+          return updated;
+        }
+        return inv;
+      })
+    );
   };
 
   const deleteInvoice = (id: string) => {
@@ -947,6 +1267,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (newInvoices.length > 0) {
       setInvoices((prev) => [...newInvoices, ...prev]);
       setCustomers(updatedCustomers);
+
+      // Persist all generated invoices and updated customer balances to Firestore
+      newInvoices.forEach((inv) => saveFirestoreDoc(COLLECTIONS.INVOICES, inv));
+      updatedCustomers.forEach((cust) => saveFirestoreDoc(COLLECTIONS.CUSTOMERS, cust));
+
       showToast(
         'success',
         'Batch Invoicing Complete',
@@ -966,22 +1291,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const newBalanceDue = Math.max(0, invoice.totalAmount - discountAmount - invoice.amountPaid);
     const newStatus = newBalanceDue === 0 ? 'paid' : invoice.amountPaid > 0 ? 'partially_paid' : 'unpaid';
 
+    const updatedInv: Invoice = {
+      ...invoice,
+      discount: discountAmount,
+      balanceDue: newBalanceDue,
+      status: newStatus,
+    };
+    saveFirestoreDoc(COLLECTIONS.INVOICES, updatedInv);
+
     setInvoices((prev) =>
-      prev.map((inv) =>
-        inv.id === invoiceId
-          ? {
-              ...inv,
-              discount: discountAmount,
-              balanceDue: newBalanceDue,
-              status: newStatus,
-            }
-          : inv
-      )
+      prev.map((inv) => (inv.id === invoiceId ? updatedInv : inv))
     );
 
     // Update customer balance
     setCustomers((prev) =>
-      prev.map((c) => (c.id === invoice.customerId ? { ...c, balance: Math.max(0, c.balance - discountAmount) } : c))
+      prev.map((c) => {
+        if (c.id === invoice.customerId) {
+          const updatedCust = { ...c, balance: Math.max(0, c.balance - discountAmount), updatedAt: new Date().toISOString() };
+          saveFirestoreDoc(COLLECTIONS.CUSTOMERS, updatedCust);
+          return updatedCust;
+        }
+        return c;
+      })
     );
 
     showToast('success', 'Discount Applied', `₱${discountAmount} discount applied to ${invoice.invoiceNumber}.`);
@@ -1026,6 +1357,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (openInvoices.length === 0 && (c.status === 'overdue' || c.status === 'suspended') && c.balance === 0) {
         // Auto-reactivate
         reactivatedCount++;
+        const routerCreds = getRouterCredsForCustomer(c);
+        const plan = plans.find((p) => p.id === c.planId) || plans[0];
+        if (routerCreds && plan) {
+          reconnectSubscriber(routerCreds, c, plan).catch((err) =>
+            console.warn('[Audit Reconnect Error]', err)
+          );
+        }
         return {
           ...c,
           status: 'active' as const,
@@ -1051,6 +1389,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       if (isPastGrace && c.status !== 'suspended') {
         isolatedCount++;
+        const routerCreds = getRouterCredsForCustomer(c);
+        if (routerCreds) {
+          isolateOverdueSubscriber(routerCreds, c).catch((err) =>
+            console.warn('[Audit Isolate Error]', err)
+          );
+        }
         return {
           ...c,
           status: 'suspended' as const,
@@ -1103,7 +1447,67 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const customer = customers.find((c) => c.id === paymentData.customerId);
     const invoice = paymentData.invoiceId ? invoices.find((inv) => inv.id === paymentData.invoiceId) : undefined;
 
+    let excessWalletCredit = 0;
+    const updatedInvoiceMap = new Map<string, Invoice>();
+
+    // Update Invoice if linked, or auto-allocate via FIFO across open invoices
+    if (invoice) {
+      const neededToPay = invoice.balanceDue;
+      const newAmountPaid = invoice.amountPaid + paymentData.amount;
+      const newBalanceDue = Math.max(0, invoice.totalAmount - invoice.discount - newAmountPaid);
+      const newStatus: InvoiceStatus = newBalanceDue <= 0 ? 'paid' : 'partially_paid';
+
+      if (paymentData.amount > neededToPay) {
+        excessWalletCredit = paymentData.amount - neededToPay;
+      }
+
+      const updatedInv: Invoice = {
+        ...invoice,
+        amountPaid: newAmountPaid,
+        balanceDue: newBalanceDue,
+        status: newStatus,
+        paidAt: newStatus === 'paid' ? new Date().toISOString() : invoice.paidAt,
+        paymentMethodUsed: paymentData.paymentMethod,
+      };
+
+      updatedInvoiceMap.set(invoice.id, updatedInv);
+    } else if (!paymentData.isAdvancePayment) {
+      // FIFO auto-allocation: find open invoices for this customer, oldest first
+      const openInvoices = invoices
+        .filter((inv) => inv.customerId === paymentData.customerId && inv.status !== 'paid' && inv.balanceDue > 0)
+        .sort((a, b) => new Date(a.billingPeriodStart || a.dueDate).getTime() - new Date(b.billingPeriodStart || b.dueDate).getTime());
+
+      let remainingPayment = paymentData.amount;
+
+      for (const inv of openInvoices) {
+        if (remainingPayment <= 0) break;
+        const toPay = Math.min(remainingPayment, inv.balanceDue);
+        const newAmountPaid = inv.amountPaid + toPay;
+        const newBalanceDue = Math.max(0, inv.balanceDue - toPay);
+        const newStatus: InvoiceStatus = newBalanceDue <= 0 ? 'paid' : 'partially_paid';
+
+        updatedInvoiceMap.set(inv.id, {
+          ...inv,
+          amountPaid: newAmountPaid,
+          balanceDue: newBalanceDue,
+          status: newStatus,
+          paidAt: newStatus === 'paid' ? new Date().toISOString() : inv.paidAt,
+          paymentMethodUsed: paymentData.paymentMethod,
+        });
+
+        remainingPayment -= toPay;
+      }
+
+      if (remainingPayment > 0) {
+        excessWalletCredit = remainingPayment;
+      }
+    } else {
+      excessWalletCredit = paymentData.amount;
+    }
+
     const receiptNumber = `OR-${new Date().getFullYear().toString().slice(2)}${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(payments.length + 1).padStart(4, '0')}`;
+    const targetInvoiceId = invoice?.id || (updatedInvoiceMap.size > 0 ? Array.from(updatedInvoiceMap.keys())[0] : undefined);
+    const targetInvoiceNumber = invoice?.invoiceNumber || (updatedInvoiceMap.size > 0 ? Array.from(updatedInvoiceMap.values()).map(i => i.invoiceNumber).join(', ') : undefined);
 
     const newPayment: Payment = {
       id: generateId('PAY'),
@@ -1111,8 +1515,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       customerId: paymentData.customerId,
       customerName: customer?.fullName || 'Customer',
       accountNo: customer?.accountNo || 'N/A',
-      invoiceId: invoice?.id,
-      invoiceNumber: invoice?.invoiceNumber,
+      invoiceId: targetInvoiceId,
+      invoiceNumber: targetInvoiceNumber,
       amount: paymentData.amount,
       paymentDate: new Date().toISOString(),
       paymentMethod: paymentData.paymentMethod,
@@ -1127,38 +1531,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setPayments((prev) => [newPayment, ...prev]);
     saveFirestoreDoc(COLLECTIONS.PAYMENTS, newPayment);
 
-    let excessWalletCredit = 0;
-
-    // Update Invoice if linked
-    if (invoice) {
-      const neededToPay = invoice.balanceDue;
-      const newAmountPaid = invoice.amountPaid + paymentData.amount;
-      const newBalanceDue = Math.max(0, invoice.totalAmount - invoice.discount - newAmountPaid);
-      const newStatus: InvoiceStatus = newBalanceDue <= 0 ? 'paid' : 'partially_paid';
-
-      if (paymentData.amount > neededToPay) {
-        excessWalletCredit = paymentData.amount - neededToPay;
-      }
-
+    if (updatedInvoiceMap.size > 0) {
       setInvoices((prev) =>
         prev.map((inv) => {
-          if (inv.id === invoice.id) {
-            const updatedInv = {
-              ...inv,
-              amountPaid: newAmountPaid,
-              balanceDue: newBalanceDue,
-              status: newStatus,
-              paidAt: newStatus === 'paid' ? new Date().toISOString() : inv.paidAt,
-              paymentMethodUsed: paymentData.paymentMethod,
-            };
-            saveFirestoreDoc(COLLECTIONS.INVOICES, updatedInv);
-            return updatedInv;
+          const updated = updatedInvoiceMap.get(inv.id);
+          if (updated) {
+            saveFirestoreDoc(COLLECTIONS.INVOICES, updated);
+            return updated;
           }
           return inv;
         })
       );
-    } else if (paymentData.isAdvancePayment) {
-      excessWalletCredit = paymentData.amount;
     }
 
     // Update Customer Balance and auto-reactivate if suspended/overdue
@@ -1168,6 +1551,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const updatedBal = Math.max(0, c.balance - paymentData.amount);
           const newWallet = (c.walletBalance || 0) + excessWalletCredit;
           const shouldReactivate = (c.status === 'suspended' || c.status === 'overdue') && updatedBal === 0;
+
+          if (shouldReactivate) {
+            const routerCreds = getRouterCredsForCustomer(c);
+            const plan = plans.find((p) => p.id === c.planId) || plans[0];
+            if (routerCreds && plan) {
+              reconnectSubscriber(routerCreds, c, plan).catch((err) =>
+                console.warn('[Payment Auto-Reactivate Error]', err)
+              );
+            }
+          }
 
           const updatedCust = {
             ...c,
@@ -1739,10 +2132,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     setInvoices((prev) => [newInvoice, ...prev]);
+    saveFirestoreDoc(COLLECTIONS.INVOICES, newInvoice);
 
     // Update repair status
     setRepairOrders((prev) =>
-      prev.map((r) => (r.id === repairId ? { ...r, billedToInvoiceId: newInvoice.id, status: 'ready' } : r))
+      prev.map((r) => {
+        if (r.id === repairId) {
+          const updatedRep = { ...r, billedToInvoiceId: newInvoice.id, status: 'ready' as const };
+          saveFirestoreDoc(COLLECTIONS.REPAIR_ORDERS, updatedRep);
+          return updatedRep;
+        }
+        return r;
+      })
     );
 
     showToast('success', 'Repair Billed', `Generated Invoice ${invoiceNumStr} for Repair #${repair.orderNumber}.`);
@@ -2019,6 +2420,183 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     showToast('warning', 'Expense Deleted', 'Expense entry was removed.');
   };
 
+  // --- Staff & System Roles Management ---
+  const addStaffUser = async (newUserData: Omit<StaffUser, 'id' | 'createdAt'>): Promise<StaffUser> => {
+    const newStaff: StaffUser = {
+      ...newUserData,
+      id: `staff-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const updated = [newStaff, ...staffUsers];
+    setStaffUsers(updated);
+    setStoredStaffUsers(updated);
+
+    // Sync to Firestore system_users
+    try {
+      await saveFirestoreDoc('system_users', {
+        id: newStaff.id,
+        uid: newStaff.id,
+        email: newStaff.email,
+        displayName: newStaff.fullName,
+        role: newStaff.role,
+        mobile: newStaff.mobile,
+        status: newStaff.status,
+        isApproved: newStaff.status === 'active',
+        createdAt: newStaff.createdAt,
+        lastLoginAt: new Date().toISOString(),
+      });
+    } catch (err) {
+      console.warn('Could not sync staff user to Firestore:', err);
+    }
+
+    // Auto-whitelist email for SSO if admin or staff
+    if (newStaff.email && newStaff.email.includes('@')) {
+      try {
+        const whitelist = await getAuthorizedAdminEmails();
+        const cleanEmail = newStaff.email.toLowerCase().trim();
+        if (!whitelist.some((e) => e.toLowerCase().trim() === cleanEmail)) {
+          await saveAuthorizedAdminEmails([...whitelist, cleanEmail]);
+        }
+      } catch (err) {
+        console.warn('Could not update admin whitelist:', err);
+      }
+    }
+
+    logAuditEvent({
+      userName: currentAuthUser?.displayName || 'Admin Leonardo Flojo',
+      action: 'STAFF_USER_CREATED',
+      category: 'auth',
+      severity: 'info',
+      details: `Created new staff user "${newStaff.fullName}" with role ${newStaff.role.toUpperCase()} (${newStaff.email}).`,
+      status: 'success',
+    });
+
+    showToast(
+      'success',
+      'Staff Member Added',
+      `${newStaff.fullName} is now registered as ${SYSTEM_ROLES_CONFIG[newStaff.role]?.label || newStaff.role}.`
+    );
+    return newStaff;
+  };
+
+  const updateStaffUser = async (id: string, updates: Partial<StaffUser>): Promise<void> => {
+    const updated = staffUsers.map((u) => (u.id === id ? { ...u, ...updates, updatedAt: new Date().toISOString() } : u));
+    setStaffUsers(updated);
+    setStoredStaffUsers(updated);
+
+    const user = updated.find((u) => u.id === id);
+
+    // Sync to Firestore
+    if (user) {
+      try {
+        await saveFirestoreDoc('system_users', {
+          id: user.id,
+          displayName: user.fullName,
+          email: user.email,
+          role: user.role,
+          mobile: user.mobile,
+          status: user.status,
+          isApproved: user.status === 'active',
+          updatedAt: user.updatedAt,
+        });
+      } catch (err) {
+        console.warn('Could not sync staff update to Firestore:', err);
+      }
+
+      logAuditEvent({
+        userName: currentAuthUser?.displayName || 'Admin Leonardo Flojo',
+        action: 'STAFF_USER_UPDATED',
+        category: 'auth',
+        severity: updates.role ? 'warning' : 'info',
+        details: `Updated staff profile for "${user.fullName}" (${user.role.toUpperCase()}).`,
+        status: 'success',
+      });
+
+      showToast('success', 'Staff Member Updated', `Changes for ${user.fullName} have been saved.`);
+    }
+  };
+
+  const deleteStaffUser = async (id: string): Promise<void> => {
+    const target = staffUsers.find((u) => u.id === id);
+    if (!target) return;
+
+    if (target.role === 'admin') {
+      const activeAdmins = staffUsers.filter((u) => u.role === 'admin' && u.id !== id && u.status === 'active');
+      if (activeAdmins.length === 0) {
+        showToast('error', 'Action Prohibited', 'Cannot delete the only active Administrator account.');
+        return;
+      }
+    }
+
+    const updated = staffUsers.filter((u) => u.id !== id);
+    setStaffUsers(updated);
+    setStoredStaffUsers(updated);
+
+    try {
+      await deleteFirestoreDoc('system_users', id);
+    } catch (err) {
+      console.warn('Could not delete staff user from Firestore:', err);
+    }
+
+    logAuditEvent({
+      userName: currentAuthUser?.displayName || 'Admin Leonardo Flojo',
+      action: 'STAFF_USER_DELETED',
+      category: 'auth',
+      severity: 'warning',
+      details: `Deleted staff member account "${target.fullName}" (${target.role.toUpperCase()}).`,
+      status: 'success',
+    });
+
+    showToast('info', 'Staff Member Removed', `Staff member ${target.fullName} has been deleted.`);
+  };
+
+  const toggleStaffUserStatus = async (id: string): Promise<void> => {
+    const target = staffUsers.find((u) => u.id === id);
+    if (!target) return;
+
+    const nextStatus: 'active' | 'suspended' = target.status === 'active' ? 'suspended' : 'active';
+
+    if (nextStatus === 'suspended' && target.role === 'admin') {
+      const activeAdmins = staffUsers.filter((u) => u.role === 'admin' && u.id !== id && u.status === 'active');
+      if (activeAdmins.length === 0) {
+        showToast('error', 'Action Prohibited', 'Cannot suspend the only active Administrator account.');
+        return;
+      }
+    }
+
+    const updated = staffUsers.map((u) => (u.id === id ? { ...u, status: nextStatus, updatedAt: new Date().toISOString() } : u));
+    setStaffUsers(updated);
+    setStoredStaffUsers(updated);
+
+    try {
+      await saveFirestoreDoc('system_users', {
+        id: target.id,
+        status: nextStatus,
+        isApproved: nextStatus === 'active',
+        updatedAt: new Date().toISOString(),
+      });
+    } catch (err) {
+      console.warn('Could not update staff status in Firestore:', err);
+    }
+
+    logAuditEvent({
+      userName: currentAuthUser?.displayName || 'Admin Leonardo Flojo',
+      action: 'STAFF_STATUS_TOGGLED',
+      category: 'auth',
+      severity: nextStatus === 'suspended' ? 'warning' : 'info',
+      details: `Changed account status for "${target.fullName}" to ${nextStatus.toUpperCase()}.`,
+      status: 'success',
+    });
+
+    showToast(
+      nextStatus === 'active' ? 'success' : 'warning',
+      nextStatus === 'active' ? 'Staff Account Activated' : 'Staff Account Suspended',
+      `${target.fullName} is now ${nextStatus}.`
+    );
+  };
+
   // --- Profile & System ---
   const updateBusinessProfile = (updates: Partial<BusinessProfile>) => {
     setBusinessProfile((prev) => ({ ...prev, ...updates }));
@@ -2062,6 +2640,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (jsonData.expenses) setExpenses(jsonData.expenses);
       if (jsonData.auditLogs) setAuditLogs(jsonData.auditLogs);
       if (jsonData.businessProfile) setBusinessProfile(jsonData.businessProfile);
+      if (jsonData.staffUsers) setStaffUsers(jsonData.staffUsers);
 
       logAuditEvent({
         userName: 'Admin Leonardo Flojo',
@@ -2094,8 +2673,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setAuditLogs([]);
     setDailyRemittances([]);
     setPaymentSubmissions([]);
+    setCoverageAreas([]);
     setPlans(initialPlans);
     setBusinessProfile(initialBusinessProfile);
+    setStaffUsers(initialStaffUsers);
+    setStoredStaffUsers(initialStaffUsers);
 
     // Also purge remote Cloud Firestore collections
     try {
@@ -2114,8 +2696,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setCurrentAuthUser,
         isAuthModalOpen,
         authModalMode,
+        authModalEmail,
         openAuthModal,
         closeAuthModal,
+        systemRole,
+        setSystemRole,
+        canAccessTab,
+        hasPermission,
         businessProfile,
         customers,
         invoices,
@@ -2204,6 +2791,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         theme,
         setTheme,
         toggleTheme,
+        staffUsers,
+        addStaffUser,
+        updateStaffUser,
+        deleteStaffUser,
+        toggleStaffUserStatus,
         updateBusinessProfile,
         exportData,
         importData,

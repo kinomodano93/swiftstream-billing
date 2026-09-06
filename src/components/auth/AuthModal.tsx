@@ -43,16 +43,19 @@ interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
   initialMode?: 'signin' | 'signup' | 'forgot';
+  initialEmail?: string;
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({
   isOpen,
   onClose,
   initialMode = 'signin',
+  initialEmail = '',
 }) => {
   const {
     showToast,
     setCurrentAuthUser,
+    setSystemRole,
     setActiveTab,
     plans,
     customers,
@@ -93,11 +96,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setErrorMessage(null);
       setSuccessMessage(null);
       setPendingApplicationNotice(null);
+      if (initialEmail) {
+        setEmail(initialEmail);
+      }
       if (plans.length > 0 && !selectedPlanId) {
         setSelectedPlanId(plans[0].id);
       }
     }
-  }, [isOpen, initialMode, plans]);
+  }, [isOpen, initialMode, initialEmail, plans]);
 
   if (!isOpen) return null;
 
@@ -131,6 +137,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       const profile = await signInWithEmail(email.trim(), password);
       setCurrentAuthUser(profile);
 
+      // Synchronize system role immediately
+      if (profile.role === 'admin' || profile.role === 'cashier' || profile.role === 'technician' || profile.role === 'tech') {
+        const sysRole = profile.role === 'tech' ? 'technician' : profile.role;
+        setSystemRole(sysRole);
+      }
+
       try {
         confetti({ particleCount: 60, spread: 60, origin: { y: 0.6 } });
       } catch {}
@@ -138,6 +150,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       if (profile.role === 'subscriber') {
         setActiveTab('portal');
         showToast('success', 'Subscriber Portal', `Welcome back, ${profile.displayName || profile.email}!`);
+      } else if (profile.role === 'cashier') {
+        setActiveTab('dashboard');
+        showToast('success', 'Cashier Portal', `Welcome, ${profile.displayName || profile.email}! Cashier operations active.`);
+      } else if (profile.role === 'technician' || profile.role === 'tech') {
+        setActiveTab('dashboard');
+        showToast('success', 'Technician Portal', `Welcome, ${profile.displayName || profile.email}! Field operations active.`);
       } else {
         setActiveTab('dashboard');
         showToast('success', 'Admin Console', `Signed in as ${profile.displayName || profile.email} (${profile.role.toUpperCase()}).`);
@@ -265,6 +283,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       const profile = await signInWithGoogle();
       setCurrentAuthUser(profile);
 
+      // Synchronize system role immediately
+      if (profile.role === 'admin' || profile.role === 'cashier' || profile.role === 'technician' || profile.role === 'tech') {
+        const sysRole = profile.role === 'tech' ? 'technician' : profile.role;
+        setSystemRole(sysRole);
+      }
+
       try {
         confetti({ particleCount: 50, spread: 60, origin: { y: 0.6 } });
       } catch {}
@@ -272,6 +296,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       if (profile.role === 'subscriber') {
         setActiveTab('portal');
         showToast('success', 'Subscriber Portal', `Welcome, ${profile.displayName}!`);
+      } else if (profile.role === 'cashier') {
+        setActiveTab('dashboard');
+        showToast('success', 'Cashier Portal', `Welcome, ${profile.displayName}! Cashier operations active.`);
+      } else if (profile.role === 'technician' || profile.role === 'tech') {
+        setActiveTab('dashboard');
+        showToast('success', 'Technician Portal', `Welcome, ${profile.displayName}! Field operations active.`);
       } else {
         setActiveTab('dashboard');
         showToast('success', 'Admin Console', `Signed in as ${profile.displayName} (${profile.role.toUpperCase()}).`);

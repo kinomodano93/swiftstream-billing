@@ -20,14 +20,19 @@ import {
   AlertCircle,
   Shuffle,
   Search,
+  ShieldCheck,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { Customer, CustomerStatus } from '../../types';
 import { LAGONOY_BARANGAYS } from '../network/CoverageAreaManager';
 import {
   fetchPppoeSecrets,
+  fetchPppoeProfilesDetailed,
   provisionPppoeSecret,
+  saveOrUpdatePppoeSecret,
+  MikrotikCredentials,
   PppoeSecretItem,
+  PppoeProfileItem,
 } from '../../services/mikrotikApiService';
 
 interface CustomerFormModalProps {
@@ -42,6 +47,7 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
   const {
     addCustomer,
     updateCustomer,
+    updateMikrotikDevice,
     plans,
     napBoxes,
     businessProfile,
@@ -70,21 +76,25 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
   // MikroTik Linking & PPPoE Assignment
   const defaultRouter = mikrotikDevices.find((d) => d.role === 'core_pppoe') || mikrotikDevices[0];
   const [selectedMikrotikId, setSelectedMikrotikId] = useState<string>(
-    customerToEdit?.network.mikrotikDeviceId || defaultRouter?.id || ''
+    customerToEdit?.network?.mikrotikDeviceId || defaultRouter?.id || ''
   );
   const [pppoeMode, setPppoeMode] = useState<'create' | 'fetch'>('create');
   const [pppoeUsername, setPppoeUsername] = useState(
-    customerToEdit?.network.pppoeUsername || ''
+    customerToEdit?.network?.pppoeUsername || ''
   );
   const [pppoePassword, setPppoePassword] = useState(
-    customerToEdit?.network.pppoePassword || 'swift1234'
+    customerToEdit?.network?.pppoePassword || (isEditing ? '' : 'swift1234')
   );
   const [showPppoePassword, setShowPppoePassword] = useState(false);
   const [pppoeProfile, setPppoeProfile] = useState<string>(
-    customerToEdit?.network.pppoeProfile || `Plan-${defaultPlan?.speedMbps || 25}M`
+    customerToEdit?.network?.pppoeProfile || `Plan-${defaultPlan?.speedMbps || 25}M`
   );
   const [ipAddress, setIpAddress] = useState(
-    customerToEdit?.network.ipAddress || '192.168.10.' + Math.floor(Math.random() * 200 + 10)
+    customerToEdit?.network?.ipAddress || ''
+  );
+  const [dynamicIp, setDynamicIp] = useState<boolean>(
+    // Default to dynamic unless the existing customer has a static IP stored
+    !customerToEdit?.network?.ipAddress
   );
 
   // Router Secrets Discovery State
@@ -96,23 +106,59 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
   const [secretSearchQuery, setSecretSearchQuery] = useState<string>('');
   const [fetchAuth401, setFetchAuth401] = useState<boolean>(false);
   const [showRouterPassword, setShowRouterPassword] = useState<boolean>(false);
+  const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  // PPPoE Profile Discovery State
+  const [fetchedProfiles, setFetchedProfiles] = useState<PppoeProfileItem[]>([]);
+  const [isFetchingProfiles, setIsFetchingProfiles] = useState<boolean>(false);
+
   // Hardware details
   const [selectedNapBoxId, setSelectedNapBoxId] = useState(
-    customerToEdit?.network.napBoxId || napBoxes[0]?.id || ''
+    customerToEdit?.network?.napBoxId || napBoxes[0]?.id || ''
   );
   const [napPortNumber, setNapPortNumber] = useState<number>(
-    customerToEdit?.network.napPortNumber || 1
+    customerToEdit?.network?.napPortNumber || 1
   );
   const [onuSerial, setOnuSerial] = useState(
-    customerToEdit?.network.onuSerial || 'HWTC-' + Math.random().toString(36).substring(2, 10).toUpperCase()
+    customerToEdit?.network?.onuSerial || 'HWTC-' + Math.random().toString(36).substring(2, 10).toUpperCase()
   );
   const [routerModel, setRouterModel] = useState(
-    customerToEdit?.network.routerModel || 'Huawei EG8145V5 Dual Band'
+    customerToEdit?.network?.routerModel || 'Huawei EG8145V5 Dual Band'
   );
 
   const selectedPlan = plans.find((p) => p.id === selectedPlanId) || defaultPlan;
-  const selectedRouter = mikrotikDevices.find((d) => d.id === selectedMikrotikId) || defaultRouter;
+  const selectedRouter =
+    mikrotikDevices.find((d) => d.id === selectedMikrotikId || d.name === selectedMikrotikId) ||
+    defaultRouter;
   const currentNapBox = napBoxes.find((b) => b.id === selectedNapBoxId);
+
+  // Keep all fields in sync when customerToEdit prop updates
+  useEffect(() => {
+    if (customerToEdit) {
+      setFullName(customerToEdit.fullName || '');
+      setMobile(customerToEdit.mobile || '09');
+      setEmail(customerToEdit.email || '');
+      setStreet(customerToEdit.address?.street || '');
+      setBarangay(customerToEdit.address?.barangay || 'San Sebastian');
+      setCity(customerToEdit.address?.city || businessProfile.address?.city || 'Lagonoy');
+      setProvince(customerToEdit.address?.province || businessProfile.address?.province || 'Camarines Sur');
+      setLandmark(customerToEdit.address?.landmark || '');
+      setSelectedPlanId(customerToEdit.planId || defaultPlan?.id || '');
+      setBillingDay(customerToEdit.billingDay || 1);
+      setStatus(customerToEdit.status || 'active');
+      setSelectedMikrotikId(customerToEdit.network?.mikrotikDeviceId || defaultRouter?.id || '');
+      setPppoeUsername(customerToEdit.network?.pppoeUsername || '');
+      setPppoeProfile(customerToEdit.network?.pppoeProfile || `Plan-${defaultPlan?.speedMbps || 25}M`);
+      setIpAddress(customerToEdit.network?.ipAddress || '');
+      setDynamicIp(!customerToEdit.network?.ipAddress);
+      setSelectedNapBoxId(customerToEdit.network?.napBoxId || napBoxes[0]?.id || '');
+      setNapPortNumber(customerToEdit.network?.napPortNumber || 1);
+      setOnuSerial(customerToEdit.network?.onuSerial || '');
+      setRouterModel(customerToEdit.network?.routerModel || 'Huawei EG8145V5 Dual Band');
+      setSubmitError(null);
+    }
+  }, [customerToEdit]);
 
   // Filtered secrets based on user search query
   const filteredSecrets = fetchedSecrets.filter((s) => {
@@ -158,20 +204,26 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
     }
     setIsFetchingSecrets(true);
     setFetchAuth401(false);
+    setSubmitError(null);
     const passToUse = overridePass !== undefined ? overridePass : (routerPasswordOverride || selectedRouter.password || '');
     try {
       const secrets = await fetchPppoeSecrets({
-        ipAddress: selectedRouter.ipAddress || selectedRouter.remoteAddress || '',
+        id: selectedRouter.id,
+        name: selectedRouter.name,
+        ipAddress: selectedRouter.remoteAddress || selectedRouter.ipAddress || 'remote.oxapsph.com',
         username: selectedRouter.username || 'admin',
         password: passToUse,
-        port: selectedRouter.port || selectedRouter.webfigPort || 10988,
+        port: selectedRouter.port || selectedRouter.webfigPort || selectedRouter.apiPort || 10988,
         useHttps: selectedRouter.useSsl,
       });
       setFetchedSecrets(secrets);
       if (secrets.length > 0) {
-        showToast('success', 'Secrets Discovered', `Discovered ${secrets.length} PPPoE secrets on ${selectedRouter.name} (${selectedRouter.ipAddress}).`);
+        showToast('success', 'Secrets Discovered', `Discovered ${secrets.length} PPPoE secrets on ${selectedRouter.name}.`);
       } else {
         showToast('info', 'No Secrets Found', `No PPPoE secrets found on ${selectedRouter.name}.`);
+      }
+      if (passToUse && passToUse !== selectedRouter.password) {
+        updateMikrotikDevice(selectedRouter.id, { password: passToUse });
       }
     } catch (err: any) {
       const msg: string = err?.message || '';
@@ -182,6 +234,51 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
       }
     } finally {
       setIsFetchingSecrets(false);
+    }
+  };
+
+  // Fetch PPPoE profiles from the linked MikroTik router
+  const handleFetchProfiles = async () => {
+    if (!selectedRouter) {
+      showToast('warning', 'No Router Selected', 'Please select a target MikroTik router first.');
+      return;
+    }
+    setIsFetchingProfiles(true);
+    const passToUse = routerPasswordOverride || selectedRouter.password || '';
+    try {
+      const result = await fetchPppoeProfilesDetailed({
+        id: selectedRouter.id,
+        name: selectedRouter.name,
+        ipAddress: selectedRouter.remoteAddress || selectedRouter.ipAddress || 'remote.oxapsph.com',
+        username: selectedRouter.username || 'admin',
+        password: passToUse,
+        port: selectedRouter.port || selectedRouter.webfigPort || selectedRouter.apiPort || 10988,
+        useHttps: selectedRouter.useSsl,
+      });
+      if (result.success && result.data.length > 0) {
+        setFetchedProfiles(result.data);
+        // Auto-select a profile that matches the current plan speed
+        const speedMbps = selectedPlan?.speedMbps;
+        const matched = result.data.find(
+          (p) =>
+            p.name.toLowerCase().includes(`${speedMbps}m`) ||
+            p.name.toLowerCase() === `plan-${speedMbps}m` ||
+            p.rateLimit?.toLowerCase().includes(`${speedMbps}m`) ||
+            p.rateLimitRx?.toLowerCase().includes(`${speedMbps}m`)
+        );
+        if (matched) {
+          setPppoeProfile(matched.name);
+          showToast('success', 'Profile Matched', `Auto-selected profile "${matched.name}" for Plan-${speedMbps}M.`);
+        } else {
+          showToast('success', 'Profiles Loaded', `${result.data.length} profiles fetched from ${selectedRouter.name}. Please select one.`);
+        }
+      } else {
+        showToast('warning', 'No Profiles Found', result.error || 'No PPPoE profiles returned from router.');
+      }
+    } catch (err: any) {
+      showToast('error', 'Profile Fetch Failed', err?.message || 'Failed to query PPPoE profiles from router.');
+    } finally {
+      setIsFetchingProfiles(false);
     }
   };
 
@@ -227,7 +324,7 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
     showToast('info', 'Secret Linked', `Loaded secret "${secret.name}" (${secret.profile || 'default'}) - ${secret.remoteAddress || 'Auto IP'}.`);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent, bypassSync = false) => {
     e.preventDefault();
 
     if (!fullName.trim() || !mobile.trim()) {
@@ -235,110 +332,162 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
       return;
     }
 
+    setSubmitError(null);
+    setIsSaving(true);
+
     const finalPppoeUser =
       pppoeUsername.trim() ||
       `swift_${fullName.toLowerCase().replace(/[^a-z0-9]/g, '_').slice(0, 16)}`;
 
-    const networkData = {
+    const networkData: any = {
       pppoeUsername: finalPppoeUser,
-      pppoePassword: pppoePassword || 'swift1234',
       pppoeProfile: pppoeProfile || `Plan-${selectedPlan.speedMbps}M`,
-      mikrotikDeviceId: selectedMikrotikId,
-      ipAddress,
+      mikrotikDeviceId: selectedRouter?.id || selectedMikrotikId,
+      ipAddress: dynamicIp ? '' : ipAddress,
       napBoxId: selectedNapBoxId,
       napPortNumber,
       onuSerial,
       routerModel,
       vlanId: '100',
       oltPonPort: 'PON-1/1',
-      isMikrotikSynced: autoSyncMikrotik,
+      isMikrotikSynced: autoSyncMikrotik && !bypassSync,
     };
 
-    if (isEditing && customerToEdit) {
-      updateCustomer(customerToEdit.id, {
-        fullName,
-        mobile,
-        email,
-        address: {
-          street,
-          barangay,
-          city,
-          province,
-          landmark,
-        },
-        planId: selectedPlan.id,
-        planName: selectedPlan.name,
-        monthlyFee: selectedPlan.monthlyFee,
-        billingDay,
-        status,
-        network: {
-          ...customerToEdit.network,
-          ...networkData,
-        },
-      });
+    if (pppoePassword && pppoePassword.trim() && pppoePassword !== '••••••••') {
+      networkData.pppoePassword = pppoePassword.trim();
+    } else if (!isEditing) {
+      networkData.pppoePassword = 'swift1234';
+    }
 
-      if (autoSyncMikrotik && selectedRouter) {
-        provisionPppoeSecret(
-          {
-            ipAddress: selectedRouter.ipAddress,
-            username: selectedRouter.username || 'admin',
-            password: selectedRouter.password || '',
-            port: selectedRouter.port || 80,
-            useHttps: selectedRouter.useSsl,
-          },
-          {
-            ...customerToEdit,
-            fullName,
-            accountNo: customerToEdit.accountNo,
-            network: { ...customerToEdit.network, ...networkData },
-          } as Customer,
-          selectedPlan
-        );
-        showToast('success', 'Router Synced', `Subscriber "${finalPppoeUser}" provisioned to ${selectedRouter.name}.`);
+    const targetHost = selectedRouter?.remoteAddress || selectedRouter?.ipAddress || 'remote.oxapsph.com';
+    const targetPort = selectedRouter?.port || selectedRouter?.webfigPort || selectedRouter?.apiPort || 10988;
+    const routerPass = routerPasswordOverride || selectedRouter?.password || '';
+
+    // If an updated router admin password was entered, persist it to device config
+    if (selectedRouter && routerPasswordOverride && routerPasswordOverride !== selectedRouter.password) {
+      updateMikrotikDevice(selectedRouter.id, { password: routerPasswordOverride });
+    }
+
+    // Step 1: Save/Update PPPoE Secret directly on the linked MikroTik device
+    if (autoSyncMikrotik && selectedRouter && !bypassSync) {
+      try {
+        const routerCreds: MikrotikCredentials = {
+          id: selectedRouter.id,
+          name: selectedRouter.name,
+          ipAddress: targetHost,
+          port: targetPort,
+          username: selectedRouter.username || 'admin',
+          password: routerPass,
+          useHttps: selectedRouter.useSsl,
+        };
+
+        const syncRes = await saveOrUpdatePppoeSecret(routerCreds, {
+          name: finalPppoeUser,
+          password: networkData.pppoePassword, // only updates password on router if non-empty
+          service: 'pppoe',
+          profile: networkData.pppoeProfile,
+          remoteAddress: dynamicIp ? undefined : ipAddress, // omit → router assigns from pool
+          comment: `${fullName.trim()} - ${isEditing && customerToEdit ? customerToEdit.accountNo : 'NEW'}`,
+          disabled: status === 'suspended' || status === 'disconnected',
+          speedMbps: selectedPlan.speedMbps,
+          accountNo: isEditing && customerToEdit ? customerToEdit.accountNo : undefined,
+        });
+
+        if (!syncRes.success) {
+          setIsSaving(false);
+          setSubmitError(syncRes.message);
+          if (syncRes.message.includes('401') || syncRes.message.toLowerCase().includes('unauthorized')) {
+            setFetchAuth401(true);
+          }
+          showToast('error', 'MikroTik Save Failed', syncRes.message);
+          return; // STOP! Keep modal open so administrator can correct credentials
+        }
+
+        networkData.isMikrotikSynced = true;
+      } catch (syncErr: any) {
+        setIsSaving(false);
+        const errMsg = syncErr?.message || 'Failed to communicate with MikroTik router.';
+        setSubmitError(errMsg);
+        showToast('error', 'MikroTik Error', errMsg);
+        return;
       }
+    }
+
+    // Step 2: Persist Customer profile (Firestore excludes pppoePassword automatically)
+    if (isEditing && customerToEdit) {
+      updateCustomer(
+        customerToEdit.id,
+        {
+          fullName,
+          mobile,
+          email,
+          address: {
+            street,
+            barangay,
+            city,
+            province,
+            landmark,
+          },
+          planId: selectedPlan.id,
+          planName: selectedPlan.name,
+          monthlyFee: selectedPlan.monthlyFee,
+          billingDay,
+          status,
+          network: {
+            ...customerToEdit.network,
+            ...networkData,
+          },
+        },
+        { skipMikrotikSync: true }
+      );
+
+      showToast(
+        'success',
+        'Subscriber Updated',
+        selectedRouter && !bypassSync
+          ? `PPPoE secret "${finalPppoeUser}" saved directly into ${selectedRouter.name} hardware.`
+          : `Subscriber ${fullName} updated successfully.`
+      );
     } else {
       const year = new Date().getFullYear();
       const accountNo = `SWIFT-${year}-${String(Math.floor(Math.random() * 900) + 100)}`;
 
-      const newCust = addCustomer({
-        accountNo,
-        fullName,
-        mobile,
-        email,
-        address: {
-          street,
-          barangay,
-          city,
-          province,
-          landmark,
-        },
-        planId: selectedPlan.id,
-        planName: selectedPlan.name,
-        monthlyFee: selectedPlan.monthlyFee,
-        billingDay,
-        status: 'active',
-        installationDate: new Date().toISOString().slice(0, 10),
-        balance: 0,
-        advanceDeposit: 0,
-        network: networkData,
-      });
-
-      if (autoSyncMikrotik && selectedRouter) {
-        provisionPppoeSecret(
-          {
-            ipAddress: selectedRouter.ipAddress,
-            username: selectedRouter.username || 'admin',
-            password: selectedRouter.password || '',
-            port: selectedRouter.port || 80,
-            useHttps: selectedRouter.useSsl,
+      addCustomer(
+        {
+          accountNo,
+          fullName,
+          mobile,
+          email,
+          address: {
+            street,
+            barangay,
+            city,
+            province,
+            landmark,
           },
-          newCust,
-          selectedPlan
-        );
-        showToast('success', 'Router Synced', `New PPPoE secret "${finalPppoeUser}" provisioned to ${selectedRouter.name}.`);
-      }
+          planId: selectedPlan.id,
+          planName: selectedPlan.name,
+          monthlyFee: selectedPlan.monthlyFee,
+          billingDay,
+          status: 'active',
+          installationDate: new Date().toISOString().slice(0, 10),
+          balance: 0,
+          advanceDeposit: 0,
+          network: networkData,
+        },
+        { skipMikrotikSync: true }
+      );
+
+      showToast(
+        'success',
+        'Subscriber Registered',
+        selectedRouter && !bypassSync
+          ? `New PPPoE secret "${finalPppoeUser}" provisioned directly into ${selectedRouter.name} hardware.`
+          : `Subscriber ${fullName} registered successfully.`
+      );
     }
 
+    setIsSaving(false);
     onClose();
   };
 
@@ -575,17 +724,17 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
               </div>
             </div>
 
-            {/* Target MikroTik Device Selection */}
+            {/* Target MikroTik Device Selection & Hardware Auth */}
             <div className="p-3.5 rounded-2xl bg-slate-950/70 border border-slate-800 space-y-3">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <label className="block text-slate-300 font-semibold text-xs flex items-center gap-1.5">
                   <Network className="w-3.5 h-3.5 text-purple-400" />
-                  <span>Target MikroTik BNG Router *</span>
+                  <span>Linked MikroTik BNG Router *</span>
                 </label>
                 {selectedRouter && (
                   <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-mono bg-emerald-950/70 text-emerald-300 border border-emerald-800/50">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                    Online ({selectedRouter.ipAddress})
+                    Target: {selectedRouter.remoteAddress || selectedRouter.ipAddress || 'remote.oxapsph.com'}:{selectedRouter.port || selectedRouter.webfigPort || selectedRouter.apiPort || 10988}
                   </span>
                 )}
               </div>
@@ -596,6 +745,7 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
                   setSelectedMikrotikId(e.target.value);
                   setFetchedSecrets([]);
                   setSelectedSecretName('');
+                  setSubmitError(null);
                 }}
                 className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 font-medium focus:outline-none focus:border-cyan-500"
               >
@@ -604,20 +754,124 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
                 ) : (
                   mikrotikDevices.map((dev) => (
                     <option key={dev.id} value={dev.id}>
-                      {dev.name} — {dev.model} ({dev.ipAddress}) [{dev.role.replace('_', ' ').toUpperCase()}]
+                      {dev.name} — {dev.model} ({dev.remoteAddress || dev.ipAddress}:{dev.port || dev.webfigPort || 10988}) [{dev.role.replace('_', ' ').toUpperCase()}]
                     </option>
                   ))
                 )}
               </select>
+
+              {/* Router Authentication Status / Input */}
+              {selectedRouter && (
+                <div className="pt-2 border-t border-slate-800/80 space-y-2">
+                  {(selectedRouter.password || routerPasswordOverride) && !showRouterPassword && !fetchAuth401 ? (
+                    <div className="flex items-center justify-between text-[11px] px-3 py-2 rounded-xl bg-slate-900/80 border border-slate-800">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                        <span className="text-slate-300 font-medium">RouterOS Admin Auth:</span>
+                        <span className="text-emerald-400 font-mono">Password Stored</span>
+                        <span className="text-slate-500 font-mono text-[10px]">({selectedRouter.username || 'admin'})</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowRouterPassword(true)}
+                        className="text-cyan-400 hover:text-cyan-300 text-[11px] underline underline-offset-2 cursor-pointer"
+                      >
+                        Change Password
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="p-3 rounded-xl bg-amber-950/40 border border-amber-600/50 space-y-2">
+                      <div className="flex items-center justify-between text-xs text-amber-300 font-medium">
+                        <span className="flex items-center gap-1.5">
+                          <Key className="w-3.5 h-3.5 text-amber-400" />
+                          RouterOS Admin Password
+                        </span>
+                        <span className="text-[10px] text-amber-400/80 font-mono">user: {selectedRouter.username || 'admin'}</span>
+                      </div>
+                      <div className="flex gap-2">
+                        <div className="relative flex-1">
+                          <input
+                            type={showRouterPassword ? 'text' : 'password'}
+                            value={routerPasswordOverride || selectedRouter.password || ''}
+                            onChange={(e) => {
+                              setRouterPasswordOverride(e.target.value);
+                              setFetchAuth401(false);
+                            }}
+                            placeholder="Enter router admin password..."
+                            className="w-full pl-3 pr-8 py-1.5 bg-slate-950 border border-amber-700/60 rounded-lg text-slate-200 font-mono text-xs focus:outline-none focus:border-amber-400"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowRouterPassword(!showRouterPassword)}
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200"
+                          >
+                            {showRouterPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                          </button>
+                        </div>
+                        {(selectedRouter.password || routerPasswordOverride) && (
+                          <button
+                            type="button"
+                            onClick={() => setShowRouterPassword(false)}
+                            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-lg font-medium"
+                          >
+                            Done
+                          </button>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-slate-400">
+                        Required to authorize RouterOS REST API to save PPPoE secrets into this router hardware.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Submit / Sync Error Banner */}
+              {submitError && (
+                <div className="p-3.5 rounded-2xl bg-rose-950/70 border border-rose-600/80 space-y-2.5 animate-in fade-in">
+                  <div className="flex items-start gap-2.5">
+                    <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-rose-300 font-bold text-xs">MikroTik Router Provisioning Failed</p>
+                      <p className="text-rose-400/90 text-[11px] mt-0.5 leading-relaxed font-mono">{submitError}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 pt-1 border-t border-rose-900/50">
+                    <button
+                      type="button"
+                      onClick={(e) => handleSubmit(e, true)}
+                      className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-[11px] font-semibold transition-colors shadow-sm cursor-pointer"
+                    >
+                      Bypass MikroTik Sync (Save to Database Only)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSubmitError(null)}
+                      className="px-3 py-1 text-slate-400 hover:text-slate-200 text-[11px] cursor-pointer"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Mode 1: Create New PPPoE Secret */}
             {pppoeMode === 'create' ? (
               <div className="p-4 rounded-2xl bg-slate-950/60 border border-cyan-900/30 space-y-4">
+                {/* Hardware Vault Security Notice */}
+                <div className="flex items-start gap-2.5 p-3 rounded-xl bg-cyan-950/30 border border-cyan-800/40 text-cyan-300 text-[11px] leading-relaxed">
+                  <ShieldCheck className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold text-cyan-200">MikroTik Hardware Vault: </span>
+                    <span>PPPoE secrets are saved directly into your router device via RouterOS REST API. Passwords are <strong className="text-white">strictly excluded</strong> from Firebase Cloud storage for security.</span>
+                  </div>
+                </div>
+
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-bold text-cyan-300 flex items-center gap-1.5">
                     <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-                    Configure New PPPoE Secret & Bandwidth Profile
+                    {isEditing ? 'Update PPPoE Secret & Bandwidth Profile' : 'Configure New PPPoE Secret & Bandwidth Profile'}
                   </span>
                   <button
                     type="button"
@@ -643,14 +897,16 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-slate-400 mb-1 font-medium">PPPoE Password *</label>
+                    <label className="block text-slate-400 mb-1 font-medium">
+                      PPPoE Password {isEditing ? '(Optional)' : '*'}
+                    </label>
                     <div className="relative">
                       <input
                         type={showPppoePassword ? 'text' : 'password'}
-                        required
+                        required={!isEditing}
                         value={pppoePassword}
                         onChange={(e) => setPppoePassword(e.target.value)}
-                        placeholder="••••••••"
+                        placeholder={isEditing ? '•••••••• (Preserve router secret)' : 'Enter password'}
                         className="w-full px-3 py-2 pr-10 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 font-mono focus:outline-none focus:border-cyan-500"
                       />
                       <button
@@ -661,29 +917,86 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
                         {showPppoePassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>
                     </div>
+                    {isEditing && (
+                      <p className="text-[10px] text-slate-500 mt-1">
+                        Stored on router device. Type a new password to update MikroTik, or leave blank to keep unchanged.
+                      </p>
+                    )}
                   </div>
 
                   <div>
-                    <label className="block text-slate-400 mb-1 font-medium">PPPoE Profile Rate-Limit</label>
-                    <input
-                      type="text"
-                      value={pppoeProfile}
-                      onChange={(e) => setPppoeProfile(e.target.value)}
-                      placeholder="Plan-25M / default"
-                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 font-mono focus:outline-none focus:border-cyan-500"
-                    />
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-slate-400 font-medium">PPPoE Profile Rate-Limit</label>
+                      <button
+                        type="button"
+                        onClick={handleFetchProfiles}
+                        disabled={isFetchingProfiles || !selectedRouter}
+                        className="flex items-center gap-1 text-[10px] text-cyan-400 hover:text-cyan-300 disabled:opacity-50 disabled:cursor-not-allowed font-semibold cursor-pointer"
+                      >
+                        <RefreshCw className={`w-3 h-3 ${isFetchingProfiles ? 'animate-spin' : ''}`} />
+                        <span>{isFetchingProfiles ? 'Fetching…' : 'Fetch from Router'}</span>
+                      </button>
+                    </div>
+                    {fetchedProfiles.length > 0 ? (
+                      <select
+                        value={pppoeProfile}
+                        onChange={(e) => setPppoeProfile(e.target.value)}
+                        className="w-full px-3 py-2 bg-slate-900 border border-cyan-800/60 rounded-xl text-slate-100 font-mono focus:outline-none focus:border-cyan-500"
+                      >
+                        {fetchedProfiles.map((p) => (
+                          <option key={p.id} value={p.name}>
+                            {p.name}{p.rateLimit ? ` — ${p.rateLimit}` : p.rateLimitRx ? ` — ↓${p.rateLimitRx}` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        value={pppoeProfile}
+                        onChange={(e) => setPppoeProfile(e.target.value)}
+                        placeholder="Click 'Fetch from Router' or type manually"
+                        className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 font-mono focus:outline-none focus:border-cyan-500"
+                      />
+                    )}
+                    {fetchedProfiles.length > 0 && (
+                      <p className="text-[10px] text-cyan-600 mt-1">{fetchedProfiles.length} profiles loaded from {selectedRouter?.name}.</p>
+                    )}
                   </div>
 
                   <div>
-                    <label className="block text-slate-400 mb-1 font-medium">Remote / Framed IP Address *</label>
-                    <input
-                      type="text"
-                      required
-                      value={ipAddress}
-                      onChange={(e) => setIpAddress(e.target.value)}
-                      placeholder="192.168.10.25"
-                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 font-mono focus:outline-none focus:border-cyan-500"
-                    />
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-slate-400 font-medium">Remote / Framed IP Address</label>
+                      <div className="flex items-center gap-1 bg-slate-900 rounded-lg p-0.5 border border-slate-700">
+                        <button
+                          type="button"
+                          onClick={() => { setDynamicIp(true); setIpAddress(''); }}
+                          className={`px-2.5 py-1 rounded-md text-[10px] font-semibold transition-all cursor-pointer ${dynamicIp ? 'bg-cyan-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+                        >
+                          Dynamic
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDynamicIp(false)}
+                          className={`px-2.5 py-1 rounded-md text-[10px] font-semibold transition-all cursor-pointer ${!dynamicIp ? 'bg-slate-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+                        >
+                          Static
+                        </button>
+                      </div>
+                    </div>
+                    {dynamicIp ? (
+                      <div className="flex items-center gap-2 px-3 py-2 bg-slate-900/60 border border-slate-800 rounded-xl text-slate-400 text-[11px] font-mono">
+                        <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse shrink-0" />
+                        <span>Assigned dynamically by router IP pool (no static address)</span>
+                      </div>
+                    ) : (
+                      <input
+                        type="text"
+                        value={ipAddress}
+                        onChange={(e) => setIpAddress(e.target.value)}
+                        placeholder="192.168.10.25"
+                        className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 font-mono focus:outline-none focus:border-cyan-500"
+                      />
+                    )}
                   </div>
                 </div>
               </div>
@@ -1017,10 +1330,20 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
             </button>
             <button
               type="submit"
-              className="flex items-center gap-2 px-5 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl font-semibold shadow-lg shadow-cyan-600/20 transition-all hover:scale-105"
+              disabled={isSaving}
+              className="flex items-center gap-2 px-5 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl font-semibold shadow-lg shadow-cyan-600/20 transition-all hover:scale-105 disabled:opacity-50 disabled:hover:scale-100 cursor-pointer"
             >
-              <Check className="w-4 h-4" />
-              <span>{isEditing ? 'Save Changes' : 'Register Subscriber'}</span>
+              {isSaving ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <span>Saving to MikroTik...</span>
+                </>
+              ) : (
+                <>
+                  <Check className="w-4 h-4" />
+                  <span>{isEditing ? 'Save Changes' : 'Register Subscriber'}</span>
+                </>
+              )}
             </button>
           </div>
         </form>

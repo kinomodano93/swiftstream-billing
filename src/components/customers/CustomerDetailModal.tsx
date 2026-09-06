@@ -419,6 +419,15 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
                               </span>
                             </td>
                             <td className="py-3 px-4 text-right space-x-1.5">
+                              {inv.balanceDue > 0 && (
+                                <button
+                                  onClick={() => onOpenPaymentModal(customer.id, inv.id)}
+                                  className="px-2 py-1 bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600 hover:text-white rounded-lg text-[11px] font-semibold transition-colors"
+                                  title="Collect Payment for this Invoice"
+                                >
+                                  Collect
+                                </button>
+                              )}
                               <button
                                 onClick={() => onSelectInvoice(inv.id)}
                                 className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-[11px] transition-colors"

@@ -26,8 +26,10 @@ import {
   ShieldCheck,
   Router,
   Cable,
+  CheckCircle2,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { SYSTEM_ROLES_CONFIG } from '../../types';
 
 export const Sidebar: React.FC = () => {
   const {
@@ -41,6 +43,10 @@ export const Sidebar: React.FC = () => {
     isMobileMenuOpen,
     setIsMobileMenuOpen,
     coverageAreas,
+    paymentSubmissions,
+    systemRole,
+    canAccessTab,
+    staffUsers,
   } = useApp();
 
   const [isCollapsed, setIsCollapsed] = useState<boolean>(() => {
@@ -67,6 +73,7 @@ export const Sidebar: React.FC = () => {
   const openRepairsCount = repairOrders.filter((r) => r.status !== 'completed' && r.status !== 'cancelled').length;
   const pendingInstallsCount = customers.filter((c) => c.status === 'pending_install').length;
   const fiberReadyCount = coverageAreas.filter((a) => a.status === 'fiber_ready').length;
+  const pendingProofsCount = paymentSubmissions.filter((s) => s.status === 'pending_review').length;
 
   interface NavItem {
     id: string;
@@ -141,6 +148,13 @@ export const Sidebar: React.FC = () => {
           badge: null,
         },
         {
+          id: 'verification_queue',
+          label: 'Payment Verifications',
+          icon: CheckCircle2,
+          badge: pendingProofsCount > 0 ? `${pendingProofsCount} pending` : null,
+          badgeColor: 'bg-amber-500/20 text-amber-300 font-bold font-mono animate-pulse',
+        },
+        {
           id: 'plans',
           label: 'Plans & Packages',
           icon: Layers,
@@ -211,6 +225,13 @@ export const Sidebar: React.FC = () => {
           badge: null,
         },
         {
+          id: 'staff_users',
+          label: 'Staff & Roles',
+          icon: Users,
+          badge: `${staffUsers.length}`,
+          badgeColor: 'bg-purple-500/20 text-purple-300 font-bold font-mono',
+        },
+        {
           id: 'settings',
           label: 'Business Settings',
           icon: Settings,
@@ -219,6 +240,15 @@ export const Sidebar: React.FC = () => {
       ],
     },
   ];
+
+  const roleMeta = SYSTEM_ROLES_CONFIG[systemRole] || SYSTEM_ROLES_CONFIG.admin;
+
+  const filteredNavGroups = navGroups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => canAccessTab(item.id)),
+    }))
+    .filter((group) => group.items.length > 0);
 
   const handleNavClick = (tabId: string) => {
     setActiveTab(tabId);
@@ -288,16 +318,16 @@ export const Sidebar: React.FC = () => {
           </button>
         </div>
 
-        {/* Location & Status Tag (Only when expanded) */}
+        {/* Location & Active Role Tag (Only when expanded) */}
         {!isCollapsed && (
           <div className="px-4 pt-3 pb-1 animate-in fade-in duration-200">
             <div className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-slate-950/60 border border-slate-800/80 text-[11px] text-slate-400">
               <span className="flex items-center gap-1.5 truncate">
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                <span className="truncate">{businessProfile.address.city}, {businessProfile.address.province}</span>
+                <span className="truncate">{businessProfile.address.city || 'Lagonoy'}, {businessProfile.address.province || 'Cam Sur'}</span>
               </span>
-              <span className="text-[10px] font-mono bg-cyan-950/80 text-cyan-300 px-1.5 py-0.5 rounded border border-cyan-800/50">
-                ISP ERP
+              <span className={`text-[10px] font-mono px-2 py-0.5 rounded border uppercase font-bold ${roleMeta.badgeBg} ${roleMeta.badgeBorder} ${roleMeta.textColor}`}>
+                {roleMeta.badge}
               </span>
             </div>
           </div>
@@ -305,7 +335,7 @@ export const Sidebar: React.FC = () => {
 
         {/* Navigation Links Grouped by Functional Categories */}
         <nav className="flex-1 overflow-y-auto p-3 space-y-3 scrollbar-thin scrollbar-thumb-slate-800">
-          {navGroups.map((group, groupIdx) => (
+          {filteredNavGroups.map((group, groupIdx) => (
             <div key={group.id} className="space-y-1">
               {!isCollapsed ? (
                 <div className="px-3 pt-1.5 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400/80 flex items-center justify-between select-none">

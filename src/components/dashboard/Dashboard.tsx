@@ -12,6 +12,7 @@ import {
   PhoneCall,
   ArrowRight,
   ShieldAlert,
+  FileText,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { StatCard } from './StatCard';
@@ -41,6 +42,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     napBoxes,
     repairOrders,
     setActiveTab,
+    setSearchTerm,
     sendReminder,
     toggleCustomerStatus,
   } = useApp();
@@ -115,8 +117,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
           value={formatCurrency(mrr)}
           subtitle={`${activeSubscribers.length} Active Paying Lines`}
           icon={TrendingUp}
-          trend="+14.2% MoM"
-          trendPositive={true}
+          trend={customers.length > 0 ? `${((activeSubscribers.length / customers.length) * 100).toFixed(0)}% Active` : '0 Lines'}
+          trendPositive={activeSubscribers.length > 0}
           colorScheme="cyan"
           onClick={() => setActiveTab('plans')}
         />
@@ -126,8 +128,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
           value={formatCurrency(totalCollectedThisMonth)}
           subtitle={`${payments.length} Transactions Recorded`}
           icon={CreditCard}
-          trend="88.5% On-Time"
-          trendPositive={true}
+          trend={
+            totalReceivables + totalCollectedThisMonth > 0
+              ? `${((totalCollectedThisMonth / (totalCollectedThisMonth + totalReceivables)) * 100).toFixed(0)}% Inflow`
+              : `${payments.length} Payments`
+          }
+          trendPositive={totalCollectedThisMonth > 0}
           colorScheme="emerald"
           onClick={() => setActiveTab('payments')}
         />
@@ -228,11 +234,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
                         </td>
                         <td className="py-3 text-right space-x-1.5">
                           <button
-                            onClick={() => onOpenPaymentModal(cust.id)}
-                            className="px-2 py-1 bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600 hover:text-white rounded-lg text-[11px] font-semibold transition-colors"
-                            title="Collect Payment"
+                            onClick={() => {
+                              setSearchTerm(cust.accountNo);
+                              setActiveTab('billing');
+                            }}
+                            className="inline-flex items-center gap-1 px-2 py-1 bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600 hover:text-white rounded-lg text-[11px] font-semibold transition-colors"
+                            title="View Invoices & Settle in Billing"
                           >
-                            Pay
+                            <FileText className="w-3 h-3" />
+                            <span>View Bill</span>
                           </button>
                           <button
                             onClick={() => sendReminder(cust.id, 'overdue_warning', 'sms')}

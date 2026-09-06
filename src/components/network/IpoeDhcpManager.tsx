@@ -37,81 +37,14 @@ export const IpoeDhcpManager: React.FC = () => {
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  // Mock DHCP Leases / IPoE MAC Bindings
-  const [leases, setLeases] = useState<DhcpLease[]>([
-    {
-      id: 'dhcp-1',
-      address: '10.200.20.50',
-      macAddress: 'BC:24:11:88:42:19',
-      server: 'DHCP-IPOE-BRGY-SANVICENTE',
-      clientHostname: 'TP-Link_Archer_AX23',
-      activeAddress: '10.200.20.50',
-      activeMacAddress: 'BC:24:11:88:42:19',
-      activeClientHostname: 'TP-Link_Archer_AX23',
-      status: 'static',
-      dynamic: false,
-      disabled: false,
-      expiresAfter: 'Never (Static)',
-      lastSeen: '1m ago',
-      comment: 'IPoE Plan 50M - Eduardo Dela Cruz',
-      rateLimit: '50M/50M',
-      circuitId: 'OLT01-PON02-ONT04',
-      remoteId: 'SAN-VICENTE-ZONE1',
-      customerName: 'Eduardo Dela Cruz',
-    },
-    {
-      id: 'dhcp-2',
-      address: '10.200.20.51',
-      macAddress: '48:8F:5A:22:99:AA',
-      server: 'DHCP-IPOE-BRGY-SANVICENTE',
-      clientHostname: 'Huawei_ONT_Router',
-      activeAddress: '10.200.20.51',
-      activeMacAddress: '48:8F:5A:22:99:AA',
-      activeClientHostname: 'Huawei_ONT_Router',
-      status: 'bound',
-      dynamic: true,
-      disabled: false,
-      expiresAfter: '23h 42m',
-      lastSeen: '30s ago',
-      comment: 'Dynamic Lease - Option 82 Verified',
-      circuitId: 'OLT01-PON02-ONT07',
-      remoteId: 'SAN-VICENTE-ZONE1',
-      customerName: 'Maria Theresa Santos',
-    },
-    {
-      id: 'dhcp-3',
-      address: '10.200.20.199',
-      macAddress: 'D8:07:B6:33:11:F2',
-      server: 'DHCP-IPOE-BRGY-SANVICENTE',
-      clientHostname: 'Unknown-Android-Device',
-      activeAddress: '10.200.20.199',
-      activeMacAddress: 'D8:07:B6:33:11:F2',
-      status: 'quarantined',
-      dynamic: false,
-      disabled: true,
-      expiresAfter: 'Blocked',
-      lastSeen: '4h ago',
-      comment: 'QUARANTINE: Rogue DHCP client / Unauthorized MAC bypass attempt',
-      circuitId: 'OLT01-PON01-ONT12',
-    },
-    {
-      id: 'dhcp-4',
-      address: '10.200.30.12',
-      macAddress: '70:A7:41:BB:CC:DD',
-      server: 'DHCP-IPOE-BRGY-POBLACION',
-      clientHostname: 'Mercusys_Halo_Mesh',
-      activeAddress: '10.200.30.12',
-      activeMacAddress: '70:A7:41:BB:CC:DD',
-      status: 'bound',
-      dynamic: true,
-      disabled: false,
-      expiresAfter: '18h 10m',
-      lastSeen: '2m ago',
-      comment: 'Dynamic IPoE Lease',
-      circuitId: 'OLT02-PON01-ONT02',
-      remoteId: 'CABUYAO-POBLACION',
-    },
-  ]);
+  // Clean DHCP Leases / IPoE MAC Bindings
+  const [leases, setLeases] = useState<DhcpLease[]>(() => {
+    try {
+      const saved = localStorage.getItem('swiftstream_ipoe_leases_v4');
+      if (saved) return JSON.parse(saved);
+    } catch (_) {}
+    return [];
+  });
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [newIp, setNewIp] = useState('');

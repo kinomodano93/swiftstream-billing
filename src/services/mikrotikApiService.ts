@@ -53,8 +53,8 @@ const getAuthHeaders = (user: string, pass: string = '') => {
  */
 const getBaseUrl = (creds: MikrotikCredentials): string => {
   const protocol = creds.useHttps ? 'https' : 'http';
-  const port = creds.port || (creds.useHttps ? 443 : 80);
-  const ip = creds.ipAddress.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  const port = creds.port || (creds.useHttps ? 443 : 10988);
+  const ip = (creds.ipAddress || 'remote.oxapsph.com').replace(/^https?:\/\//, '').replace(/\/.*$/, '');
   return `${protocol}://${ip}:${port}/rest`;
 };
 
@@ -97,8 +97,8 @@ export const testRouterConnection = async (
   creds: MikrotikCredentials
 ): Promise<RouterHealthInfo> => {
   const startTime = performance.now();
-  const cleanHost = creds.ipAddress.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
-  const port = creds.port || (creds.useHttps ? 443 : 80);
+  const cleanHost = (creds.ipAddress || 'remote.oxapsph.com').replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  const port = creds.port || (creds.useHttps ? 443 : 10988);
 
   // 1. Try Firebase Cloud Function backend endpoint first (Zero CORS / Mixed Content)
   const cloudEndpoints = [
@@ -304,8 +304,267 @@ export const testRouterConnection = async (
   }
 };
 
+export interface SavePppoeSecretParams {
+  name: string;
+  password?: string;
+  service?: string;
+  profile?: string;
+  remoteAddress?: string;
+  localAddress?: string;
+  comment?: string;
+  disabled?: boolean;
+  speedMbps?: number;
+  accountNo?: string;
+}
+
+export interface SavePppoeSecretResult {
+  success: boolean;
+  action: 'created' | 'updated' | 'unchanged';
+  message: string;
+}
+
 /**
- * 2. Auto-Provision PPPoE Secret & Simple Queue Bandwidth
+ * 2. Save or Update PPPoE Secret & Simple Queue directly on MikroTik Router
+ * Checks if secret exists:
+ * - If exists: updates secret with PATCH /rest/ppp/secret/{id} (only updating password if provided)
+ * - If not found: creates secret with PUT /rest/ppp/secret
+ * Also synchronizes /queue/simple bandwidth rate limit
+ */
+export const saveOrUpdatePppoeSecret = async (
+  creds: MikrotikCredentials,
+  params: SavePppoeSecretParams
+): Promise<SavePppoeSecretResult> => {
+  const cleanHost = (creds.ipAddress || '').replace(/^https?:\/\//, '').replace(/\/.*$/, '') || 'remote.oxapsph.com';
+  const port = creds.port || (creds.useHttps ? 443 : 10988);
+
+  // 1. Tier 1: Try backend endpoints (/api/mikrotikPppoeSync or Cloud Function)
+  const endpoints = [
+    '/api/mikrotikPppoeSync',
+    'https://asia-southeast1-swiftstream-portal.cloudfunctions.net/mikrotikPppoeSync',
+  ];
+
+  for (const endpoint of endpoints) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 6000);
+
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          routerId: creds.id || creds.name,
+          host: cleanHost,
+          port,
+          username: creds.username,
+          password: creds.password,
+          secret: {
+            name: params.name,
+            password: params.password,
+            service: params.service || 'pppoe',
+            profile: params.profile || 'default',
+            remoteAddress: params.remoteAddress,
+            localAddress: params.localAddress,
+            comment: params.comment || `SwiftStream - ${params.name}`,
+            disabled: params.disabled,
+            speedMbps: params.speedMbps,
+            accountNo: params.accountNo,
+          },
+        }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.success) {
+          return {
+            success: true,
+            action: data.action || 'updated',
+            message: data.message || `PPPoE secret "${params.name}" synchronized to MikroTik device.`,
+          };
+        } else if (data && !data.success) {
+          return {
+            success: false,
+            action: 'unchanged',
+            message: data.message || `MikroTik router rejected PPPoE secret "${params.name}".`,
+          };
+        }
+      }
+    } catch (_) {}
+  }
+
+  // 2. Tier 2: Direct RouterOS REST API execution via executeMikrotikRequest
+  try {
+    const baseUrl = getBaseUrl(creds);
+    const authHeaders = getAuthHeaders(creds.username, creds.password || '');
+
+    // Step A: Check if secret exists
+    const listRes = await executeMikrotikRequest(`${baseUrl}/ppp/secret`, {
+      method: 'GET',
+      headers: authHeaders,
+    });
+
+    if (listRes.status === 401 || listRes.status === 403) {
+      return {
+        success: false,
+        action: 'unchanged',
+        message: `RouterOS authentication failed (HTTP ${listRes.status} Unauthorized) on ${cleanHost}:${port}. Please verify the router admin password.`,
+      };
+    }
+
+    let existingId: string | null = null;
+    if (listRes.ok) {
+      const secretsData = await listRes.json();
+      const secretsList = Array.isArray(secretsData) ? secretsData : [secretsData];
+      const match = secretsList.find((s: any) => s && s.name === params.name);
+      if (match) {
+        existingId = match['.id'] || match.name;
+      }
+    }
+
+    const payload: Record<string, any> = {
+      name: params.name,
+      service: params.service || 'pppoe',
+      profile: params.profile || 'default',
+      comment: params.comment || `SwiftStream - ${params.name}`,
+      disabled: params.disabled ? 'yes' : 'no',
+    };
+    if (params.password && params.password !== '••••••••') {
+      payload.password = params.password;
+    }
+    if (params.remoteAddress) {
+      payload['remote-address'] = params.remoteAddress;
+    }
+    if (params.localAddress) {
+      payload['local-address'] = params.localAddress;
+    }
+
+    let actionTaken: 'created' | 'updated' = 'created';
+
+    if (existingId) {
+      // Step B: Update existing secret
+      actionTaken = 'updated';
+      const patchRes = await executeMikrotikRequest(`${baseUrl}/ppp/secret/${encodeURIComponent(existingId)}`, {
+        method: 'PATCH',
+        headers: authHeaders,
+        body: JSON.stringify(payload),
+      });
+
+      if (!patchRes.ok) {
+        // Fallback to POST /ppp/secret/set
+        const postSetRes = await executeMikrotikRequest(`${baseUrl}/ppp/secret/set`, {
+          method: 'POST',
+          headers: authHeaders,
+          body: JSON.stringify({
+            numbers: existingId,
+            ...payload,
+          }),
+        });
+        if (!postSetRes.ok) {
+          const errData = await postSetRes.json().catch(() => null);
+          const errMsg = errData?.detail || errData?.error || `HTTP ${postSetRes.status}`;
+          return {
+            success: false,
+            action: 'unchanged',
+            message: `MikroTik rejected PPPoE secret update for "${params.name}": ${errMsg}`,
+          };
+        }
+      }
+    } else {
+      // Step C: Create new secret (ensure password exists)
+      if (!payload.password) {
+        payload.password = 'swift1234';
+      }
+      const putRes = await executeMikrotikRequest(`${baseUrl}/ppp/secret`, {
+        method: 'PUT',
+        headers: authHeaders,
+        body: JSON.stringify(payload),
+      });
+
+      if (!putRes.ok) {
+        // Fallback to POST /ppp/secret/add
+        const postAddRes = await executeMikrotikRequest(`${baseUrl}/ppp/secret/add`, {
+          method: 'POST',
+          headers: authHeaders,
+          body: JSON.stringify(payload),
+        });
+        if (!postAddRes.ok) {
+          const errData = await postAddRes.json().catch(() => null);
+          const errMsg = errData?.detail || errData?.error || `HTTP ${postAddRes.status}`;
+          return {
+            success: false,
+            action: 'unchanged',
+            message: `MikroTik rejected PPPoE secret creation for "${params.name}": ${errMsg}`,
+          };
+        }
+      }
+    }
+
+    // Step D: Simple Queue Bandwidth synchronization
+    if (params.speedMbps && params.remoteAddress) {
+      try {
+        const speedStr = `${params.speedMbps}M/${params.speedMbps}M`;
+        const qName = `Q-${params.accountNo || params.name}`;
+        const queueListRes = await executeMikrotikRequest(`${baseUrl}/queue/simple`, {
+          method: 'GET',
+          headers: authHeaders,
+        });
+
+        let existingQueueId: string | null = null;
+        if (queueListRes.ok) {
+          const qData = await queueListRes.json();
+          const qList = Array.isArray(qData) ? qData : [qData];
+          const matchQ = qList.find((q: any) => q && (q.name === qName || q.target === `${params.remoteAddress}/32`));
+          if (matchQ) {
+            existingQueueId = matchQ['.id'] || matchQ.name;
+          }
+        }
+
+        if (existingQueueId) {
+          await executeMikrotikRequest(`${baseUrl}/queue/simple/${encodeURIComponent(existingQueueId)}`, {
+            method: 'PATCH',
+            headers: authHeaders,
+            body: JSON.stringify({
+              'max-limit': speedStr,
+              target: `${params.remoteAddress}/32`,
+              disabled: params.disabled ? 'yes' : 'no',
+            }),
+          });
+        } else {
+          await executeMikrotikRequest(`${baseUrl}/queue/simple`, {
+            method: 'PUT',
+            headers: authHeaders,
+            body: JSON.stringify({
+              name: qName,
+              target: `${params.remoteAddress}/32`,
+              'max-limit': speedStr,
+              comment: params.comment || `SwiftStream - ${params.name}`,
+              disabled: params.disabled ? 'yes' : 'no',
+            }),
+          });
+        }
+      } catch (queueErr) {
+        console.warn('[MikroTik Bridge] Queue sync notice:', queueErr);
+      }
+    }
+
+    return {
+      success: true,
+      action: actionTaken,
+      message: `PPPoE secret "${params.name}" ${actionTaken === 'updated' ? 'updated' : 'created'} on MikroTik device (${cleanHost}).`,
+    };
+  } catch (err: any) {
+    console.warn('[MikroTik Bridge] saveOrUpdatePppoeSecret direct REST warning:', err);
+    return {
+      success: false,
+      action: 'unchanged',
+      message: err?.message || 'Unable to update secret on MikroTik router.',
+    };
+  }
+};
+
+/**
+ * 2B. Auto-Provision PPPoE Secret & Simple Queue Bandwidth
  */
 export const provisionPppoeSecret = async (
   creds: MikrotikCredentials,
@@ -313,42 +572,34 @@ export const provisionPppoeSecret = async (
   plan: Plan
 ): Promise<MikrotikActionResult> => {
   const pppUser = customer.network.pppoeUsername || customer.accountNo.toLowerCase().replace(/[^a-z0-9]/g, '_');
-  const pppPass = customer.network.pppoePassword || 'swift1234';
-  const profileName = `Plan-${plan.speedMbps}M`;
+  const pppPass = customer.network.pppoePassword;
+  const profileName = customer.network.pppoeProfile || `Plan-${plan.speedMbps}M`;
   const ip = customer.network.ipAddress || '192.168.10.100';
   const speed = `${plan.speedMbps}M`;
 
+  const syncRes = await saveOrUpdatePppoeSecret(creds, {
+    name: pppUser,
+    password: pppPass,
+    service: 'pppoe',
+    profile: profileName,
+    remoteAddress: ip,
+    comment: `${customer.fullName} - ${customer.accountNo}`,
+    disabled: customer.status === 'suspended' || customer.status === 'disconnected',
+    speedMbps: plan.speedMbps,
+    accountNo: customer.accountNo,
+  });
+
   const commands = [
-    `/ppp profile add name="${profileName}" rate-limit="${speed}/${speed}" local-address=192.168.10.1 dns-server=1.1.1.1,8.8.8.8 on-up="" comment="SwiftStream ${plan.name}"`,
-    `/ppp secret add name="${pppUser}" password="${pppPass}" service=pppoe profile="${profileName}" remote-address=${ip} disabled=no comment="${customer.fullName} - ${customer.accountNo}"`,
-    `/queue simple add name="Q-${customer.accountNo}" target=${ip}/32 max-limit=${speed}/${speed} comment="${customer.fullName} (${plan.name})"`,
+    `/ppp secret add/set name="${pppUser}" ${pppPass ? `password="${pppPass}" ` : ''}service=pppoe profile="${profileName}" remote-address=${ip}`,
+    `/queue simple add/set name="Q-${customer.accountNo}" target=${ip}/32 max-limit=${speed}/${speed}`,
   ];
 
-  try {
-    const url = `${getBaseUrl(creds)}/ppp/secret`;
-    await executeMikrotikRequest(url, {
-      method: 'PUT',
-      headers: getAuthHeaders(creds.username, creds.password),
-      body: JSON.stringify({
-        name: pppUser,
-        password: pppPass,
-        service: 'pppoe',
-        profile: profileName,
-        'remote-address': ip,
-        disabled: 'no',
-        comment: `${customer.fullName} - ${customer.accountNo}`,
-      }),
-    });
-  } catch (err) {
-    console.info('[MikroTik Bridge] API provision executed with fallback logging:', err);
-  }
-
   return {
-    success: true,
+    success: syncRes.success,
     action: 'provision',
     targetUser: pppUser,
     targetIp: ip,
-    details: `PPPoE secret "${pppUser}" provisioned on profile "${profileName}" (${speed}/${speed}) with IP ${ip}.`,
+    details: syncRes.message || `PPPoE secret "${pppUser}" provisioned on profile "${profileName}" (${speed}/${speed}) with IP ${ip}.`,
     executedCommands: commands,
     timestamp: new Date().toISOString(),
   };
@@ -596,8 +847,8 @@ export interface PppoeQueryResult<T> {
 export const fetchPppoeSecretsDetailed = async (
   creds: MikrotikCredentials
 ): Promise<PppoeQueryResult<PppoeSecretItem>> => {
-  const cleanHost = creds.ipAddress.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
-  const port = creds.port || (creds.useHttps ? 443 : 80);
+  const cleanHost = (creds.ipAddress || 'remote.oxapsph.com').replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  const port = creds.port || (creds.useHttps ? 443 : 10988);
 
   // 1. Dedicated backend proxy endpoints
   const proxyEndpoints = [
@@ -738,8 +989,8 @@ export const fetchPppoeSecrets = async (
 export const fetchPppoeActiveSessions = async (
   creds: MikrotikCredentials
 ): Promise<PppoeQueryResult<PppoeActiveSessionItem>> => {
-  const cleanHost = creds.ipAddress.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
-  const port = creds.port || (creds.useHttps ? 443 : 80);
+  const cleanHost = (creds.ipAddress || 'remote.oxapsph.com').replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  const port = creds.port || (creds.useHttps ? 443 : 10988);
 
   const proxyEndpoints = [
     '/api/getPppoeActive',
@@ -867,8 +1118,8 @@ export const fetchPppoeActiveSessions = async (
 export const fetchPppoeProfilesDetailed = async (
   creds: MikrotikCredentials
 ): Promise<PppoeQueryResult<PppoeProfileItem>> => {
-  const cleanHost = creds.ipAddress.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
-  const port = creds.port || (creds.useHttps ? 443 : 80);
+  const cleanHost = (creds.ipAddress || 'remote.oxapsph.com').replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  const port = creds.port || (creds.useHttps ? 443 : 10988);
 
   const proxyEndpoints = [
     '/api/getPppoeProfiles',
@@ -1005,8 +1256,8 @@ export const fetchPppoeProfiles = async (
 export const fetchIpPools = async (
   creds: MikrotikCredentials
 ): Promise<PppoeQueryResult<IpPoolItem>> => {
-  const cleanHost = creds.ipAddress.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
-  const port = creds.port || (creds.useHttps ? 443 : 80);
+  const cleanHost = (creds.ipAddress || 'remote.oxapsph.com').replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  const port = creds.port || (creds.useHttps ? 443 : 10988);
 
   const proxyEndpoints = [
     '/api/getIpPools',
@@ -1368,7 +1619,7 @@ export const kickActivePppoeSession = async (
 };
 
 /**
- * 12. Sync PPPoE Secret to MikroTik
+ * 12. Sync PPPoE Secret to MikroTik Router Hardware
  */
 export const syncPppoeSecretToRouter = async (
   creds: MikrotikCredentials,
@@ -1378,40 +1629,18 @@ export const syncPppoeSecretToRouter = async (
     service?: string;
     profile?: string;
     remoteAddress?: string;
+    localAddress?: string;
     comment?: string;
     disabled?: boolean;
+    speedMbps?: number;
+    accountNo?: string;
   }
 ): Promise<{ success: boolean; message: string }> => {
-  const cleanHost = (creds.ipAddress || '').replace(/^https?:\/\//, '').replace(/\/.*$/, '');
-  const port = creds.port || (creds.useHttps ? 443 : 80);
-
-  const endpoints = [
-    '/api/mikrotikPppoeSync',
-    'https://asia-southeast1-swiftstream-portal.cloudfunctions.net/mikrotikPppoeSync',
-  ];
-
-  for (const endpoint of endpoints) {
-    try {
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          routerId: creds.id || creds.name,
-          host: cleanHost,
-          port,
-          username: creds.username,
-          password: creds.password,
-          secret,
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        return { success: true, message: data.message || 'PPPoE secret synchronized' };
-      }
-    } catch (_) {}
-  }
-
-  return { success: true, message: `Secret for ${secret.name} synchronized` };
+  const res = await saveOrUpdatePppoeSecret(creds, secret);
+  return {
+    success: res.success,
+    message: res.message,
+  };
 };
 
 /**

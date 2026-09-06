@@ -46,101 +46,14 @@ export const GenieAcsManager: React.FC = () => {
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  // Mock TR-069 CPE Fleet Devices
-  const [devices, setDevices] = useState<GenieAcsDevice[]>([
-    {
-      id: 'cpe-001',
-      serialNumber: 'ZTEGC14A2991',
-      manufacturer: 'ZTE Corporation',
-      productClass: 'F670L (Dual-Band GPON ONT)',
-      hardwareVersion: 'V2.0',
-      softwareVersion: 'V2.0.10P1T4',
-      ipAddress: '10.200.14.88',
-      macAddress: '2C:39:96:4A:29:91',
-      connectionRequestUrl: 'http://10.200.14.88:7547/tr069',
-      lastInform: new Date(Date.now() - 120000).toISOString(),
-      isOnline: true,
-      subscriberName: 'Eduardo Dela Cruz',
-      pppoeUsername: 'pppoe_edcruz',
-      opticalRxPowerDbm: -19.4,
-      opticalTxPowerDbm: 2.3,
-      opticalTemperature: 44.2,
-      opticalVoltage: 3.28,
-      wifiSsid: 'SwiftStream_Fiber_DelaCruz_5G',
-      wifiChannel: 36,
-      wanMode: 'PPPoE',
-      uptimeSeconds: 345600,
-    },
-    {
-      id: 'cpe-002',
-      serialNumber: 'HWTC8829A002',
-      manufacturer: 'Huawei Technologies',
-      productClass: 'EG8145V5 (Wi-Fi 5 GPON Terminal)',
-      hardwareVersion: '118E.A',
-      softwareVersion: 'V5R019C00S105',
-      ipAddress: '10.200.14.89',
-      macAddress: '48:8F:5A:88:29:A0',
-      connectionRequestUrl: 'http://10.200.14.89:7547/tr069',
-      lastInform: new Date(Date.now() - 30000).toISOString(),
-      isOnline: true,
-      subscriberName: 'Maria Theresa Santos',
-      pppoeUsername: 'pppoe_msantos',
-      opticalRxPowerDbm: -18.2,
-      opticalTxPowerDbm: 2.6,
-      opticalTemperature: 41.0,
-      opticalVoltage: 3.31,
-      wifiSsid: 'Santos_Home_Fiber',
-      wifiChannel: 44,
-      wanMode: 'PPPoE',
-      uptimeSeconds: 864000,
-    },
-    {
-      id: 'cpe-003',
-      serialNumber: 'VSOL4188F003',
-      manufacturer: 'V-SOL Electronics',
-      productClass: 'V2804AX (Wi-Fi 6 GPON/EPON HGU)',
-      hardwareVersion: 'V1.3',
-      softwareVersion: 'V1.3.4-20251101',
-      ipAddress: '10.200.14.90',
-      macAddress: '70:A7:41:88:F0:03',
-      connectionRequestUrl: 'http://10.200.14.90:7547/tr069',
-      lastInform: new Date(Date.now() - 600000).toISOString(),
-      isOnline: true,
-      subscriberName: 'Bernardo Del Rosario',
-      pppoeUsername: 'pppoe_bdelrosario',
-      opticalRxPowerDbm: -24.8,
-      opticalTxPowerDbm: 1.9,
-      opticalTemperature: 49.8,
-      opticalVoltage: 3.25,
-      wifiSsid: 'DelRosario_WiFi6',
-      wifiChannel: 149,
-      wanMode: 'PPPoE',
-      uptimeSeconds: 120000,
-    },
-    {
-      id: 'cpe-004',
-      serialNumber: 'ZTEGC9921B004',
-      manufacturer: 'ZTE Corporation',
-      productClass: 'F660 (Single-Band ONT)',
-      hardwareVersion: 'V5.0',
-      softwareVersion: 'V5.0.1P1T1',
-      ipAddress: '10.200.14.155',
-      macAddress: 'D4:6E:0E:99:21:B0',
-      connectionRequestUrl: 'http://10.200.14.155:7547/tr069',
-      lastInform: new Date(Date.now() - 86400000 * 2).toISOString(),
-      isOnline: false,
-      subscriberName: 'Offline Test ONT',
-      pppoeUsername: 'pppoe_offline',
-      opticalRxPowerDbm: -32.0,
-      opticalTxPowerDbm: 0.0,
-      opticalTemperature: 0,
-      opticalVoltage: 0,
-      wifiSsid: 'Swift_Offline',
-      wifiChannel: 6,
-      wanMode: 'PPPoE',
-      uptimeSeconds: 0,
-    },
-  ]);
+  // Clean TR-069 CPE Fleet Devices
+  const [devices, setDevices] = useState<GenieAcsDevice[]>(() => {
+    try {
+      const saved = localStorage.getItem('swiftstream_genieacs_devices_v4');
+      if (saved) return JSON.parse(saved);
+    } catch (_) {}
+    return [];
+  });
 
   const filteredDevices = useMemo(() => {
     const q = searchQuery.toLowerCase();
@@ -162,7 +75,7 @@ export const GenieAcsManager: React.FC = () => {
     setIsRefreshing(true);
     setTimeout(() => {
       setIsRefreshing(false);
-      showToast('GenieACS NBI API polled. 4 CPE devices synchronized.');
+      showToast(`GenieACS NBI API polled. ${devices.length} CPE devices found.`);
     }, 800);
   };
 
@@ -318,7 +231,16 @@ export const GenieAcsManager: React.FC = () => {
           </div>
 
           <div className="space-y-3">
-            {filteredDevices.map((dev) => {
+            {filteredDevices.length === 0 ? (
+              <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-12 text-center">
+                <Router className="w-12 h-12 text-slate-600 mx-auto mb-3" />
+                <h3 className="text-sm font-bold text-slate-300">No TR-069 CPE Devices Registered</h3>
+                <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
+                  Connect your GenieACS ACS server URL to auto-discover active customer ONUs, or provision new CPE devices from Subscribers CRM.
+                </p>
+              </div>
+            ) : (
+              filteredDevices.map((dev) => {
               const isSelected = selectedDevice?.id === dev.id;
               const opticalRating = getOpticalRating(dev.opticalRxPowerDbm);
 
@@ -371,7 +293,7 @@ export const GenieAcsManager: React.FC = () => {
                   </div>
                 </div>
               );
-            })}
+            }))}
           </div>
         </div>
 

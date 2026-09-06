@@ -26,80 +26,20 @@ export const ClientApplicationManager: React.FC = () => {
     addCustomer,
   } = useApp();
 
-  // Mock initial applications state with persistent local storage
+  // Clean online applications state with persistent local storage
   const [applications, setApplications] = useState<OnlineApplication[]>(() => {
     try {
-      const saved = localStorage.getItem('swiftstream_online_applications');
+      const saved = localStorage.getItem('swiftstream_online_applications_v4');
       if (saved) return JSON.parse(saved);
     } catch (_) {}
 
-    return [
-      {
-        id: 'app-001',
-        applicationNumber: 'APP-2026-0891',
-        applicantName: 'Eduardo Dela Cruz',
-        email: 'eduardo.delacruz@gmail.com',
-        phone: '09171234567',
-        address: 'Blk 14 Lot 8 Phase 2, Mabuhay Homes',
-        barangay: 'San Vicente',
-        city: 'Santa Rosa',
-        province: 'Laguna',
-        landmark: 'Near Barangay Hall & Chapel',
-        preferredPlanId: 'p2',
-        preferredPlanName: 'Swift Fiber 50 Mbps',
-        preferredSpeedMbps: 50,
-        monthlyFee: 1299,
-        status: 'pending',
-        notes: 'Requested installation ASAP. House is right beside pole with NAP Box 04.',
-        createdAt: new Date(Date.now() - 3600000 * 4).toISOString(),
-      },
-      {
-        id: 'app-002',
-        applicationNumber: 'APP-2026-0892',
-        applicantName: 'Maria Theresa Santos',
-        email: 'maria.santos@outlook.com',
-        phone: '09289876543',
-        address: '142 Rizal Avenue Ext.',
-        barangay: 'Poblacion 1',
-        city: 'Cabuyao',
-        province: 'Laguna',
-        landmark: 'In front of 7-Eleven',
-        preferredPlanId: 'p3',
-        preferredPlanName: 'Swift Turbo 100 Mbps',
-        preferredSpeedMbps: 100,
-        monthlyFee: 1699,
-        status: 'survey_scheduled',
-        surveyDate: '2026-09-02',
-        assignedTechnician: 'Tech Juan / Crew Alpha',
-        notes: 'Wants optical drop cable route checked across main highway.',
-        createdAt: new Date(Date.now() - 3600000 * 24).toISOString(),
-      },
-      {
-        id: 'app-003',
-        applicationNumber: 'APP-2026-0888',
-        applicantName: 'Roberto Gomez',
-        email: 'robert.gomez@gmail.com',
-        phone: '09085551234',
-        address: 'Sitio Kawayan, Brgy. Pittland',
-        barangay: 'Pittland',
-        city: 'Cabuyao',
-        province: 'Laguna',
-        landmark: 'Near Water District Tank',
-        preferredPlanId: 'p1',
-        preferredPlanName: 'Swift Starter 30 Mbps',
-        preferredSpeedMbps: 30,
-        monthlyFee: 999,
-        status: 'rejected',
-        rejectionReason: 'Beyond maximum 350m optical drop cable distance from nearest NAP box.',
-        createdAt: new Date(Date.now() - 3600000 * 72).toISOString(),
-      },
-    ];
+    return [];
   });
 
   const saveApplications = (newApps: OnlineApplication[]) => {
     setApplications(newApps);
     try {
-      localStorage.setItem('swiftstream_online_applications', JSON.stringify(newApps));
+      localStorage.setItem('swiftstream_online_applications_v4', JSON.stringify(newApps));
     } catch (_) {}
   };
 

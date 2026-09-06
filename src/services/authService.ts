@@ -11,8 +11,9 @@ import {
 } from 'firebase/auth';
 import { doc, setDoc, getDoc, query, where, getDocs, collection } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
+import { getStoredStaffUsers, setStoredStaffUsers } from '../data/storage';
 
-export type UserRole = 'admin' | 'tech' | 'subscriber';
+export type UserRole = 'admin' | 'cashier' | 'technician' | 'tech' | 'subscriber';
 
 export interface AppUserProfile {
   uid: string;
@@ -94,6 +95,90 @@ export const saveAuthorizedAdminEmails = async (emails: string[]): Promise<void>
  * Sign In with Email and Password
  */
 export const signInWithEmail = async (email: string, password: string): Promise<AppUserProfile> => {
+  const cleanEmail = email.toLowerCase().trim();
+
+  // 1. Check local/staff directory first (Cashier, Technician, Admin)
+  const staffList = getStoredStaffUsers();
+  const staff = staffList.find((s) => s.email.toLowerCase().trim() === cleanEmail);
+
+  if (staff) {
+    if (staff.status === 'suspended') {
+      throw new Error('Your staff account is currently suspended. Please contact the System Administrator.');
+    }
+
+    if (staff.initialPassword && staff.initialPassword !== password) {
+      const err: any = new Error('Incorrect email or password. Please double-check your login credentials.');
+      err.code = 'auth/wrong-password';
+      throw err;
+    }
+
+    const updatedStaff = {
+      ...staff,
+      lastLoginAt: new Date().toISOString(),
+    };
+    setStoredStaffUsers(staffList.map((s) => (s.id === staff.id ? updatedStaff : s)));
+
+    const profile: AppUserProfile = {
+      uid: staff.id,
+      email: staff.email,
+      displayName: staff.fullName,
+      role: staff.role,
+      status: staff.status,
+      isApproved: true,
+      mobile: staff.mobile,
+      createdAt: staff.createdAt,
+      lastLoginAt: updatedStaff.lastLoginAt,
+    };
+
+    localStorage.setItem('swiftstream_current_auth_user', JSON.stringify(profile));
+    return profile;
+  }
+
+  // 2. Check remote Firestore system_users for staff created remotely
+  try {
+    const q = query(collection(db, 'system_users'), where('email', '==', cleanEmail));
+    const qSnap = await getDocs(q);
+    if (!qSnap.empty) {
+      const docData = qSnap.docs[0].data();
+      if (
+        docData.role === 'admin' ||
+        docData.role === 'cashier' ||
+        docData.role === 'technician' ||
+        docData.role === 'tech'
+      ) {
+        if (docData.status === 'suspended') {
+          throw new Error('Your staff account is currently suspended. Please contact the System Administrator.');
+        }
+
+        if (docData.initialPassword && docData.initialPassword !== password) {
+          const err: any = new Error('Incorrect email or password. Please double-check your login credentials.');
+          err.code = 'auth/wrong-password';
+          throw err;
+        }
+
+        const profile: AppUserProfile = {
+          uid: docData.uid || qSnap.docs[0].id,
+          email: docData.email,
+          displayName: docData.displayName || docData.fullName || 'Staff Member',
+          role: docData.role,
+          status: docData.status || 'active',
+          isApproved: true,
+          mobile: docData.mobile,
+          createdAt: docData.createdAt || new Date().toISOString(),
+          lastLoginAt: new Date().toISOString(),
+        };
+
+        localStorage.setItem('swiftstream_current_auth_user', JSON.stringify(profile));
+        return profile;
+      }
+    }
+  } catch (e: any) {
+    if (e.message?.includes('suspended') || e.code === 'auth/wrong-password') {
+      throw e;
+    }
+  }
+
+  // 3. Fallback to Firebase Auth for subscribers / cloud users
   const cred = await signInWithEmailAndPassword(auth, email, password);
   const profile = await fetchOrCreateUserProfile(cred.user);
 
@@ -102,6 +187,9 @@ export const signInWithEmail = async (email: string, password: string): Promise<
     await signOut(auth);
     throw new Error('Your subscriber registration is currently under review by our Admin team. You will receive an SMS when your connection is approved.');
   }
+
+  // Clean local staff cache if signed in via standard Firebase user
+  localStorage.removeItem('swiftstream_current_auth_user');
 
   return profile;
 };
@@ -182,7 +270,14 @@ export const signInWithGoogle = async (): Promise<AppUserProfile> => {
   const userEmail = (user.email || '').toLowerCase().trim();
 
   const authorizedAdmins = (await getAuthorizedAdminEmails()).map((e) => e.toLowerCase().trim());
-  const isAuthorizedAdmin = authorizedAdmins.includes(userEmail);
+  const localStaff = getStoredStaffUsers().find((s) => s.email.toLowerCase().trim() === userEmail);
+  const isAuthorizedAdmin = authorizedAdmins.includes(userEmail) || !!localStaff;
+
+  // Check if staff user is suspended
+  if (localStaff && localStaff.status === 'suspended') {
+    await signOut(auth);
+    throw new Error(`Access Restricted: The staff account "${userEmail}" is suspended. Please contact the Administrator.`);
+  }
 
   // Check if profile exists in Firestore system_users
   const userDocRef = doc(db, 'system_users', user.uid);
@@ -191,14 +286,20 @@ export const signInWithGoogle = async (): Promise<AppUserProfile> => {
   if (snap.exists()) {
     const data = snap.data() as AppUserProfile;
 
-    // If Admin/Staff: verify whitelist authorization
-    if (data.role === 'admin' || data.role === 'tech') {
+    // If Admin/Staff (Admin, Cashier, Technician): verify whitelist authorization
+    if (data.role === 'admin' || data.role === 'cashier' || data.role === 'technician' || data.role === 'tech') {
       if (!isAuthorizedAdmin && data.isApproved === false) {
         await signOut(auth);
-        throw new Error(`Access Restricted: The Google account "${userEmail}" is not pre-authorized for SwiftStream Admin access.`);
+        throw new Error(`Access Restricted: The Google account "${userEmail}" is not pre-authorized for SwiftStream Staff access.`);
       }
-      await setDoc(userDocRef, { lastLoginAt: new Date().toISOString() }, { merge: true });
-      return data;
+      const finalRole = localStaff?.role || data.role;
+      const updatedProfile: AppUserProfile = {
+        ...data,
+        role: finalRole,
+        lastLoginAt: new Date().toISOString(),
+      };
+      await setDoc(userDocRef, updatedProfile, { merge: true });
+      return updatedProfile;
     }
 
     // If Subscriber: check approval status
@@ -212,13 +313,14 @@ export const signInWithGoogle = async (): Promise<AppUserProfile> => {
     }
   }
 
-  // If newly signing in via Google and email is in the Authorized Admin Whitelist:
+  // If newly signing in via Google and email is in the Authorized Admin Whitelist or local staff:
   if (isAuthorizedAdmin) {
+    const assignedRole = localStaff?.role || 'admin';
     const adminProfile: AppUserProfile = {
       uid: user.uid,
       email: user.email,
-      displayName: user.displayName || userEmail.split('@')[0],
-      role: 'admin',
+      displayName: user.displayName || localStaff?.fullName || userEmail.split('@')[0],
+      role: assignedRole,
       isApproved: true,
       status: 'active',
       photoURL: user.photoURL,
@@ -229,7 +331,7 @@ export const signInWithGoogle = async (): Promise<AppUserProfile> => {
     try {
       await setDoc(userDocRef, adminProfile, { merge: true });
     } catch (err) {
-      console.warn('Could not save admin profile to Firestore:', err);
+      console.warn('Could not save admin/staff profile to Firestore:', err);
     }
 
     return adminProfile;
@@ -273,6 +375,9 @@ export const signInWithGoogle = async (): Promise<AppUserProfile> => {
  * Sign Out from Firebase
  */
 export const signOutUser = async (): Promise<void> => {
+  try {
+    localStorage.removeItem('swiftstream_current_auth_user');
+  } catch (_) {}
   await signOut(auth);
 };
 
@@ -413,14 +518,16 @@ export const fetchOrCreateUserProfile = async (user: User): Promise<AppUserProfi
     }
 
     const userEmail = (user.email || '').toLowerCase().trim();
+    const localStaff = getStoredStaffUsers().find((s) => s.email.toLowerCase().trim() === userEmail);
     const authorizedAdmins = (await getAuthorizedAdminEmails()).map((e) => e.toLowerCase().trim());
-    const isOwner = authorizedAdmins.includes(userEmail) || userEmail.includes('admin');
+    const isOwner = authorizedAdmins.includes(userEmail) || userEmail.includes('admin') || !!localStaff;
+    const assignedRole = localStaff?.role || (isOwner ? 'admin' : 'subscriber');
 
     const defaultProfile: AppUserProfile = {
       uid: user.uid,
       email: user.email,
-      displayName: user.displayName || user.email?.split('@')[0] || 'SwiftStream Staff',
-      role: 'admin',
+      displayName: user.displayName || localStaff?.fullName || user.email?.split('@')[0] || 'SwiftStream Staff',
+      role: assignedRole,
       isApproved: isOwner,
       status: isOwner ? 'active' : 'pending_approval',
       photoURL: user.photoURL,
@@ -465,6 +572,32 @@ export const subscribeToAuth = (
         onUserChanged(null);
       }
     } else {
+      // Check if a local authenticated staff session exists
+      try {
+        const localRaw = localStorage.getItem('swiftstream_current_auth_user');
+        if (localRaw) {
+          const localProfile = JSON.parse(localRaw) as AppUserProfile;
+          const staffList = getStoredStaffUsers();
+          const matchedStaff = staffList.find(
+            (s) =>
+              s.id === localProfile.uid ||
+              s.email.toLowerCase().trim() === (localProfile.email || '').toLowerCase().trim()
+          );
+
+          if (matchedStaff && matchedStaff.status === 'active') {
+            onUserChanged({
+              ...localProfile,
+              role: matchedStaff.role,
+              displayName: matchedStaff.fullName,
+              status: matchedStaff.status,
+            });
+            return;
+          } else {
+            localStorage.removeItem('swiftstream_current_auth_user');
+          }
+        }
+      } catch (_) {}
+
       onUserChanged(null);
     }
   });

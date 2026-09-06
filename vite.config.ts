@@ -74,16 +74,20 @@ function mikrotikProxyPlugin(): Plugin {
           );
 
           clientReq.on('error', (err) => {
-            res.statusCode = 502;
-            res.setHeader('Content-Type', 'application/json');
-            res.end(JSON.stringify({ error: `Connection failed: ${err.message}` }));
+            if (!res.headersSent) {
+              res.statusCode = 502;
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify({ error: `Connection failed: ${err.message}` }));
+            }
           });
 
           clientReq.on('timeout', () => {
             clientReq.destroy();
-            res.statusCode = 504;
-            res.setHeader('Content-Type', 'application/json');
-            res.end(JSON.stringify({ error: 'Gateway timeout: MikroTik did not respond within 7s' }));
+            if (!res.headersSent) {
+              res.statusCode = 504;
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify({ error: 'Gateway timeout: MikroTik did not respond within 7s' }));
+            }
           });
 
           if (req.method === 'GET' || req.method === 'HEAD' || !req.headers['content-length']) {
@@ -92,9 +96,11 @@ function mikrotikProxyPlugin(): Plugin {
             req.pipe(clientReq);
           }
         } catch (e: any) {
-          res.statusCode = 500;
-          res.setHeader('Content-Type', 'application/json');
-          res.end(JSON.stringify({ error: e.message || 'Internal proxy error' }));
+          if (!res.headersSent) {
+            res.statusCode = 500;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ error: e.message || 'Internal proxy error' }));
+          }
         }
       });
 
@@ -1177,6 +1183,255 @@ function mikrotikProxyPlugin(): Plugin {
       server.middlewares.use('/api/mikrotikActiveSessions', handleGetPppoeActive);
       server.middlewares.use('/api/getPppoeProfiles', handleGetPppoeProfiles);
       server.middlewares.use('/api/getIpPools', handleGetIpPools);
+
+      // 7B. MikroTik PPPoE Secret Sync / Create / Update Endpoint
+      const handleMikrotikPppoeSync = (req: any, res: any) => {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+        if (req.method === 'OPTIONS') {
+          res.statusCode = 204;
+          res.end();
+          return;
+        }
+
+        let bodyData = '';
+        req.on('data', (chunk: any) => (bodyData += chunk));
+        req.on('end', async () => {
+          let body: any = {};
+          try {
+            body = bodyData ? JSON.parse(bodyData) : {};
+          } catch (_) {}
+
+          const host = (body.host || 'remote.oxapsph.com').replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+          const port = Number(body.port || 10988);
+          const username = body.username || 'admin';
+          const password = body.password || '';
+          const isHttps = body.useHttps === true || port === 443;
+          const transport = isHttps ? https : http;
+          const authHeader = `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`;
+
+          const secrets = Array.isArray(body.secrets) ? body.secrets : (body.secret ? [body.secret] : []);
+
+          if (secrets.length === 0) {
+            res.statusCode = 200;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ success: true, message: 'No secrets provided', syncedCount: 0 }));
+            return;
+          }
+
+          const requestJson = (options: { path: string; method: string; body?: any }) => {
+            return new Promise<{ status: number; data: any }>((resolve) => {
+              const reqData = options.body ? JSON.stringify(options.body) : null;
+              const headers: Record<string, string> = {
+                'Authorization': authHeader,
+                'Accept': 'application/json',
+              };
+              if (reqData) {
+                headers['Content-Type'] = 'application/json';
+                headers['Content-Length'] = Buffer.byteLength(reqData).toString();
+              }
+              const clientReq = transport.request(
+                {
+                  protocol: isHttps ? 'https:' : 'http:',
+                  hostname: host,
+                  port: port,
+                  path: `/rest${options.path}`,
+                  method: options.method,
+                  headers,
+                  timeout: 7000,
+                },
+                (clientRes: any) => {
+                  let resData = '';
+                  clientRes.on('data', (c: any) => (resData += c));
+                  clientRes.on('end', () => {
+                    let parsed: any = null;
+                    try {
+                      parsed = resData ? JSON.parse(resData) : null;
+                    } catch (_) {
+                      parsed = resData;
+                    }
+                    resolve({ status: clientRes.statusCode || 200, data: parsed });
+                  });
+                }
+              );
+              clientReq.on('error', (err: any) => {
+                resolve({ status: 500, data: { error: err.message } });
+              });
+              clientReq.on('timeout', () => {
+                clientReq.destroy();
+                resolve({ status: 504, data: { error: 'timeout' } });
+              });
+              if (reqData) clientReq.write(reqData);
+              clientReq.end();
+            });
+          };
+
+          try {
+            // 1. Fetch existing secrets to find matches
+            const existingRes = await requestJson({ path: '/ppp/secret', method: 'GET' });
+
+            if (existingRes.status === 401 || existingRes.status === 403) {
+              res.statusCode = 200;
+              res.setHeader('Content-Type', 'application/json');
+              res.end(
+                JSON.stringify({
+                  success: false,
+                  statusCode: existingRes.status,
+                  error: 'Unauthorized',
+                  message: `RouterOS authentication failed (HTTP ${existingRes.status} Unauthorized) on ${host}:${port}. Please verify the router admin password.`,
+                })
+              );
+              return;
+            }
+
+            if (existingRes.status >= 500) {
+              res.statusCode = 200;
+              res.setHeader('Content-Type', 'application/json');
+              res.end(
+                JSON.stringify({
+                  success: false,
+                  statusCode: existingRes.status,
+                  error: 'NetworkError',
+                  message: `Could not connect to MikroTik router at ${host}:${port}. Verify router IP, port forward, and firewall.`,
+                })
+              );
+              return;
+            }
+
+            const existingSecrets = Array.isArray(existingRes.data) ? existingRes.data : [];
+            const existingMap = new Map();
+            for (const item of existingSecrets) {
+              if (item && item.name) existingMap.set(item.name, item['.id'] || item.id || item.name);
+            }
+
+            let syncedCount = 0;
+            let lastAction: 'created' | 'updated' = 'created';
+
+            for (const s of secrets) {
+              if (!s || !s.name) continue;
+              const payload: Record<string, any> = {
+                name: s.name,
+                service: s.service || 'pppoe',
+                profile: s.profile || 'default',
+                comment: s.comment || `SwiftStream - ${s.name}`,
+                disabled: s.disabled ? 'yes' : 'no',
+              };
+              if (s.password && s.password !== '••••••••') {
+                payload.password = s.password;
+              }
+              if (s.remoteAddress) {
+                payload['remote-address'] = s.remoteAddress;
+              }
+              if (s.localAddress) {
+                payload['local-address'] = s.localAddress;
+              }
+
+              let opError: string | null = null;
+              const existingId = existingMap.get(s.name);
+              if (existingId) {
+                lastAction = 'updated';
+                const patchRes = await requestJson({
+                  path: `/ppp/secret/${encodeURIComponent(existingId)}`,
+                  method: 'PATCH',
+                  body: payload,
+                });
+                if (patchRes.status >= 400) {
+                  const setRes = await requestJson({
+                    path: '/ppp/secret/set',
+                    method: 'POST',
+                    body: { numbers: existingId, ...payload },
+                  });
+                  if (setRes.status >= 400) {
+                    opError = setRes.data?.detail || setRes.data?.error || `HTTP ${setRes.status}`;
+                  }
+                }
+              } else {
+                if (!payload.password) payload.password = 'swift1234';
+                lastAction = 'created';
+                const putRes = await requestJson({
+                  path: '/ppp/secret',
+                  method: 'PUT',
+                  body: payload,
+                });
+                if (putRes.status >= 400) {
+                  const addRes = await requestJson({
+                    path: '/ppp/secret/add',
+                    method: 'POST',
+                    body: payload,
+                  });
+                  if (addRes.status >= 400) {
+                    opError = addRes.data?.detail || addRes.data?.error || `HTTP ${addRes.status}`;
+                  }
+                }
+              }
+
+              if (opError) {
+                res.statusCode = 200;
+                res.setHeader('Content-Type', 'application/json');
+                res.end(
+                  JSON.stringify({
+                    success: false,
+                    error: 'RouterError',
+                    message: `MikroTik rejected PPPoE secret "${s.name}": ${opError}`,
+                  })
+                );
+                return;
+              }
+
+              // Simple queue bandwidth rate-limit sync
+              if (s.speedMbps && s.remoteAddress) {
+                try {
+                  const speedStr = `${s.speedMbps}M/${s.speedMbps}M`;
+                  const qName = `Q-${s.accountNo || s.name}`;
+                  const qRes = await requestJson({ path: '/queue/simple', method: 'GET' });
+                  const qList = Array.isArray(qRes.data) ? qRes.data : [];
+                  const existingQueue = qList.find((q: any) => q && (q.name === qName || q.target === `${s.remoteAddress}/32`));
+                  if (existingQueue) {
+                    const qId = existingQueue['.id'] || existingQueue.name;
+                    await requestJson({
+                      path: `/queue/simple/${encodeURIComponent(qId)}`,
+                      method: 'PATCH',
+                      body: { 'max-limit': speedStr, target: `${s.remoteAddress}/32`, disabled: s.disabled ? 'yes' : 'no' },
+                    });
+                  } else {
+                    await requestJson({
+                      path: '/queue/simple',
+                      method: 'PUT',
+                      body: { name: qName, target: `${s.remoteAddress}/32`, 'max-limit': speedStr, comment: payload.comment, disabled: s.disabled ? 'yes' : 'no' },
+                    });
+                  }
+                } catch (_) {}
+              }
+
+              syncedCount++;
+            }
+
+            res.statusCode = 200;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(
+              JSON.stringify({
+                success: true,
+                action: lastAction,
+                syncedCount,
+                message: `Successfully synchronized ${syncedCount} secret(s) to MikroTik device.`,
+              })
+            );
+          } catch (err: any) {
+            res.statusCode = 200;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(
+              JSON.stringify({
+                success: false,
+                message: `Failed to synchronize PPPoE secret: ${err.message}`,
+              })
+            );
+          }
+        });
+      };
+
+      server.middlewares.use('/api/mikrotikPppoeSync', handleMikrotikPppoeSync);
 
       // 8. MikroTik CLI Terminal Command Execution Endpoint
       const handleMikrotikCli = (req: any, res: any) => {

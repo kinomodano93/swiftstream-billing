@@ -17,6 +17,7 @@ import {
   AddonCatalogItem,
   PaymentSubmission,
   CoverageArea,
+  StaffUser,
 } from '../types';
 import {
   initialAuditLogs,
@@ -37,32 +38,47 @@ import {
   initialAddonCatalog,
   initialPaymentSubmissions,
   initialCoverageAreas,
+  initialStaffUsers,
 } from './initialData';
 
 const STORAGE_KEYS = {
-  BUSINESS_PROFILE: 'swiftstream_business_profile_v3',
-  CUSTOMERS: 'swiftstream_customers_v3',
-  INVOICES: 'swiftstream_invoices_v3',
-  PAYMENTS: 'swiftstream_payments_v3',
-  PLANS: 'swiftstream_plans_v3',
-  NAP_BOXES: 'swiftstream_nap_boxes_v3',
-  REPAIR_ORDERS: 'swiftstream_repair_orders_v3',
-  REMINDERS: 'swiftstream_reminders_v3',
-  MIKROTIK_DEVICES: 'swiftstream_mikrotik_devices_v3',
-  EXPENSES: 'swiftstream_expenses_v3',
-  AUDIT_LOGS: 'swiftstream_audit_logs_v3',
-  FIBER_CABLES: 'swiftstream_fiber_cables_v3',
-  FIBER_CLOSURES: 'swiftstream_fiber_closures_v3',
-  OLT_NODE: 'swiftstream_olt_node_v3',
-  DAILY_REMITTANCES: 'swiftstream_daily_remittances_v3',
-  ADDON_CATALOG: 'swiftstream_addon_catalog_v3',
-  PAYMENT_SUBMISSIONS: 'swiftstream_payment_submissions_v3',
-  COVERAGE_AREAS: 'swiftstream_coverage_areas_v3',
+  BUSINESS_PROFILE: 'swiftstream_business_profile_v4',
+  CUSTOMERS: 'swiftstream_customers_v4',
+  INVOICES: 'swiftstream_invoices_v4',
+  PAYMENTS: 'swiftstream_payments_v4',
+  PLANS: 'swiftstream_plans_v4',
+  NAP_BOXES: 'swiftstream_nap_boxes_v4',
+  REPAIR_ORDERS: 'swiftstream_repair_orders_v4',
+  REMINDERS: 'swiftstream_reminders_v4',
+  MIKROTIK_DEVICES: 'swiftstream_mikrotik_devices_v4',
+  EXPENSES: 'swiftstream_expenses_v4',
+  AUDIT_LOGS: 'swiftstream_audit_logs_v4',
+  FIBER_CABLES: 'swiftstream_fiber_cables_v4',
+  FIBER_CLOSURES: 'swiftstream_fiber_closures_v4',
+  OLT_NODE: 'swiftstream_olt_node_v4',
+  DAILY_REMITTANCES: 'swiftstream_daily_remittances_v4',
+  ADDON_CATALOG: 'swiftstream_addon_catalog_v4',
+  PAYMENT_SUBMISSIONS: 'swiftstream_payment_submissions_v4',
+  COVERAGE_AREAS: 'swiftstream_coverage_areas_v4',
+  SYSTEM_ROLE: 'swiftstream_system_role_v4',
+  STAFF_USERS: 'swiftstream_staff_users_v4',
 };
 
-// Automatic one-time cleanup of all legacy mock data keys (v1 and v2)
+// Automatic one-time cleanup of all legacy mock data keys (v1, v2, v3, and portal queues)
 const cleanupLegacyMockData = () => {
-  if (typeof window !== 'undefined' && !localStorage.getItem('swiftstream_v3_clean_slate_init')) {
+  if (typeof window !== 'undefined' && !localStorage.getItem('swiftstream_v4_clean_slate_init')) {
+    // Preserve custom business profile & plan pricing if previously configured in v3
+    try {
+      const existingProfile = localStorage.getItem('swiftstream_business_profile_v3');
+      if (existingProfile && !localStorage.getItem(STORAGE_KEYS.BUSINESS_PROFILE)) {
+        localStorage.setItem(STORAGE_KEYS.BUSINESS_PROFILE, existingProfile);
+      }
+      const existingPlans = localStorage.getItem('swiftstream_plans_v3');
+      if (existingPlans && !localStorage.getItem(STORAGE_KEYS.PLANS)) {
+        localStorage.setItem(STORAGE_KEYS.PLANS, existingPlans);
+      }
+    } catch (_) {}
+
     const legacyKeys = [
       'swiftstream_customers_v1',
       'swiftstream_invoices_v1',
@@ -93,9 +109,29 @@ const cleanupLegacyMockData = () => {
       'swiftstream_addon_catalog_v2',
       'swiftstream_payment_submissions_v2',
       'swiftstream_coverage_areas_v2',
+      'swiftstream_customers_v3',
+      'swiftstream_invoices_v3',
+      'swiftstream_payments_v3',
+      'swiftstream_nap_boxes_v3',
+      'swiftstream_repair_orders_v3',
+      'swiftstream_reminders_v3',
+      'swiftstream_mikrotik_devices_v3',
+      'swiftstream_expenses_v3',
+      'swiftstream_audit_logs_v3',
+      'swiftstream_fiber_cables_v3',
+      'swiftstream_fiber_closures_v3',
+      'swiftstream_daily_remittances_v3',
+      'swiftstream_addon_catalog_v3',
+      'swiftstream_payment_submissions_v3',
+      'swiftstream_coverage_areas_v3',
+      'swiftstream_online_applications',
+      'swiftstream_genieacs_devices',
+      'swiftstream_ipoe_leases',
+      'swiftstream_radius_users',
+      'swiftstream_radius_sessions',
     ];
     legacyKeys.forEach((k) => localStorage.removeItem(k));
-    localStorage.setItem('swiftstream_v3_clean_slate_init', 'true');
+    localStorage.setItem('swiftstream_v4_clean_slate_init', 'true');
   }
 };
 
@@ -175,6 +211,10 @@ export const loadStoredData = () => {
       localStorage.getItem(STORAGE_KEYS.COVERAGE_AREAS) || JSON.stringify(initialCoverageAreas)
     ) as CoverageArea[];
 
+    const staffUsers = JSON.parse(
+      localStorage.getItem(STORAGE_KEYS.STAFF_USERS) || JSON.stringify(initialStaffUsers)
+    ) as StaffUser[];
+
     return {
       businessProfile,
       customers,
@@ -194,6 +234,7 @@ export const loadStoredData = () => {
       addonCatalog,
       paymentSubmissions,
       coverageAreas,
+      staffUsers,
     };
   } catch (error) {
     console.error('Failed to load data from localStorage, falling back to defaults:', error);
@@ -216,8 +257,22 @@ export const loadStoredData = () => {
       addonCatalog: initialAddonCatalog,
       paymentSubmissions: initialPaymentSubmissions,
       coverageAreas: initialCoverageAreas,
+      staffUsers: initialStaffUsers,
     };
   }
+};
+
+export const getStoredStaffUsers = (): StaffUser[] => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.STAFF_USERS);
+    return raw ? JSON.parse(raw) : initialStaffUsers;
+  } catch {
+    return initialStaffUsers;
+  }
+};
+
+export const setStoredStaffUsers = (users: StaffUser[]) => {
+  saveToStorage(STORAGE_KEYS.STAFF_USERS, users);
 };
 
 export const saveToStorage = (key: string, data: unknown) => {
@@ -251,4 +306,11 @@ export const exportAllDataAsJson = () => {
 export const resetAllDataToDefault = () => {
   Object.values(STORAGE_KEYS).forEach((k) => localStorage.removeItem(k));
   localStorage.removeItem('swiftstream_v3_clean_slate_init');
+  localStorage.removeItem('swiftstream_v4_clean_slate_init');
+  localStorage.removeItem('swiftstream_online_applications');
+  localStorage.removeItem('swiftstream_online_applications_v4');
+  localStorage.removeItem('swiftstream_genieacs_devices');
+  localStorage.removeItem('swiftstream_ipoe_leases');
+  localStorage.removeItem('swiftstream_radius_users');
+  localStorage.removeItem('swiftstream_radius_sessions');
 };

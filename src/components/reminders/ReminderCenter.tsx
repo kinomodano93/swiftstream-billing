@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Send,
   MessageSquare,
@@ -32,25 +32,19 @@ export const ReminderCenter: React.FC = () => {
   const [activePreviewText, setActivePreviewText] = useState<string | null>(null);
   const [showOutageModal, setShowOutageModal] = useState<boolean>(false);
 
-  const [outageHistory, setOutageHistory] = useState<OutageBroadcastRecord[]>([
-    {
-      id: 'outage-init-1',
-      incidentNumber: 'OUT-918241',
-      type: 'fiber_cut',
-      title: 'Service Interruption - NAP-01 Binauahan Center',
-      description: 'Fiber cable cut along Purok Maharlika caused by DPWH road widening. Core splicing in progress.',
-      targetScope: 'nap_box',
-      targetEntityName: 'NAP-01 Binauahan Center (Binauahan)',
-      impactedSubscribersCount: 8,
-      estimatedRestorationTime: '2 - 3 Hours',
-      advisoryMessage: 'SWIFTSTREAM EMERGENCY FIBER CABLE CUT ADVISORY: Please be advised of a service interruption affecting NAP-01 Binauahan Center. Field fiber splicers are actively restoring lines. ETR: 2-3 Hours.',
-      channelsSent: ['sms', 'telegram', 'discord'],
-      status: 'resolved',
-      declaredBy: 'Leonardo Flojo',
-      declaredAt: '2026-08-28 11:30:00',
-      resolvedAt: '2026-08-28 13:45:00',
-    },
-  ]);
+  const [outageHistory, setOutageHistory] = useState<OutageBroadcastRecord[]>(() => {
+    try {
+      const saved = localStorage.getItem('swiftstream_outage_history_v4');
+      if (saved) return JSON.parse(saved);
+    } catch (_) {}
+    return [];
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('swiftstream_outage_history_v4', JSON.stringify(outageHistory));
+    } catch (_) {}
+  }, [outageHistory]);
 
   const selectedCustomer = customers.find((c) => c.id === selectedCustomerId);
 
@@ -392,41 +386,51 @@ export const ReminderCenter: React.FC = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {outageHistory.map((item) => (
-            <div
-              key={item.id}
-              className="p-4 rounded-2xl bg-slate-950/70 border border-slate-800 space-y-2.5 text-xs"
-            >
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <span className="font-mono text-[10px] text-rose-400 font-bold bg-rose-950/60 px-2 py-0.5 rounded border border-rose-800/40">
-                    {item.incidentNumber}
+        {outageHistory.length === 0 ? (
+          <div className="p-8 text-center text-slate-500 text-xs bg-slate-950/40 rounded-2xl border border-slate-800/60">
+            <Radio className="w-8 h-8 mx-auto mb-2 opacity-30" />
+            <p className="text-slate-300 font-semibold">No Outage Incidents Logged</p>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              Broadcasted community advisories and maintenance records will be listed here.
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {outageHistory.map((item) => (
+              <div
+                key={item.id}
+                className="p-4 rounded-2xl bg-slate-950/70 border border-slate-800 space-y-2.5 text-xs"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <span className="font-mono text-[10px] text-rose-400 font-bold bg-rose-950/60 px-2 py-0.5 rounded border border-rose-800/40">
+                      {item.incidentNumber}
+                    </span>
+                    <h5 className="font-bold text-slate-200 mt-1">{item.title}</h5>
+                  </div>
+                  <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-emerald-950 text-emerald-300 border border-emerald-800/40">
+                    {item.status}
                   </span>
-                  <h5 className="font-bold text-slate-200 mt-1">{item.title}</h5>
                 </div>
-                <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-emerald-950 text-emerald-300 border border-emerald-800/40">
-                  {item.status}
-                </span>
-              </div>
 
-              <p className="text-[11px] text-slate-400 line-clamp-2">{item.description}</p>
+                <p className="text-[11px] text-slate-400 line-clamp-2">{item.description}</p>
 
-              <div className="grid grid-cols-2 gap-2 text-[10px] text-slate-500 pt-2 border-t border-slate-800/60">
-                <div>
-                  <span>Impacted:</span> <strong className="text-slate-300">{item.impactedSubscribersCount} Subscribers</strong>
-                </div>
-                <div>
-                  <span>ETR:</span> <strong className="text-cyan-300">{item.estimatedRestorationTime}</strong>
-                </div>
-                <div className="col-span-2 flex items-center justify-between text-slate-500">
-                  <span>Declared by {item.declaredBy}</span>
-                  <span>{formatDateTime(item.declaredAt)}</span>
+                <div className="grid grid-cols-2 gap-2 text-[10px] text-slate-500 pt-2 border-t border-slate-800/60">
+                  <div>
+                    <span>Impacted:</span> <strong className="text-slate-300">{item.impactedSubscribersCount} Subscribers</strong>
+                  </div>
+                  <div>
+                    <span>ETR:</span> <strong className="text-cyan-300">{item.estimatedRestorationTime}</strong>
+                  </div>
+                  <div className="col-span-2 flex items-center justify-between text-slate-500">
+                    <span>Declared by {item.declaredBy}</span>
+                    <span>{formatDateTime(item.declaredAt)}</span>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Outage Modal */}
