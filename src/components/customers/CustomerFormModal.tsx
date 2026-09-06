@@ -21,6 +21,7 @@ import {
   Shuffle,
   Search,
   ShieldCheck,
+  Lock,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { Customer, CustomerStatus } from '../../types';
@@ -34,6 +35,7 @@ import {
   PppoeSecretItem,
   PppoeProfileItem,
 } from '../../services/mikrotikApiService';
+import { signUpWithEmail } from '../../services/authService';
 
 interface CustomerFormModalProps {
   customerToEdit?: Customer | null;
@@ -66,6 +68,13 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
   const [city, setCity] = useState(customerToEdit?.address.city || businessProfile.address.city || 'Lagonoy');
   const [province, setProvince] = useState(customerToEdit?.address.province || businessProfile.address.province || 'Camarines Sur');
   const [landmark, setLandmark] = useState(customerToEdit?.address.landmark || '');
+
+  // Portal Authentication Credentials (only for new subscribers — creates Firebase Auth account)
+  const [portalEmail, setPortalEmail] = useState(customerToEdit?.email || '');
+  const [portalPassword, setPortalPassword] = useState('Swift@2025');
+  const [showPortalPassword, setShowPortalPassword] = useState(false);
+  const [createPortalAccount, setCreatePortalAccount] = useState(!isEditing);
+  const [portalAccountCreated, setPortalAccountCreated] = useState(false);
 
   // Plan & Billing
   const defaultPlan = plans[0];
@@ -452,12 +461,37 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
       const year = new Date().getFullYear();
       const accountNo = `SWIFT-${year}-${String(Math.floor(Math.random() * 900) + 100)}`;
 
+      // Step: Create Firebase Auth portal account for the subscriber (if requested)
+      const finalPortalEmail = portalEmail.trim() || email.trim();
+      if (createPortalAccount && finalPortalEmail && portalPassword.trim()) {
+        try {
+          await signUpWithEmail(finalPortalEmail, portalPassword.trim(), fullName, 'subscriber', {
+            accountNo,
+            planId: selectedPlan.id,
+            planName: selectedPlan.name,
+            monthlyFee: selectedPlan.monthlyFee,
+            mobile,
+          });
+          setPortalAccountCreated(true);
+        } catch (portalErr: any) {
+          const msg: string = portalErr?.message || 'Failed to create portal account.';
+          // email-already-in-use is OK — subscriber may have self-registered previously
+          if (!msg.toLowerCase().includes('already') && !msg.toLowerCase().includes('in-use')) {
+            setIsSaving(false);
+            setSubmitError(`Portal account error: ${msg}`);
+            showToast('error', 'Portal Account Failed', msg);
+            return;
+          }
+          // If already exists, continue — they'll still be linked by email
+        }
+      }
+
       addCustomer(
         {
           accountNo,
           fullName,
           mobile,
-          email,
+          email: finalPortalEmail || email,
           address: {
             street,
             barangay,
@@ -482,8 +516,8 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
         'success',
         'Subscriber Registered',
         selectedRouter && !bypassSync
-          ? `New PPPoE secret "${finalPppoeUser}" provisioned directly into ${selectedRouter.name} hardware.`
-          : `Subscriber ${fullName} registered successfully.`
+          ? `New PPPoE secret "${finalPppoeUser}" provisioned into ${selectedRouter.name}. ${createPortalAccount && finalPortalEmail ? 'Portal account created ✓' : ''}`
+          : `Subscriber ${fullName} registered. ${createPortalAccount && finalPortalEmail ? 'Portal login: ' + finalPortalEmail : ''}`
       );
     }
 
@@ -564,6 +598,81 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
               </div>
             </div>
           </div>
+
+          {/* Portal Login Credentials — only shown for new subscriber creation */}
+          {!isEditing && (
+            <div className="space-y-3 pt-2 border-t border-slate-800">
+              <div className="flex items-center justify-between">
+                <h4 className="font-bold text-slate-200 uppercase tracking-wider text-[11px] flex items-center gap-2 text-cyan-400">
+                  <Lock className="w-3.5 h-3.5" />
+                  <span>Client Portal Login Account</span>
+                </h4>
+                <div className="flex items-center gap-2 cursor-pointer select-none" onClick={() => setCreatePortalAccount((v) => !v)}>
+                  <span className="text-[11px] text-slate-400">Create portal account</span>
+                  <div className={`w-9 h-5 rounded-full transition-colors relative ${createPortalAccount ? 'bg-cyan-600' : 'bg-slate-700'}`}>
+                    <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${createPortalAccount ? 'left-4.5' : 'left-0.5'}`} />
+                  </div>
+                </div>
+              </div>
+
+              {createPortalAccount ? (
+                <div className="p-3.5 rounded-2xl bg-cyan-950/30 border border-cyan-800/40 space-y-3">
+                  <p className="text-[11px] text-cyan-300/80 leading-relaxed">
+                    Creates a <strong className="text-cyan-200">Firebase Auth account</strong> so this subscriber can log into the <strong className="text-cyan-200">Client Portal</strong> with email + password.
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-slate-400 mb-1 font-medium text-xs">Portal Login Email *</label>
+                      <input
+                        type="email"
+                        value={portalEmail}
+                        onChange={(e) => setPortalEmail(e.target.value)}
+                        placeholder="subscriber@gmail.com"
+                        className="w-full px-3 py-2 bg-slate-950 border border-cyan-800/50 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="block text-slate-400 font-medium text-xs">Portal Password *</label>
+                        <button
+                          type="button"
+                          onClick={() => setPortalPassword(`Swift@${Math.floor(1000 + Math.random() * 9000)}`)}
+                          className="flex items-center gap-1 text-[10px] text-cyan-400 hover:text-cyan-300 font-semibold cursor-pointer"
+                        >
+                          <Shuffle className="w-3 h-3" />
+                          Generate
+                        </button>
+                      </div>
+                      <div className="relative">
+                        <input
+                          type={showPortalPassword ? 'text' : 'password'}
+                          value={portalPassword}
+                          onChange={(e) => setPortalPassword(e.target.value)}
+                          placeholder="Min. 6 characters"
+                          className="w-full px-3 py-2 pr-9 bg-slate-950 border border-cyan-800/50 rounded-xl text-slate-100 font-mono focus:outline-none focus:border-cyan-500 text-sm"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPortalPassword(!showPortalPassword)}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200"
+                        >
+                          {showPortalPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-slate-500">
+                    Share these credentials with the subscriber so they can track their bills and payments on the portal.
+                  </p>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 px-3 py-2 bg-slate-900/60 border border-slate-800 rounded-xl text-slate-500 text-[11px]">
+                  <Lock className="w-3.5 h-3.5 shrink-0" />
+                  <span>No portal account — subscriber can self-register later from the Home page.</span>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Section 2: Address & Location */}
           <div className="space-y-4 pt-2 border-t border-slate-800">
