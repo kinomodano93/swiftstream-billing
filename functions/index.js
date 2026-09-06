@@ -78,7 +78,6 @@ exports.mikrotikTest = onRequest(
         },
       };
 
-      const resourceRes = await axios.get(`http://${creds.host}:${creds.port}/rest/system/resource`, axiosConfig).catch(() => null);
       let resourceData = null;
       let interfacesData = [];
 
@@ -115,12 +114,6 @@ exports.mikrotikTest = onRequest(
             interfacesData = iEthRes.data;
           }
         } catch (_) {}
-      }
-
-      const resourceData = resourceRes ? resourceRes.data : null;
-
-      if (!resourceData) {
-        throw new Error("Failed to query /system/resource from MikroTik");
       }
 
       return res.status(200).json({

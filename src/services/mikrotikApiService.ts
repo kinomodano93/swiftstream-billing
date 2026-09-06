@@ -78,8 +78,6 @@ const executeMikrotikRequest = async (
       signal: options.signal,
     });
     
-    // If proxy responded (even 401/403/200), return response directly
-    if (proxyRes.ok || proxyRes.status === 401 || proxyRes.status === 403) {
     // If proxy responded, return response directly.
     // When browsing over HTTPS, never fall back to direct HTTP fetch as browsers block it (Mixed Content).
     const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:';
@@ -90,7 +88,6 @@ const executeMikrotikRequest = async (
     console.info('[MikroTik Bridge] Backend proxy bypassed, trying direct fetch:', proxyErr);
   }
 
-  // 2. Direct browser fetch fallback
   // 2. Direct browser fetch fallback (only when safe, e.g. on localhost or target is HTTPS)
   return await fetch(targetUrl, options);
 };
