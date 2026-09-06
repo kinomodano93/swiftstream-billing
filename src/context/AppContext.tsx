@@ -296,9 +296,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [activeTab, setActiveTab] = useState<string>(() => {
     try {
       const saved = localStorage.getItem('swiftstream_active_tab');
-      if (saved) return saved;
+      // Always start at the public home page on a fresh visit.
+      // Only restore the saved tab if it's a non-sensitive section (home / portal).
+      if (saved && (saved === 'home' || saved === 'portal')) return saved;
     } catch {}
-    return 'dashboard';
+    return 'home';
   });
 
   useEffect(() => {
