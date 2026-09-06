@@ -80,6 +80,10 @@ const executeMikrotikRequest = async (
     
     // If proxy responded (even 401/403/200), return response directly
     if (proxyRes.ok || proxyRes.status === 401 || proxyRes.status === 403) {
+    // If proxy responded, return response directly.
+    // When browsing over HTTPS, never fall back to direct HTTP fetch as browsers block it (Mixed Content).
+    const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:';
+    if (proxyRes.ok || proxyRes.status === 401 || proxyRes.status === 403 || (isHttps && !targetUrl.startsWith('https:'))) {
       return proxyRes;
     }
   } catch (proxyErr) {
@@ -87,6 +91,7 @@ const executeMikrotikRequest = async (
   }
 
   // 2. Direct browser fetch fallback
+  // 2. Direct browser fetch fallback (only when safe, e.g. on localhost or target is HTTPS)
   return await fetch(targetUrl, options);
 };
 
@@ -168,6 +173,42 @@ export const testRouterConnection = async (
           timestamp: new Date().toISOString(),
           errorMessage: 'Invalid username or password for RouterOS REST API (HTTP 401/403).',
         };
+      } else {
+        const payload = await fnRes.json().catch(() => null);
+        if (payload?.statusCode === 401 || payload?.statusCode === 403) {
+          return {
+            status: 'auth_failed',
+            boardName: 'MikroTik Router',
+            model: 'RouterOS Device',
+            version: 'v7.x',
+            cpuLoad: 0,
+            uptime: '0s',
+            totalMemoryMb: 0,
+            freeMemoryMb: 0,
+            activePppoeCount: 0,
+            latencyMs: Math.round(performance.now() - attemptStartTime),
+            timestamp: new Date().toISOString(),
+            errorMessage: payload.message || 'Invalid username or password for RouterOS REST API (HTTP 401/403).',
+          };
+        }
+        // When browsing over HTTPS, direct in-browser HTTP call will be blocked by Mixed Content.
+        // Return the error from the proxy directly so the user sees the real reason (e.g. timeout / connection refused).
+        if (typeof window !== 'undefined' && window.location.protocol === 'https:' && !creds.useHttps) {
+          return {
+            status: 'unreachable',
+            boardName: 'Unreachable',
+            model: 'Unknown',
+            version: 'N/A',
+            cpuLoad: 0,
+            uptime: '0s',
+            totalMemoryMb: 0,
+            freeMemoryMb: 0,
+            activePppoeCount: 0,
+            latencyMs: Math.round(performance.now() - attemptStartTime),
+            timestamp: new Date().toISOString(),
+            errorMessage: payload?.message || payload?.error || `MikroTik router unreachable at ${cleanHost}:${port} (HTTP ${fnRes.status}).`,
+          };
+        }
       }
     } catch (_) {
       // Continue to next endpoint or direct proxy fallback

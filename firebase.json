@@ -78,6 +78,34 @@
         }
       },
       {
+        "source": "/api/mikrotik-proxy",
+        "function": {
+          "functionId": "mikrotikProxy",
+          "region": "asia-southeast1"
+        }
+      },
+      {
+        "source": "/api/getPppoeSecrets",
+        "function": {
+          "functionId": "getPppoeSecrets",
+          "region": "asia-southeast1"
+        }
+      },
+      {
+        "source": "/api/getPppoeProfiles",
+        "function": {
+          "functionId": "getPppoeProfiles",
+          "region": "asia-southeast1"
+        }
+      },
+      {
+        "source": "/api/getPppoeActive",
+        "function": {
+          "functionId": "getPppoeActive",
+          "region": "asia-southeast1"
+        }
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }

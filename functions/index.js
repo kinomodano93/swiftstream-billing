@@ -27,14 +27,14 @@ const resolveRouterCredentials = async (reqBody) => {
     if (routerDoc && routerDoc.exists) {
       const data = routerDoc.data() || {};
       host = host || data.remoteAddress || data.ipAddress;
-      port = port || data.port || data.webfigPort || data.apiPort || 80;
+      port = port || data.port || data.webfigPort || data.apiPort || 10988;
       username = username || data.username;
       password = password || data.password;
     }
   }
 
   const cleanHost = (host || "").replace(/^https?:\/\//, "").replace(/\/.*$/, "");
-  const targetPort = port || 80;
+  const targetPort = port || 10988;
 
   return {
     host: cleanHost,
@@ -79,7 +79,25 @@ exports.mikrotikTest = onRequest(
       };
 
       const resourceRes = await axios.get(`http://${creds.host}:${creds.port}/rest/system/resource`, axiosConfig).catch(() => null);
+      let resourceData = null;
       let interfacesData = [];
+
+      try {
+        const resourceRes = await axios.get(`http://${creds.host}:${creds.port}/rest/system/resource`, axiosConfig);
+        resourceData = resourceRes.data;
+      } catch (err) {
+        const status = err.response?.status || 502;
+        console.error(`MikroTik /system/resource failed (HTTP ${status}):`, err.message);
+        return res.status(status).json({
+          success: false,
+          statusCode: status,
+          message: status === 401 || status === 403
+            ? 'Invalid username or password for RouterOS REST API (HTTP 401/403).'
+            : `Unable to reach MikroTik at ${creds.host}:${creds.port}: ${err.message}`,
+          error: err.message,
+          details: err.response?.data || null,
+        });
+      }
 
       try {
         const iRes = await axios.get(`http://${creds.host}:${creds.port}/rest/interface`, axiosConfig);
@@ -1661,7 +1679,151 @@ exports.xenditWebhook = onRequest(
   }
 );
 
+// ─── MikroTik PPPoE Proxy Cloud Functions ────────────────────────────────────
+// These act as HTTPS proxies so the browser is not blocked by Mixed Content
+// when the app is hosted on HTTPS (swiftstream-portal.web.app) but the router
+// is on plain HTTP.
 
+const makeMikrotikProxyHandler = (restPath, transform) =>
+  onRequest(
+    { region: "asia-southeast1", cors: true },
+    async (req, res) => {
+      res.set("Access-Control-Allow-Origin", "*");
+      res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+      res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
 
+      if (req.method === "OPTIONS") return res.status(204).send("");
 
+      try {
+        const creds = await resolveRouterCredentials(req.body || {});
+        if (!creds.host) {
+          return res.status(400).json({ success: false, message: "Missing host or routerId" });
+        }
+
+        const isHttps = creds.port === 443;
+        const protocol = isHttps ? "https" : "http";
+        const url = `${protocol}://${creds.host}:${creds.port}/rest${restPath}`;
+
+        const response = await axios.get(url, {
+          auth: { username: creds.username, password: creds.password },
+          timeout: 9000,
+          headers: { Accept: "application/json" },
+        });
+
+        const raw = Array.isArray(response.data) ? response.data : (response.data ? [response.data] : []);
+        const mapped = transform(raw);
+
+        return res.status(200).json({ success: true, count: mapped.length, data: mapped, source: "cloud_function" });
+      } catch (err) {
+        const status = err?.response?.status;
+        if (status === 401 || status === 403) {
+          return res.status(200).json({
+            success: false,
+            statusCode: status,
+            error: "Unauthorized",
+            message: `RouterOS authentication failed (HTTP ${status}). Please check your API username and password.`,
+          });
+        }
+        console.error(`[${restPath}] Error:`, err.message);
+        return res.status(200).json({
+          success: false,
+          statusCode: err?.response?.status || 502,
+          error: "NetworkError",
+          message: err.message || `Could not reach MikroTik at ${restPath}`,
+        });
+      }
+    }
+  );
+
+exports.getPppoeSecrets = makeMikrotikProxyHandler("/ppp/secret", (items) =>
+  items.map((item) => ({
+    id: item[".id"] || item.name || "",
+    name: item.name || "",
+    password: item.password || "",
+    service: item.service || "pppoe",
+    profile: item.profile || "default",
+    remoteAddress: item["remote-address"] || item["framed-ip-address"] || "",
+    localAddress: item["local-address"] || "",
+    disabled: item.disabled === "true" || item.disabled === true,
+    comment: item.comment || "",
+  }))
+);
+
+exports.getPppoeProfiles = makeMikrotikProxyHandler("/ppp/profile", (items) =>
+  items.map((item) => ({
+    id: item[".id"] || item.name || "",
+    name: item.name || "",
+    rateLimitRx: (item["rate-limit"] || "").split("/")[0] || "",
+    rateLimitTx: (item["rate-limit"] || "").split("/")[1] || "",
+    rateLimit: item["rate-limit"] || "",
+    localAddress: item["local-address"] || "",
+    remoteAddressPool: item["remote-address"] || "",
+    dnsServers: item["dns-server"] || "",
+    onlyOne: item["only-one"] || "default",
+    useEncryption: item["use-encryption"] || "default",
+    comment: item.comment || "",
+  }))
+);
+
+exports.getPppoeActive = makeMikrotikProxyHandler("/ppp/active", (items) =>
+  items.map((item) => ({
+    id: item[".id"] || "",
+    name: item.name || "",
+    service: item.service || "pppoe",
+    callerId: item["caller-id"] || "",
+    address: item.address || item["framed-ip-address"] || "",
+    uptime: item.uptime || "",
+    encoding: item.encoding || "",
+    sessionId: item["session-id"] || "",
+    comment: item.comment || "",
+  }))
+);
+
+/**
+ * Generic Reverse Proxy for MikroTik RouterOS REST API
+ * Bypasses browser Mixed Content security rules when app is hosted on HTTPS (swiftstream-portal.web.app)
+ */
+exports.mikrotikProxy = onRequest(
+  { region: "asia-southeast1", cors: true },
+  async (req, res) => {
+    res.set("Access-Control-Allow-Origin", "*");
+    res.set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+    res.set("Access-Control-Allow-Headers", "Content-Type, Authorization, x-target-url");
+
+    if (req.method === "OPTIONS") return res.status(204).send("");
+
+    const targetUrl = req.query.url || req.headers["x-target-url"];
+    if (!targetUrl) {
+      return res.status(400).json({ error: "Missing url query parameter or x-target-url header" });
+    }
+
+    try {
+      const headers = { accept: "application/json" };
+      if (req.headers.authorization) headers.authorization = req.headers.authorization;
+      if (req.headers["content-type"]) headers["content-type"] = req.headers["content-type"];
+
+      const axiosConfig = {
+        method: req.method,
+        url: targetUrl,
+        headers,
+        timeout: 9000,
+        validateStatus: () => true,
+      };
+
+      if (req.method !== "GET" && req.method !== "HEAD" && req.body) {
+        axiosConfig.data = req.body;
+      }
+
+      const response = await axios(axiosConfig);
+      res.status(response.status);
+      if (response.headers["content-type"]) {
+        res.set("Content-Type", response.headers["content-type"]);
+      }
+      return res.send(response.data);
+    } catch (err) {
+      console.error("[mikrotikProxy] Forward error:", err.message);
+      return res.status(502).json({ error: `Proxy connection failed: ${err.message}` });
+    }
+  }
+);
 
