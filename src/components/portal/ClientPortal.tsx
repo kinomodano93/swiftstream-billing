@@ -625,12 +625,20 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
         <header className="h-16 bg-slate-900/90 border-b border-slate-800 px-6 sticky top-0 z-30 backdrop-blur-md">
           <div className="max-w-5xl mx-auto h-full flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-cyan-600 via-sky-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20">
-                <Radio className="w-5 h-5 text-white animate-pulse" />
-              </div>
+              {businessProfile.logoUrl ? (
+                <img
+                  src={businessProfile.logoUrl}
+                  alt={businessProfile.tradeName || 'Logo'}
+                  className="w-10 h-10 rounded-2xl object-contain bg-slate-900 border border-slate-700/60 p-1 shadow-lg shadow-cyan-500/20 shrink-0"
+                />
+              ) : (
+                <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-cyan-600 via-sky-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20 shrink-0">
+                  <Radio className="w-5 h-5 text-white animate-pulse" />
+                </div>
+              )}
               <div>
                 <h1 className="font-black text-sm text-slate-100 tracking-tight flex items-center gap-1.5">
-                  <span>SwiftStream</span>
+                  <span>{businessProfile.tradeName || businessProfile.name || 'SwiftStream'}</span>
                   <span className="text-[10px] bg-cyan-950 text-cyan-400 font-mono px-2 py-0.5 rounded-full border border-cyan-800/60 font-normal">
                     PORTAL
                   </span>

@@ -220,18 +220,28 @@ export const HomePage: React.FC<HomePageProps> = ({
       {/* ================= 1. PUBLIC NAVBAR ================= */}
       <header className="h-20 bg-slate-950/90 border-b border-slate-800/80 px-4 sm:px-12 flex items-center justify-between sticky top-0 z-40 backdrop-blur-xl">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-gradient-to-tr from-cyan-600 via-sky-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/25 ring-1 ring-white/20">
-            <Radio className="w-5 h-5 sm:w-6 sm:h-6 text-white animate-pulse" />
-          </div>
+          {businessProfile.logoUrl ? (
+            <img
+              src={businessProfile.logoUrl}
+              alt={businessProfile.tradeName || businessProfile.name || 'Company Logo'}
+              className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl object-contain bg-slate-900 border border-slate-700/60 p-1 shadow-lg shadow-cyan-500/20 shrink-0"
+            />
+          ) : (
+            <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-gradient-to-tr from-cyan-600 via-sky-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/25 ring-1 ring-white/20 shrink-0">
+              <Radio className="w-5 h-5 sm:w-6 sm:h-6 text-white animate-pulse" />
+            </div>
+          )}
           <div>
             <div className="flex items-center gap-2">
-              <span className="font-black text-base sm:text-lg text-slate-100 tracking-tight">SwiftStream</span>
+              <span className="font-black text-base sm:text-lg text-slate-100 tracking-tight">
+                {businessProfile.tradeName || businessProfile.name || 'SwiftStream'}
+              </span>
               <span className="text-[10px] font-bold uppercase tracking-wider bg-cyan-950 text-cyan-300 px-2 py-0.5 rounded-full border border-cyan-800/50">
                 Fiber Internet
               </span>
             </div>
             <p className="text-[10px] sm:text-[11px] text-slate-400 font-medium">
-              Lagonoy, Camarines Sur Node
+              {businessProfile.address.city}, {businessProfile.address.province} Node
             </p>
           </div>
         </div>
@@ -344,7 +354,7 @@ export const HomePage: React.FC<HomePageProps> = ({
           {[
             { id: 'plans', label: 'Fiber Plans & Rates' },
             { id: 'calculator', label: 'Speed Matcher Calculator' },
-            { id: 'why-us', label: 'Why SwiftStream Fiber' },
+            { id: 'why-us', label: `Why ${businessProfile.tradeName || businessProfile.name || 'SwiftStream'} Fiber` },
             { id: 'coverage', label: 'Barangay Coverage Area' },
             { id: 'faq', label: 'Frequently Asked Questions' },
             { id: 'contact', label: 'Contact Helpline' },
@@ -678,7 +688,7 @@ export const HomePage: React.FC<HomePageProps> = ({
       <section id="why-us" className="py-16 px-6 sm:px-12 max-w-7xl mx-auto space-y-12">
         <div className="text-center space-y-3 max-w-2xl mx-auto">
           <span className="text-xs font-bold text-cyan-400 uppercase tracking-widest">
-            The SwiftStream Advantage
+            The {businessProfile.tradeName || businessProfile.name || 'SwiftStream'} Advantage
           </span>
           <h2 className="text-2xl sm:text-4xl font-extrabold text-slate-100">
             Why Lagonoy Families & Businesses Choose Us
@@ -962,9 +972,17 @@ export const HomePage: React.FC<HomePageProps> = ({
           {/* Col 1: Business Identity */}
           <div className="space-y-3 md:col-span-2">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-600 to-blue-600 flex items-center justify-center">
-                <Radio className="w-5 h-5 text-white" />
-              </div>
+              {businessProfile.logoUrl ? (
+                <img
+                  src={businessProfile.logoUrl}
+                  alt={businessProfile.tradeName || businessProfile.name || 'Company Logo'}
+                  className="w-10 h-10 rounded-xl object-contain bg-slate-900 border border-slate-700/60 p-1 shrink-0 shadow-md"
+                />
+              ) : (
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-600 to-blue-600 flex items-center justify-center shrink-0">
+                  <Radio className="w-5 h-5 text-white" />
+                </div>
+              )}
               <div>
                 <h4 className="font-extrabold text-sm text-slate-100">{businessProfile.name}</h4>
                 <p className="text-[10px] text-cyan-400">{businessProfile.tradeName}</p>
@@ -1026,11 +1044,11 @@ export const HomePage: React.FC<HomePageProps> = ({
         </div>
 
         <div className="max-w-7xl mx-auto pt-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500">
-          <p>© {new Date().getFullYear()} SwiftStream Telecom. All rights reserved.</p>
+          <p>© {new Date().getFullYear()} {businessProfile.tradeName || businessProfile.name || 'SwiftStream Telecom'}. All rights reserved.</p>
           <div className="flex items-center gap-4">
             <span>High-Speed Fiber ISP</span>
             <span>•</span>
-            <span>Lagonoy, Camarines Sur</span>
+            <span>{businessProfile.address.city}, {businessProfile.address.province}</span>
           </div>
         </div>
       </footer>

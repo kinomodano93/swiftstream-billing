@@ -56,6 +56,7 @@ import { sendTelegramStaffAlert, sendDiscordStaffAlert } from '../utils/webhookS
 import {
   COLLECTIONS,
   subscribeToCollection,
+  subscribeToDocument,
   saveFirestoreDoc,
   deleteFirestoreDoc,
   purgeFirestoreCollections,
@@ -571,6 +572,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const unsubExpenses = subscribeToCollection<Expense>(COLLECTIONS.EXPENSES, (data) => {
       setExpenses(data || []);
     });
+    const unsubProfile = subscribeToDocument<BusinessProfile>(
+      COLLECTIONS.BUSINESS_PROFILE,
+      'company_profile',
+      (data) => {
+        if (data) {
+          setBusinessProfile((prev) => ({ ...prev, ...data }));
+        }
+      }
+    );
 
     return () => {
       unsubCustomers();
@@ -585,6 +595,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       unsubFiberClosures();
       unsubMikrotik();
       unsubExpenses();
+      unsubProfile();
     };
   }, []);
 
@@ -2624,16 +2635,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // --- Profile & System ---
   const updateBusinessProfile = (updates: Partial<BusinessProfile>) => {
-    setBusinessProfile((prev) => ({ ...prev, ...updates }));
+    const updated = { ...businessProfile, ...updates };
+    setBusinessProfile(updated);
+    saveFirestoreDoc(COLLECTIONS.BUSINESS_PROFILE, { id: 'company_profile', ...updated });
     logAuditEvent({
       userName: 'Admin Leonardo Flojo',
       action: 'SETTINGS_MODIFIED',
       category: 'settings',
       severity: 'info',
-      details: `Updated business & SMTP configuration settings.`,
+      details: `Updated business & branding settings.`,
       status: 'success',
     });
-    showToast('success', 'Settings Saved', 'Business & billing preferences updated.');
+    showToast('success', 'Settings Saved', 'Business branding & preferences updated.');
   };
 
   const exportData = () => {

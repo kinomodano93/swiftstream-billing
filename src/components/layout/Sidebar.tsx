@@ -277,18 +277,28 @@ export const Sidebar: React.FC = () => {
           <div className="flex items-center gap-3 min-w-0">
             <div
               onClick={() => setActiveTab('dashboard')}
-              className="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-600 via-sky-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20 ring-1 ring-white/20 shrink-0 cursor-pointer"
-              title="SwiftStream Telecom ERP"
+              className="w-10 h-10 rounded-xl bg-slate-900 border border-slate-700/60 flex items-center justify-center shadow-lg shadow-cyan-500/10 shrink-0 cursor-pointer overflow-hidden p-1"
+              title={businessProfile.name || 'ISP ERP'}
             >
-              <Radio className="w-5 h-5 text-white animate-pulse" />
+              {businessProfile.logoUrl ? (
+                <img
+                  src={businessProfile.logoUrl}
+                  alt={businessProfile.tradeName || 'Logo'}
+                  className="w-full h-full object-contain rounded-lg"
+                />
+              ) : (
+                <div className="w-full h-full rounded-lg bg-gradient-to-tr from-cyan-600 via-sky-500 to-blue-600 flex items-center justify-center">
+                  <Radio className="w-5 h-5 text-white animate-pulse" />
+                </div>
+              )}
             </div>
             {!isCollapsed && (
               <div className="flex-1 min-w-0 animate-in fade-in duration-200">
                 <h1 className="font-bold text-sm text-slate-100 tracking-tight leading-tight truncate">
-                  SwiftStream
+                  {businessProfile.tradeName || businessProfile.name || 'SwiftStream'}
                 </h1>
-                <p className="text-[10px] text-cyan-400 font-medium tracking-wide truncate">
-                  TELECOM & REPAIR SHOP
+                <p className="text-[10px] text-cyan-400 font-medium tracking-wide truncate uppercase">
+                  {businessProfile.industry || 'TELECOM & ISP'}
                 </p>
               </div>
             )}

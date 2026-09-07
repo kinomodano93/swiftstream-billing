@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Settings,
   Building2,
@@ -35,6 +35,7 @@ import {
   Cloud,
   Sun,
   Moon,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import {
@@ -75,12 +76,32 @@ export const SettingsModal: React.FC = () => {
   // Business state
   const [businessName, setBusinessName] = useState(businessProfile.name);
   const [tradeName, setTradeName] = useState(businessProfile.tradeName);
+  const [logoUrl, setLogoUrl] = useState<string>(businessProfile.logoUrl || '');
   const [tin, setTin] = useState(businessProfile.tin);
   const [firstName, setFirstName] = useState(businessProfile.representative.firstName);
   const [middleName, setMiddleName] = useState(businessProfile.representative.middleName);
   const [lastName, setLastName] = useState(businessProfile.representative.lastName);
   const [mobile, setMobile] = useState(businessProfile.representative.mobile);
   const [email, setEmail] = useState(businessProfile.representative.email);
+
+  useEffect(() => {
+    setBusinessName(businessProfile.name);
+    setTradeName(businessProfile.tradeName);
+    setLogoUrl(businessProfile.logoUrl || '');
+    setTin(businessProfile.tin);
+    setFirstName(businessProfile.representative.firstName);
+    setMiddleName(businessProfile.representative.middleName);
+    setLastName(businessProfile.representative.lastName);
+    setMobile(businessProfile.representative.mobile);
+    setEmail(businessProfile.representative.email);
+    setBuilding(businessProfile.address.building || '');
+    setStreet(businessProfile.address.street);
+    setBarangay(businessProfile.address.barangay);
+    setCity(businessProfile.address.city);
+    setProvince(businessProfile.address.province);
+    setZipCode(businessProfile.address.zipCode);
+    setLandmark(businessProfile.address.landmark || '');
+  }, [businessProfile]);
 
   // Address
   const [building, setBuilding] = useState(businessProfile.address.building || '');
@@ -282,6 +303,7 @@ export const SettingsModal: React.FC = () => {
     updateBusinessProfile({
       name: businessName,
       tradeName,
+      logoUrl,
       tin,
       representative: {
         ...businessProfile.representative,
@@ -530,6 +552,82 @@ export const SettingsModal: React.FC = () => {
                 <span className="text-[10px] text-slate-500 font-mono">BIR Registered</span>
               </div>
 
+              {/* Company Logo Upload & Customization */}
+              <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <label className="block text-slate-200 font-bold text-xs">
+                      Company Brand Logo
+                    </label>
+                    <p className="text-[11px] text-slate-400">
+                      Upload your ISP company logo (PNG, JPG, WEBP, or SVG, max 2MB). This logo will dynamically reflect on the Home Page, Admin Sidebar, Invoices, and Subscriber Portal.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-col sm:flex-row items-center gap-4 pt-1">
+                  {/* Logo Preview Box */}
+                  <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-slate-900 border border-slate-700/80 flex items-center justify-center p-2 shrink-0 shadow-md relative overflow-hidden">
+                    {logoUrl ? (
+                      <img
+                        src={logoUrl}
+                        alt="Company Logo Preview"
+                        className="w-full h-full object-contain rounded-xl"
+                      />
+                    ) : (
+                      <div className="flex flex-col items-center justify-center text-slate-500 text-center">
+                        <ImageIcon className="w-6 h-6 mb-1 text-slate-600" />
+                        <span className="text-[9px] font-mono">No Logo</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Actions & File Input */}
+                  <div className="space-y-2 w-full sm:w-auto">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <label className="flex items-center gap-2 px-3.5 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl text-xs font-semibold cursor-pointer transition-all shadow-md shadow-cyan-600/20 active:scale-95">
+                        <Upload className="w-4 h-4" />
+                        <span>{logoUrl ? 'Change Company Logo' : 'Upload Company Logo'}</span>
+                        <input
+                          type="file"
+                          accept="image/png, image/jpeg, image/webp, image/svg+xml"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              if (file.size > 2 * 1024 * 1024) {
+                                alert('Please select an image smaller than 2MB.');
+                                return;
+                              }
+                              const reader = new FileReader();
+                              reader.onload = () => {
+                                setLogoUrl(reader.result as string);
+                              };
+                              reader.readAsDataURL(file);
+                            }
+                          }}
+                        />
+                      </label>
+
+                      {logoUrl && (
+                        <button
+                          type="button"
+                          onClick={() => setLogoUrl('')}
+                          className="flex items-center gap-1.5 px-3 py-2 bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/40 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Remove Logo</span>
+                        </button>
+                      )}
+                    </div>
+
+                    <p className="text-[10px] text-slate-500 font-mono">
+                      Recommended: Transparent PNG or SVG (square or horizontal ratio).
+                    </p>
+                  </div>
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-slate-400 mb-1 font-medium">Business Legal Name *</label>
@@ -730,12 +828,25 @@ export const SettingsModal: React.FC = () => {
 
               {/* Sample Invoice / Receipt Header Preview */}
               <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800/80 space-y-3">
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <h3 className="font-bold text-sm text-slate-100">{businessName || 'Business Name'}</h3>
-                    <p className="text-[11px] text-cyan-400 font-medium">{tradeName || 'Trade / Brand Name'}</p>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    {logoUrl ? (
+                      <img
+                        src={logoUrl}
+                        alt="Logo"
+                        className="w-10 h-10 object-contain rounded-xl bg-slate-900 border border-slate-700/60 p-1 shrink-0 shadow-sm"
+                      />
+                    ) : (
+                      <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-600 via-sky-500 to-blue-600 flex items-center justify-center text-white shrink-0 shadow-md">
+                        <Radio className="w-5 h-5 animate-pulse" />
+                      </div>
+                    )}
+                    <div className="min-w-0">
+                      <h3 className="font-bold text-sm text-slate-100 truncate">{businessName || 'Business Name'}</h3>
+                      <p className="text-[11px] text-cyan-400 font-medium truncate">{tradeName || 'Trade / Brand Name'}</p>
+                    </div>
                   </div>
-                  <span className="text-[10px] font-mono bg-cyan-950 text-cyan-300 px-1.5 py-0.5 rounded border border-cyan-800">
+                  <span className="text-[10px] font-mono bg-cyan-950 text-cyan-300 px-1.5 py-0.5 rounded border border-cyan-800 shrink-0">
                     ISP NODE
                   </span>
                 </div>

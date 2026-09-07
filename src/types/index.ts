@@ -190,6 +190,7 @@ export interface XenditConfig {
 export interface BusinessProfile {
   name: string;
   tradeName: string;
+  logoUrl?: string;
   industry: string;
   tin: string;
   representative: {

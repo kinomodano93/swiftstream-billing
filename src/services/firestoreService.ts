@@ -81,6 +81,37 @@ export const subscribeToCollection = <T extends { id: string }>(
 };
 
 /**
+ * Subscribes to a single document in Firestore in real-time
+ */
+export const subscribeToDocument = <T>(
+  collectionName: string,
+  docId: string,
+  onData: (data: T | null) => void,
+  onError?: (err: Error) => void
+): Unsubscribe => {
+  try {
+    const docRef = doc(db, collectionName, docId);
+    return onSnapshot(
+      docRef,
+      (snapshot) => {
+        if (snapshot.exists()) {
+          onData({ id: snapshot.id, ...snapshot.data() } as T);
+        } else {
+          onData(null);
+        }
+      },
+      (error) => {
+        console.warn(`Firestore document subscription error on [${collectionName}/${docId}]:`, error);
+        if (onError) onError(error);
+      }
+    );
+  } catch (err: any) {
+    console.warn(`Failed to initialize doc subscription for [${collectionName}/${docId}]:`, err);
+    return () => {};
+  }
+};
+
+/**
  * Sanitizes documents before writing to Cloud Firestore.
  * Ensures subscriber PPPoE secrets / passwords are NEVER stored in Firebase Cloud storage,
  * and purges any legacy cloud fields via deleteField().
