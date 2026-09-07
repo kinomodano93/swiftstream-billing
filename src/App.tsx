@@ -34,6 +34,8 @@ import { RadiusAaaManager } from './components/network/RadiusAaaManager';
 import { GenieAcsManager } from './components/network/GenieAcsManager';
 import { IpoeDhcpManager } from './components/network/IpoeDhcpManager';
 import { StaffUserManager } from './components/users/StaffUserManager';
+import { SystemLogsViewer } from './components/logs/SystemLogsViewer';
+import { FinancialTransactionLogs } from './components/logs/FinancialTransactionLogs';
 import { Customer, RepairOrder, SYSTEM_ROLES_CONFIG } from './types';
 import { ShieldAlert, ArrowLeft } from 'lucide-react';
 
@@ -251,7 +253,11 @@ const MainLayout: React.FC = () => {
 
               {activeTab === 'reports' && <FinancialReports />}
 
+              {activeTab === 'transaction_logs' && <FinancialTransactionLogs />}
+
               {activeTab === 'staff_users' && <StaffUserManager />}
+
+              {activeTab === 'system_logs' && <SystemLogsViewer />}
 
               {activeTab === 'settings' && <SettingsModal />}
             </>

@@ -99,6 +99,8 @@ export const ROLE_PERMISSIONS: Record<SystemRole, RolePermissions> = {
       'reminders',
       'staff_users',
       'settings',
+      'system_logs',
+      'transaction_logs',
     ],
     canDeleteCustomer: true,
     canDeleteInvoice: true,
@@ -118,6 +120,7 @@ export const ROLE_PERMISSIONS: Record<SystemRole, RolePermissions> = {
       'applications',
       'billing',
       'payments',
+      'transaction_logs',
       'verification_queue',
       'plans',
       'reminders',
@@ -790,7 +793,9 @@ export interface SmtpConfig {
 
 export type AuditLogCategory =
   | 'auth'
+  | 'admin'
   | 'billing'
+  | 'financial'
   | 'customer'
   | 'network'
   | 'settings'
@@ -810,6 +815,33 @@ export interface AuditLog {
   ipAddress?: string;
   details: string;
   status: 'success' | 'failed';
+  metadata?: Record<string, any>;
+}
+
+export type FinancialTransactionType =
+  | 'invoice'
+  | 'payment'
+  | 'expense'
+  | 'remittance'
+  | 'credit_adjustment';
+
+export type FinancialFlow = 'inflow' | 'outflow' | 'receivable';
+
+export interface UnifiedFinancialTransaction {
+  id: string;
+  timestamp: string;
+  referenceNumber: string;
+  type: FinancialTransactionType;
+  flow: FinancialFlow;
+  partyName: string;
+  partySubtext?: string;
+  category: string;
+  amount: number;
+  paymentMethod: string;
+  recordedBy: string;
+  status: string;
+  notes?: string;
+  sourceDocId: string;
 }
 
 export type WorkOrderType =

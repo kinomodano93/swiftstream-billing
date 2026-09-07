@@ -572,6 +572,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const unsubExpenses = subscribeToCollection<Expense>(COLLECTIONS.EXPENSES, (data) => {
       setExpenses(data || []);
     });
+    const unsubAuditLogs = subscribeToCollection<AuditLog>(COLLECTIONS.AUDIT_LOGS, (data) => {
+      if (data && data.length > 0) {
+        const sorted = [...data].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+        setAuditLogs(sorted);
+      }
+    });
     const unsubProfile = subscribeToDocument<BusinessProfile>(
       COLLECTIONS.BUSINESS_PROFILE,
       'company_profile',
@@ -595,6 +601,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       unsubFiberClosures();
       unsubMikrotik();
       unsubExpenses();
+      unsubAuditLogs();
       unsubProfile();
     };
   }, []);
@@ -605,11 +612,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       id: generateId('AUD'),
       timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19),
     };
-    setAuditLogs((prev) => [newLog, ...prev.slice(0, 200)]); // Keep last 200 entries
+    setAuditLogs((prev) => [newLog, ...prev.filter((l) => l.id !== newLog.id).slice(0, 499)]);
+    saveFirestoreDoc(COLLECTIONS.AUDIT_LOGS, newLog);
   };
 
   const clearAuditLogs = () => {
     setAuditLogs([]);
+    saveToStorage(STORAGE_KEYS.AUDIT_LOGS, []);
     showToast('info', 'Audit Logs Cleared', 'Security audit ledger has been reset.');
   };
 
@@ -1110,6 +1119,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       })
     );
 
+    const targetCustomer = customers.find((c) => c.id === newInvoice.customerId);
+    logAuditEvent({
+      userName: 'Admin Leonardo Flojo',
+      action: 'INVOICE_CREATED',
+      category: 'billing',
+      severity: 'info',
+      details: `Generated invoice ${newInvoice.invoiceNumber} for ${targetCustomer?.fullName || newInvoice.customerId} amounting to ₱${newInvoice.totalAmount.toLocaleString()} (Due: ${newInvoice.dueDate}).`,
+      status: 'success',
+      metadata: { invoiceId: newInvoice.id, invoiceNumber: newInvoice.invoiceNumber, amount: newInvoice.totalAmount },
+    });
+
     showToast('success', 'Invoice Created', `Invoice ${newInvoice.invoiceNumber} generated.`);
     return newInvoice;
   };
@@ -1147,6 +1167,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         })
       );
     }
+
+    logAuditEvent({
+      userName: 'Admin Leonardo Flojo',
+      action: 'INVOICE_DELETED',
+      category: 'billing',
+      severity: 'warning',
+      details: `Deleted invoice ${target.invoiceNumber} for ${target.customerName || target.customerId} (Total: ₱${target.totalAmount.toLocaleString()}).`,
+      status: 'success',
+      metadata: { invoiceId: target.id, invoiceNumber: target.invoiceNumber },
+    });
 
     showToast('warning', 'Invoice Deleted', `Invoice ${target.invoiceNumber} removed.`);
   };
@@ -1308,6 +1338,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       newInvoices.forEach((inv) => saveFirestoreDoc(COLLECTIONS.INVOICES, inv));
       updatedCustomers.forEach((cust) => saveFirestoreDoc(COLLECTIONS.CUSTOMERS, cust));
 
+      logAuditEvent({
+        userName: 'Admin Leonardo Flojo',
+        action: 'BATCH_BILLING_EXECUTED',
+        category: 'billing',
+        severity: 'info',
+        details: `Batch billing executed: generated ${generatedCount} invoices totaling ₱${totalGeneratedAmount.toLocaleString()} for billing cycle ${options.billingMonth}.`,
+        status: 'success',
+        metadata: { generatedCount, totalGeneratedAmount, billingMonth: options.billingMonth },
+      });
+
       showToast(
         'success',
         'Batch Invoicing Complete',
@@ -1350,6 +1390,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return c;
       })
     );
+
+    logAuditEvent({
+      userName: 'Admin Leonardo Flojo',
+      action: 'INVOICE_DISCOUNT_APPLIED',
+      category: 'billing',
+      severity: 'info',
+      details: `Applied courtesy discount of ₱${discountAmount.toLocaleString()} to invoice ${invoice.invoiceNumber}. New balance: ₱${newBalanceDue.toLocaleString()}.`,
+      status: 'success',
+      metadata: { invoiceId, discountAmount, newBalanceDue },
+    });
 
     showToast('success', 'Discount Applied', `₱${discountAmount} discount applied to ${invoice.invoiceNumber}.`);
   };

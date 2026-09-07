@@ -27,6 +27,8 @@ import {
   Router,
   Cable,
   CheckCircle2,
+  Receipt,
+  ScrollText,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { SYSTEM_ROLES_CONFIG } from '../../types';
@@ -166,6 +168,13 @@ export const Sidebar: React.FC = () => {
           icon: BarChart3,
           badge: null,
         },
+        {
+          id: 'transaction_logs',
+          label: 'Transaction Ledger',
+          icon: Receipt,
+          badge: 'Ledger',
+          badgeColor: 'bg-emerald-500/20 text-emerald-300 font-bold font-mono',
+        },
       ],
     },
     {
@@ -230,6 +239,13 @@ export const Sidebar: React.FC = () => {
           icon: Users,
           badge: `${staffUsers.length}`,
           badgeColor: 'bg-purple-500/20 text-purple-300 font-bold font-mono',
+        },
+        {
+          id: 'system_logs',
+          label: 'Admin & System Logs',
+          icon: ScrollText,
+          badge: 'Audit',
+          badgeColor: 'bg-cyan-500/20 text-cyan-300 font-bold font-mono',
         },
         {
           id: 'settings',
