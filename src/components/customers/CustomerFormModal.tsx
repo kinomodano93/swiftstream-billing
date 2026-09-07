@@ -1051,7 +1051,7 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
                       <label className="block text-slate-400 font-medium">PPPoE Profile Rate-Limit</label>
                       <button
                         type="button"
-                        onClick={handleFetchProfiles}
+                        onClick={() => handleFetchProfiles()}
                         disabled={isFetchingProfiles || !selectedRouter}
                         className="flex items-center gap-1 text-[10px] text-cyan-400 hover:text-cyan-300 disabled:opacity-50 disabled:cursor-not-allowed font-semibold cursor-pointer"
                       >
