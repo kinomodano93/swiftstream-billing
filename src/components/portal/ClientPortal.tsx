@@ -34,6 +34,9 @@ import {
   Smartphone,
   CheckCircle,
   DollarSign,
+  Upload,
+  Image as ImageIcon,
+  Receipt,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import confetti from 'canvas-confetti';
@@ -181,6 +184,15 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
   const customerPlan = customer
     ? plans.find((p) => p.id === customer.planId)
     : null;
+
+  // Payment submissions / proofs for this subscriber
+  const customerSubmissions = customer
+    ? paymentSubmissions.filter((s) => s.customerId === customer.id)
+    : [];
+  const pendingSubmissions = customerSubmissions.filter((s) => s.status === 'pending_review');
+  const hasPendingProof = pendingSubmissions.length > 0;
+  const getPendingSubmissionForInvoice = (invoiceId: string) =>
+    pendingSubmissions.find((s) => s.invoiceId === invoiceId);
 
   // Unpaid invoices for this subscriber
   const unpaidInvoices = customerInvoices.filter((i) => i.status !== 'paid');
@@ -820,7 +832,28 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
       </header>
 
       {/* Centered Bill Due Notice Ribbon */}
-      {customer.balance > 0 ? (
+      {hasPendingProof ? (
+        <div className="bg-gradient-to-r from-amber-950/90 via-slate-900 to-amber-950/90 border-b border-amber-800/50 px-4 sm:px-6 py-2.5">
+          <div className="max-w-5xl mx-auto flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-2 text-amber-200">
+              <Clock className="w-4 h-4 text-amber-400 flex-shrink-0 animate-pulse" />
+              <span>
+                <strong>Payment Proof Under Review:</strong> We received your submission of{' '}
+                <span className="font-mono font-bold text-amber-300">
+                  {formatCurrency(pendingSubmissions[0].amount)}
+                </span>{' '}
+                (Ref: {pendingSubmissions[0].referenceNumber}). Cashier approval is in progress. Official Receipt will be issued once approved.
+              </span>
+            </div>
+            <button
+              onClick={() => setPortalTab('pay')}
+              className="px-3 py-1 bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/40 rounded-xl text-xs font-bold transition-all cursor-pointer"
+            >
+              Track Review Status &rarr;
+            </button>
+          </div>
+        </div>
+      ) : customer.balance > 0 ? (
         <div className="bg-gradient-to-r from-rose-950/90 via-amber-950/80 to-rose-950/90 border-b border-rose-800/50 px-4 sm:px-6 py-2.5">
           <div className="max-w-5xl mx-auto flex flex-wrap items-center justify-between gap-3 text-xs">
             <div className="flex items-center gap-2 text-rose-200">
@@ -865,8 +898,14 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                 id: 'bills',
                 label: 'Statements (Bills)',
                 icon: FileText,
-                badge: unpaidInvoices.length > 0 ? `${unpaidInvoices.length} Due` : null,
-                badgeColor: 'bg-rose-500/20 text-rose-300 border border-rose-500/30',
+                badge: hasPendingProof
+                  ? `${pendingSubmissions.length} Reviewing`
+                  : unpaidInvoices.length > 0
+                  ? `${unpaidInvoices.length} Due`
+                  : null,
+                badgeColor: hasPendingProof
+                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                  : 'bg-rose-500/20 text-rose-300 border border-rose-500/30',
               },
               { id: 'pay', label: 'Pay Online', icon: CreditCard },
               {
@@ -964,7 +1003,9 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                   </h3>
 
                   <p className="text-xs text-slate-400 mt-1">
-                    {customer.balance > 0
+                    {hasPendingProof
+                      ? `⏳ Payment proof of ${formatCurrency(pendingSubmissions[0].amount)} (Ref: ${pendingSubmissions[0].referenceNumber}) is awaiting cashier approval.`
+                      : customer.balance > 0
                       ? 'Payment due to maintain continuous internet service.'
                       : 'Your account is in good standing! No balance due.'}
                   </p>
@@ -972,10 +1013,14 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
 
                 <button
                   onClick={() => setPortalTab('pay')}
-                  className="w-full flex items-center justify-center gap-1.5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-2xl text-xs font-bold shadow-lg shadow-emerald-600/20 transition-all hover:scale-[1.02] cursor-pointer"
+                  className={`w-full flex items-center justify-center gap-1.5 py-2.5 rounded-2xl text-xs font-bold transition-all hover:scale-[1.02] cursor-pointer ${
+                    hasPendingProof
+                      ? 'bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/40'
+                      : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-lg shadow-emerald-600/20'
+                  }`}
                 >
-                  <CreditCard className="w-4 h-4" />
-                  <span>{customer.balance > 0 ? 'Pay Online Now (GCash/Maya)' : 'Make Advance Payment'}</span>
+                  {hasPendingProof ? <Clock className="w-4 h-4 text-amber-400" /> : <CreditCard className="w-4 h-4" />}
+                  <span>{hasPendingProof ? 'View Pending Review Status' : customer.balance > 0 ? 'Pay Online Now (GCash/Maya)' : 'Make Advance Payment'}</span>
                 </button>
               </div>
 
@@ -1093,7 +1138,10 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                 ) : (
                   <div className="space-y-2.5">
                     {customerInvoices.slice(0, 3).map((inv) => {
-                      const badge = getInvoiceStatusBadge(inv.status);
+                      const pendingSub = getPendingSubmissionForInvoice(inv.id);
+                      const badge = pendingSub
+                        ? { text: 'Pending Verification', bg: 'bg-amber-500/10', textCol: 'text-amber-400', border: 'border-amber-500/30' }
+                        : getInvoiceStatusBadge(inv.status);
                       return (
                         <div
                           key={inv.id}
@@ -1212,7 +1260,10 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
             ) : (
               <div className="space-y-4">
                 {customerInvoices.map((inv) => {
-                  const badge = getInvoiceStatusBadge(inv.status);
+                  const pendingSub = getPendingSubmissionForInvoice(inv.id);
+                  const badge = pendingSub
+                    ? { text: 'Pending Verification', bg: 'bg-amber-500/10', textCol: 'text-amber-400', border: 'border-amber-500/30' }
+                    : getInvoiceStatusBadge(inv.status);
                   return (
                     <div
                       key={inv.id}
@@ -1247,7 +1298,12 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                             <span>Download PDF Bill</span>
                           </button>
 
-                          {inv.balanceDue > 0 && (
+                          {pendingSub ? (
+                            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-950/40 text-amber-300 border border-amber-800/40 rounded-xl text-xs font-semibold">
+                              <Clock className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+                              <span>Proof Submitted (#{pendingSub.submissionNumber})</span>
+                            </div>
+                          ) : inv.balanceDue > 0 ? (
                             <button
                               onClick={() => {
                                 setPayInvoiceId(inv.id);
@@ -1258,7 +1314,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                               <CreditCard className="w-3.5 h-3.5" />
                               <span>Pay {formatCurrency(inv.balanceDue)}</span>
                             </button>
-                          )}
+                          ) : null}
                         </div>
                       </div>
 
@@ -1290,11 +1346,16 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pt-2 text-xs">
                         <div className="text-slate-400 space-y-0.5">
                           <p>Due Date: <strong className="text-rose-400">{formatDate(inv.dueDate)}</strong></p>
-                          {inv.paidAt && (
+                          {pendingSub ? (
+                            <p className="text-amber-300 font-semibold flex items-center gap-1">
+                              <Clock className="w-3.5 h-3.5 text-amber-400" />
+                              <span>Payment Proof Queued: {formatCurrency(pendingSub.amount)} (Ref: {pendingSub.referenceNumber}) awaiting cashier approval.</span>
+                            </p>
+                          ) : inv.paidAt ? (
                             <p className="text-emerald-400">
                               Paid on: {formatDateTime(inv.paidAt)} ({inv.paymentMethodUsed?.toUpperCase()})
                             </p>
-                          )}
+                          ) : null}
                         </div>
 
                         <div className="flex items-center gap-4 text-right">
@@ -1331,7 +1392,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                 <span>Pay Online via GCash, Maya, or Bank Transfer</span>
               </h2>
               <p className="text-xs text-slate-400">
-                Scan the official merchant QR code using your e-wallet app, enter your reference number, and receive your Official Receipt (OR) instantly.
+                Scan our merchant QR code using GCash or Maya, enter your reference number, and attach your receipt screenshot. Once verified and approved by our cashier, your Official Receipt (OR) will be issued.
               </p>
             </div>
 
@@ -1859,6 +1920,72 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                       </div>
                     </div>
 
+                    {/* Receipt Screenshot Upload Field */}
+                    <div>
+                      <label className="block text-slate-400 mb-1 font-medium flex items-center justify-between">
+                        <span>Upload Transfer Receipt Screenshot (Optional)</span>
+                        <span className="text-[10px] text-slate-500 font-normal">PNG, JPG, WEBP (Max 5MB)</span>
+                      </label>
+
+                      {receiptImageBase64 ? (
+                        <div className="p-3 bg-slate-900 border border-emerald-500/50 rounded-2xl flex items-center justify-between gap-3 animate-in fade-in">
+                          <div className="flex items-center gap-3 overflow-hidden">
+                            <img
+                              src={receiptImageBase64}
+                              alt="Receipt Screenshot Preview"
+                              className="w-12 h-12 object-cover rounded-xl border border-slate-700 shrink-0"
+                            />
+                            <div className="truncate">
+                              <span className="text-xs font-bold text-emerald-300 flex items-center gap-1">
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                <span>Receipt Screenshot Attached</span>
+                              </span>
+                              <span className="text-[10px] text-slate-400 block truncate mt-0.5">
+                                Ready for cashier verification
+                              </span>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setReceiptImageBase64(null)}
+                            className="p-1.5 text-rose-400 hover:text-rose-300 hover:bg-rose-950/40 rounded-xl transition-colors cursor-pointer shrink-0"
+                            title="Remove screenshot"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ) : (
+                        <label className="flex flex-col items-center justify-center p-3.5 border-2 border-dashed border-slate-800 hover:border-cyan-500/50 rounded-2xl bg-slate-900/40 hover:bg-slate-900 transition-all cursor-pointer text-center group">
+                          <Upload className="w-5 h-5 text-slate-400 group-hover:text-cyan-400 mb-1 transition-colors" />
+                          <span className="text-xs text-slate-300 font-semibold group-hover:text-cyan-300 transition-colors">
+                            Click to upload payment screenshot
+                          </span>
+                          <span className="text-[10px] text-slate-500 mt-0.5">
+                            Attach your transaction receipt from GCash, Maya, or bank app
+                          </span>
+                          <input
+                            type="file"
+                            accept="image/png, image/jpeg, image/webp"
+                            className="hidden"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                if (file.size > 5 * 1024 * 1024) {
+                                  alert('Image file size must be less than 5MB.');
+                                  return;
+                                }
+                                const reader = new FileReader();
+                                reader.onload = () => {
+                                  setReceiptImageBase64(reader.result as string);
+                                };
+                                reader.readAsDataURL(file);
+                              }
+                            }}
+                          />
+                        </label>
+                      )}
+                    </div>
+
                     <div className="pt-2">
                       <button
                         type="submit"
@@ -1871,12 +1998,12 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                     </div>
 
                     {submittedProofSuccess && (
-                      <div className="p-4 rounded-2xl bg-emerald-950/60 border border-emerald-800/60 text-emerald-200 flex items-start gap-3 animate-in fade-in">
-                        <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+                      <div className="p-4 rounded-2xl bg-amber-950/60 border border-amber-800/60 text-amber-200 flex items-start gap-3 animate-in fade-in">
+                        <Clock className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
                         <div>
-                          <h4 className="font-bold text-xs">Payment Proof Submitted Successfully!</h4>
+                          <h4 className="font-bold text-xs text-amber-300">Payment Proof Submitted for Verification!</h4>
                           <p className="text-[11px] text-slate-300 mt-0.5">
-                            Our cashier team has received your transaction reference. Once verified, your invoice will be marked as paid and you will receive an SMS confirmation.
+                            Your transaction has been submitted and is currently in <strong>Pending Review</strong> in our Cashier Verification Queue. Once approved by our cashier, your invoice will be marked as paid and your Official Receipt (OR) will be issued.
                           </p>
                         </div>
                       </div>
@@ -1949,15 +2076,88 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                 <span>Official Billing Receipts (OR)</span>
               </h2>
               <p className="text-xs text-slate-400">
-                Download verified 80mm thermal PDF official receipts for your business or personal records.
+                Official Receipts (OR) are issued once payments are verified and approved by the cashier.
               </p>
             </div>
 
-            {customerPayments.length === 0 ? (
-              <div className="p-12 text-center text-slate-500 bg-slate-900/80 rounded-3xl border border-slate-800 text-xs">
-                No payment transactions recorded yet.
+            {/* Submissions Pending Cashier Approval */}
+            {pendingSubmissions.length > 0 && (
+              <div className="p-5 rounded-3xl bg-amber-950/30 border border-amber-800/50 space-y-4">
+                <div className="flex items-center justify-between border-b border-amber-800/40 pb-3">
+                  <div className="flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-amber-400 animate-pulse" />
+                    <span className="font-bold text-xs text-amber-200 uppercase tracking-wider">
+                      Submissions Awaiting Cashier Approval ({pendingSubmissions.length})
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-amber-400/80 font-mono">
+                    Under Audit
+                  </span>
+                </div>
+
+                <div className="space-y-2.5">
+                  {pendingSubmissions.map((sub) => (
+                    <div
+                      key={sub.id}
+                      className="p-4 rounded-2xl bg-slate-950 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
+                    >
+                      <div className="flex items-center gap-3">
+                        {sub.receiptImageUrl ? (
+                          <img
+                            src={sub.receiptImageUrl}
+                            alt="Receipt"
+                            className="w-10 h-10 object-cover rounded-xl border border-slate-700 shrink-0"
+                          />
+                        ) : (
+                          <div className="w-10 h-10 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center shrink-0 text-slate-500 font-mono text-[10px]">
+                            No Pic
+                          </div>
+                        )}
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono font-bold text-slate-100">#{sub.submissionNumber}</span>
+                            <span className="font-mono font-bold text-amber-300">{formatCurrency(sub.amount)}</span>
+                            <span className="px-2 py-0.5 rounded-full text-[9px] font-bold uppercase bg-amber-950 text-amber-400 border border-amber-800/50">
+                              Pending Review
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-slate-400 mt-0.5 font-mono">
+                            Channel: <strong className="text-slate-200">{sub.paymentMethod.toUpperCase()}</strong> • Ref: <span className="text-cyan-400">{sub.referenceNumber}</span> • {formatDateTime(sub.submittedAt)}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="text-right sm:self-center">
+                        <span className="text-[11px] text-amber-400/90 font-medium block">
+                          Awaiting Cashier Approval
+                        </span>
+                        <span className="text-[10px] text-slate-500 block">
+                          OR issued upon cashier verification
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
-            ) : (
+            )}
+
+            {/* Finalized / Issued Official Receipts */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between px-1">
+                <span className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                  <Receipt className="w-4 h-4 text-emerald-400" />
+                  <span>Approved & Issued Official Receipts ({customerPayments.length})</span>
+                </span>
+              </div>
+
+              {customerPayments.length === 0 ? (
+                <div className="p-10 text-center text-slate-500 bg-slate-900/80 rounded-3xl border border-slate-800 text-xs space-y-1">
+                  <p className="font-medium text-slate-400">No finalized official receipts issued yet.</p>
+                  <p className="text-[11px] text-slate-500">
+                    Once your payment submission is verified and approved by our cashier, your official receipt will appear here for download.
+                  </p>
+                </div>
+              ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {customerPayments.map((p) => {
                   const method = getPaymentMethodLabel(p.paymentMethod);
@@ -2022,7 +2222,8 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
               </div>
             )}
           </div>
-        )}
+        </div>
+      )}
 
         {/* ================= TAB 5: SUPPORT & TICKETS ================= */}
         {portalTab === 'support' && (
