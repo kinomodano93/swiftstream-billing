@@ -1055,6 +1055,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // --- Invoicing Operations ---
   const createInvoice = (invoiceData: Omit<Invoice, 'id' | 'createdAt'>): Invoice => {
+    // Guard: Prevent duplicate invoice creation for the subscriber for the same month (whether paid or unpaid)
+    const billingMonth = invoiceData.billingPeriodStart
+      ? invoiceData.billingPeriodStart.slice(0, 7)
+      : invoiceData.issueDate
+      ? invoiceData.issueDate.slice(0, 7)
+      : new Date().toISOString().slice(0, 7);
+
+    const existingInvoice = invoices.find(
+      (inv) =>
+        inv.customerId === invoiceData.customerId &&
+        (inv.billingPeriodStart?.startsWith(billingMonth) || inv.issueDate?.startsWith(billingMonth))
+    );
+
+    if (existingInvoice) {
+      showToast(
+        'warning',
+        'Duplicate Invoice Blocked',
+        `Subscriber already has an invoice (${existingInvoice.invoiceNumber} • ${existingInvoice.status.toUpperCase()}) for ${billingMonth}.`
+      );
+      return existingInvoice;
+    }
+
     const newInvoice: Invoice = {
       ...invoiceData,
       id: generateId('INV'),
@@ -1149,7 +1171,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const alreadyInvoiced = invoices.some(
         (inv) =>
           inv.customerId === customer.id &&
-          inv.billingPeriodStart.startsWith(options.billingMonth)
+          (inv.billingPeriodStart?.startsWith(options.billingMonth) ||
+            inv.issueDate?.startsWith(options.billingMonth))
       );
 
       if (alreadyInvoiced) return;

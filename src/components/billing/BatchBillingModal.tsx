@@ -31,7 +31,9 @@ export const BatchBillingModal: React.FC<BatchBillingModalProps> = ({ onClose })
 
     // Check if already invoiced for this month
     const hasInvoice = invoices.some(
-      (inv) => inv.customerId === c.id && inv.billingPeriodStart.startsWith(billingMonth)
+      (inv) =>
+        inv.customerId === c.id &&
+        (inv.billingPeriodStart?.startsWith(billingMonth) || inv.issueDate?.startsWith(billingMonth))
     );
     return !hasInvoice;
   });
