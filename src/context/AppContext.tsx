@@ -572,6 +572,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const unsubExpenses = subscribeToCollection<Expense>(COLLECTIONS.EXPENSES, (data) => {
       setExpenses(data || []);
     });
+    const unsubRemittances = subscribeToCollection<DailyRemittanceRecord>(COLLECTIONS.DAILY_REMITTANCES, (data) => {
+      setDailyRemittances(data || []);
+    });
     const unsubAuditLogs = subscribeToCollection<AuditLog>(COLLECTIONS.AUDIT_LOGS, (data) => {
       if (data && data.length > 0) {
         const sorted = [...data].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
@@ -601,6 +604,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       unsubFiberClosures();
       unsubMikrotik();
       unsubExpenses();
+      unsubRemittances();
       unsubAuditLogs();
       unsubProfile();
     };
@@ -1739,6 +1743,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       id: generateId('REMIT'),
     };
     setDailyRemittances((prev) => [newRemittance, ...prev]);
+    saveFirestoreDoc(COLLECTIONS.DAILY_REMITTANCES, newRemittance);
     showToast('success', 'Remittance Created', `Created remittance sheet for ${newRemittance.remittanceDate}.`);
     return newRemittance;
   };
@@ -1748,7 +1753,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       prev.map((r) => {
         if (r.id === id) {
           const discrepancy = actualCashInDrawer - r.totalCash;
-          return {
+          const updated: DailyRemittanceRecord = {
             ...r,
             actualCashInDrawer,
             discrepancy,
@@ -1757,6 +1762,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             status: 'closed' as const,
             closedAt: new Date().toISOString(),
           };
+          saveFirestoreDoc(COLLECTIONS.DAILY_REMITTANCES, updated);
+          return updated;
         }
         return r;
       })
