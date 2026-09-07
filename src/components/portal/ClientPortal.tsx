@@ -37,6 +37,7 @@ import {
   Upload,
   Image as ImageIcon,
   Receipt,
+  Eye,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import confetti from 'canvas-confetti';
@@ -133,6 +134,8 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [isSubmittingPayment, setIsSubmittingPayment] = useState<boolean>(false);
   const [justPaidPaymentId, setJustPaidPaymentId] = useState<string | null>(null);
+  const [qrDisplayMode, setQrDisplayMode] = useState<'merchant' | 'dynamic'>('merchant');
+  const [previewQrModal, setPreviewQrModal] = useState<string | null>(null);
 
   // Active Xendit Gateway Session
   const [activeXenditSession, setActiveXenditSession] = useState<XenditInvoiceResponse | null>(null);
@@ -1806,30 +1809,82 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                 <div className="p-5 rounded-3xl bg-slate-950 border border-slate-800 space-y-4">
                   <div className="flex flex-col md:flex-row items-center justify-center gap-6">
                     {/* QR Code Container */}
-                    <div className="bg-white p-4 rounded-3xl border-2 border-slate-700 flex-shrink-0 shadow-2xl flex flex-col items-center gap-2">
-                      <div className="flex items-center gap-1.5 text-slate-900 font-bold text-[11px] tracking-wider uppercase border-b border-slate-200 pb-1 w-full justify-center">
-                        <QrCode className="w-4 h-4 text-rose-600" />
-                        <span>BSP QR Ph Dynamic</span>
-                      </div>
+                    {(() => {
+                      const customQr =
+                        payMethod === 'gcash'
+                          ? businessProfile.paymentGateways.gcashQrImage
+                          : payMethod === 'maya'
+                          ? businessProfile.paymentGateways.mayaQrImage
+                          : undefined;
 
-                      <QRCodeSVG
-                        value={generateDynamicQrPhPayload({
-                          merchantName: businessProfile.tradeName || 'SWIFTSTREAM TELECOM',
-                          merchantCity: businessProfile.address.city || 'LAGONOY',
-                          accountNumber: customer.accountNo,
-                          amount: Number(payAmount) || (customer.balance > 0 ? customer.balance : customer.monthlyFee),
-                          invoiceNumber: selectedPayInvoice?.invoiceNumber || 'BILL-2026',
-                          mobileNumber: businessProfile.paymentGateways.gcashNumber || '09624171684',
-                          serviceProvider: payMethod === 'gcash' ? 'gcash' : payMethod === 'maya' ? 'maya' : 'qrph_national',
-                        })}
-                        size={150}
-                        level="M"
-                      />
+                      const hasCustomQr = Boolean(customQr && customQr.trim());
+                      const isShowingCustom = hasCustomQr && qrDisplayMode === 'merchant';
 
-                      <div className="text-center text-[10px] text-slate-600 font-mono font-bold">
-                        ₱{(Number(payAmount) || (customer.balance > 0 ? customer.balance : customer.monthlyFee)).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                      </div>
-                    </div>
+                      return (
+                        <div className="bg-white p-4 rounded-3xl border-2 border-slate-700 flex-shrink-0 shadow-2xl flex flex-col items-center gap-2 min-w-[210px] max-w-[240px]">
+                          <div className="flex items-center justify-between gap-1 text-slate-900 font-bold text-[10px] tracking-wider uppercase border-b border-slate-200 pb-1.5 w-full">
+                            <div className="flex items-center gap-1.5 truncate">
+                              <QrCode className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                              <span className="truncate">
+                                {isShowingCustom
+                                  ? payMethod === 'gcash'
+                                    ? 'Official GCash QR'
+                                    : 'Official Maya QR'
+                                  : 'Dynamic QR Ph'}
+                              </span>
+                            </div>
+
+                            {hasCustomQr && (
+                              <button
+                                type="button"
+                                onClick={() => setQrDisplayMode((prev) => (prev === 'merchant' ? 'dynamic' : 'merchant'))}
+                                className="text-[9px] font-mono text-blue-700 hover:text-blue-900 underline font-semibold shrink-0 cursor-pointer"
+                                title="Switch QR Code view"
+                              >
+                                {qrDisplayMode === 'merchant' ? 'show dynamic' : 'show merchant'}
+                              </button>
+                            )}
+                          </div>
+
+                          {isShowingCustom ? (
+                            <div className="relative group flex flex-col items-center">
+                              <img
+                                src={customQr}
+                                alt={`${payMethod.toUpperCase()} Merchant QR Code`}
+                                className="w-[155px] h-[155px] object-contain rounded-xl p-1 bg-white border border-slate-200 cursor-pointer hover:opacity-95 transition-opacity shadow-sm"
+                                onClick={() => setPreviewQrModal(customQr || null)}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setPreviewQrModal(customQr || null)}
+                                className="mt-1 text-[10px] text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1 cursor-pointer"
+                              >
+                                <Eye className="w-3 h-3" />
+                                <span>Tap to Enlarge</span>
+                              </button>
+                            </div>
+                          ) : (
+                            <QRCodeSVG
+                              value={generateDynamicQrPhPayload({
+                                merchantName: businessProfile.tradeName || 'SWIFTSTREAM TELECOM',
+                                merchantCity: businessProfile.address.city || 'LAGONOY',
+                                accountNumber: customer.accountNo,
+                                amount: Number(payAmount) || (customer.balance > 0 ? customer.balance : customer.monthlyFee),
+                                invoiceNumber: selectedPayInvoice?.invoiceNumber || 'BILL-2026',
+                                mobileNumber: businessProfile.paymentGateways.gcashNumber || '09624171684',
+                                serviceProvider: payMethod === 'gcash' ? 'gcash' : payMethod === 'maya' ? 'maya' : 'qrph_national',
+                              })}
+                              size={150}
+                              level="M"
+                            />
+                          )}
+
+                          <div className="text-center text-[10px] text-slate-600 font-mono font-bold">
+                            ₱{(Number(payAmount) || (customer.balance > 0 ? customer.balance : customer.monthlyFee)).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                     <div className="space-y-3 text-xs flex-1 text-center md:text-left">
                       <div className="flex items-center justify-center md:justify-between">
@@ -2599,6 +2654,57 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
           </div>
         )}
       </main>
+
+      {/* QR Code Enlarged Preview Modal */}
+      {previewQrModal && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => setPreviewQrModal(null)}
+        >
+          <div
+            className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-sm w-full shadow-2xl relative flex flex-col items-center gap-4 text-center animate-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() => setPreviewQrModal(null)}
+              className="absolute top-4 right-4 p-2 rounded-full bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center gap-2 text-cyan-400 font-bold text-sm tracking-wide uppercase">
+              <QrCode className="w-5 h-5" />
+              <span>Official Merchant QR</span>
+            </div>
+
+            <div className="bg-white p-3 rounded-2xl shadow-inner border border-slate-300">
+              <img
+                src={previewQrModal}
+                alt="Enlarged QR Code"
+                className="w-64 h-64 object-contain rounded-xl"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <p className="text-xs font-semibold text-slate-200">
+                Scan or screenshot with your payment app
+              </p>
+              <p className="text-[11px] text-slate-400">
+                {businessProfile.tradeName || 'SwiftStream Telecom'} • Instant Verification
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setPreviewQrModal(null)}
+              className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-bold transition-all cursor-pointer"
+            >
+              Done / Close
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 24/7 Gemini AI Client Support Agent */}
       <GeminiAiAssistant mode="client" activeCustomer={customer} />

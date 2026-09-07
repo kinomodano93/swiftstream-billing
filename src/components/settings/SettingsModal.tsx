@@ -36,6 +36,7 @@ import {
   Sun,
   Moon,
   Image as ImageIcon,
+  QrCode,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import {
@@ -101,6 +102,15 @@ export const SettingsModal: React.FC = () => {
     setProvince(businessProfile.address.province);
     setZipCode(businessProfile.address.zipCode);
     setLandmark(businessProfile.address.landmark || '');
+    setGcashNumber(businessProfile.paymentGateways.gcashNumber || '');
+    setGcashName(businessProfile.paymentGateways.gcashName || '');
+    setGcashQrImage(businessProfile.paymentGateways.gcashQrImage || '');
+    setMayaNumber(businessProfile.paymentGateways.mayaNumber || '');
+    setMayaName(businessProfile.paymentGateways.mayaName || '');
+    setMayaQrImage(businessProfile.paymentGateways.mayaQrImage || '');
+    setBankName(businessProfile.paymentGateways.bankName || '');
+    setBankAccountName(businessProfile.paymentGateways.bankAccountName || '');
+    setBankAccountNumber(businessProfile.paymentGateways.bankAccountNumber || '');
   }, [businessProfile]);
 
   // Address
@@ -918,7 +928,7 @@ export const SettingsModal: React.FC = () => {
             <form onSubmit={handleSaveProfile} className="p-6 rounded-3xl bg-slate-900/80 border border-slate-800 space-y-6 text-xs shadow-card">
               <div className="space-y-4">
                 <h4 className="font-bold text-slate-200 uppercase tracking-wider text-[11px] text-cyan-400">
-                  GCash Payment Gateway
+                  GCash Payment Gateway & QR Code
                 </h4>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -945,11 +955,77 @@ export const SettingsModal: React.FC = () => {
                     />
                   </div>
                 </div>
+
+                {/* GCash QR Upload Box */}
+                <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-16 h-16 rounded-2xl bg-white border border-slate-700 p-1 flex items-center justify-center shrink-0 shadow-md">
+                        {gcashQrImage ? (
+                          <img
+                            src={gcashQrImage}
+                            alt="GCash QR Preview"
+                            className="w-full h-full object-contain rounded-xl"
+                          />
+                        ) : (
+                          <div className="flex flex-col items-center justify-center text-slate-400">
+                            <QrCode className="w-7 h-7 text-blue-600 mb-0.5" />
+                            <span className="text-[8px] font-bold text-slate-600 font-mono">NO QR</span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div>
+                        <span className="font-bold text-slate-200 block text-xs">GCash Merchant / Payment QR</span>
+                        <p className="text-[11px] text-slate-400 mt-0.5">
+                          Upload your official GCash QR Code. This will be displayed in the Subscriber Portal for subscribers to scan and pay.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <label className="flex items-center gap-1.5 px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold transition-colors cursor-pointer shadow-md shadow-blue-600/20">
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>{gcashQrImage ? 'Change GCash QR' : 'Upload GCash QR'}</span>
+                        <input
+                          type="file"
+                          accept="image/png, image/jpeg, image/webp, image/svg+xml"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              if (file.size > 2 * 1024 * 1024) {
+                                alert('Please select an image smaller than 2MB.');
+                                return;
+                              }
+                              const reader = new FileReader();
+                              reader.onload = () => {
+                                setGcashQrImage(reader.result as string);
+                              };
+                              reader.readAsDataURL(file);
+                            }
+                          }}
+                        />
+                      </label>
+
+                      {gcashQrImage && (
+                        <button
+                          type="button"
+                          onClick={() => setGcashQrImage('')}
+                          className="flex items-center gap-1.5 px-3 py-2 bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/40 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Remove</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
               </div>
 
               <div className="space-y-4 pt-4 border-t border-slate-800">
                 <h4 className="font-bold text-slate-200 uppercase tracking-wider text-[11px] text-cyan-400">
-                  Maya Gateway
+                  Maya Gateway & QR Code
                 </h4>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -974,6 +1050,72 @@ export const SettingsModal: React.FC = () => {
                       className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100"
                       required
                     />
+                  </div>
+                </div>
+
+                {/* Maya QR Upload Box */}
+                <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-16 h-16 rounded-2xl bg-white border border-slate-700 p-1 flex items-center justify-center shrink-0 shadow-md">
+                        {mayaQrImage ? (
+                          <img
+                            src={mayaQrImage}
+                            alt="Maya QR Preview"
+                            className="w-full h-full object-contain rounded-xl"
+                          />
+                        ) : (
+                          <div className="flex flex-col items-center justify-center text-slate-400">
+                            <QrCode className="w-7 h-7 text-emerald-600 mb-0.5" />
+                            <span className="text-[8px] font-bold text-slate-600 font-mono">NO QR</span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div>
+                        <span className="font-bold text-slate-200 block text-xs">Maya Merchant / Payment QR</span>
+                        <p className="text-[11px] text-slate-400 mt-0.5">
+                          Upload your official Maya QR Code. This will be displayed in the Subscriber Portal when paying via Maya.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <label className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold transition-colors cursor-pointer shadow-md shadow-emerald-600/20">
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>{mayaQrImage ? 'Change Maya QR' : 'Upload Maya QR'}</span>
+                        <input
+                          type="file"
+                          accept="image/png, image/jpeg, image/webp, image/svg+xml"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              if (file.size > 2 * 1024 * 1024) {
+                                alert('Please select an image smaller than 2MB.');
+                                return;
+                              }
+                              const reader = new FileReader();
+                              reader.onload = () => {
+                                setMayaQrImage(reader.result as string);
+                              };
+                              reader.readAsDataURL(file);
+                            }
+                          }}
+                        />
+                      </label>
+
+                      {mayaQrImage && (
+                        <button
+                          type="button"
+                          onClick={() => setMayaQrImage('')}
+                          className="flex items-center gap-1.5 px-3 py-2 bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/40 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Remove</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
