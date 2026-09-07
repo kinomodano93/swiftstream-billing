@@ -247,13 +247,14 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
   };
 
   // Fetch PPPoE profiles from the linked MikroTik router
-  const handleFetchProfiles = async () => {
+  const handleFetchProfiles = async (overridePass?: string) => {
     if (!selectedRouter) {
       showToast('warning', 'No Router Selected', 'Please select a target MikroTik router first.');
       return;
     }
     setIsFetchingProfiles(true);
-    const passToUse = routerPasswordOverride || selectedRouter.password || '';
+    setFetchAuth401(false);
+    const passToUse = overridePass !== undefined ? overridePass : (routerPasswordOverride || selectedRouter.password || '');
     try {
       const result = await fetchPppoeProfilesDetailed({
         id: selectedRouter.id,
@@ -266,6 +267,9 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
       });
       if (result.success && result.data.length > 0) {
         setFetchedProfiles(result.data);
+        if (passToUse && passToUse !== selectedRouter.password) {
+          updateMikrotikDevice(selectedRouter.id, { password: passToUse });
+        }
         // Auto-select a profile that matches the current plan speed
         const speedMbps = selectedPlan?.speedMbps;
         const matched = result.data.find(
@@ -281,11 +285,20 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
         } else {
           showToast('success', 'Profiles Loaded', `${result.data.length} profiles fetched from ${selectedRouter.name}. Please select one.`);
         }
+      } else if (result.statusCode === 401 || result.error === 'Unauthorized') {
+        setFetchAuth401(true);
+        showToast('error', 'Authentication Required', result.message || 'RouterOS authentication failed (HTTP 401). Please enter the router password.');
       } else {
-        showToast('warning', 'No Profiles Found', result.error || 'No PPPoE profiles returned from router.');
+        showToast('warning', 'No Profiles Found', result.message || result.error || 'No PPPoE profiles returned from router.');
       }
     } catch (err: any) {
-      showToast('error', 'Profile Fetch Failed', err?.message || 'Failed to query PPPoE profiles from router.');
+      const msg: string = err?.message || '';
+      if (msg.includes('401') || msg.toLowerCase().includes('unauthorized')) {
+        setFetchAuth401(true);
+        showToast('error', 'Authentication Required', 'RouterOS authentication failed (HTTP 401). Please enter the router password.');
+      } else {
+        showToast('error', 'Profile Fetch Failed', msg || 'Failed to query PPPoE profiles from router.');
+      }
     } finally {
       setIsFetchingProfiles(false);
     }
