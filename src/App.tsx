@@ -217,7 +217,12 @@ const MainLayout: React.FC = () => {
                 />
               )}
 
-              {activeTab === 'mikrotik' && <MikrotikDeviceManager onOpenTerminal={handleOpenTerminal} />}
+              {activeTab === 'mikrotik' && (
+                <MikrotikDeviceManager
+                  onOpenTerminal={handleOpenTerminal}
+                  onSelectCustomer={(id) => setSelectedCustomerId(id)}
+                />
+              )}
 
               {activeTab === 'genieacs' && <GenieAcsManager />}
 

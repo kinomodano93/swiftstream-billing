@@ -1132,3 +1132,34 @@ export interface DhcpLease {
   customerName?: string;
 }
 
+// -------------------------------------------------------------
+// 13. MikroTik Torch Traffic Flow Monitor
+// -------------------------------------------------------------
+export interface TorchFlow {
+  id: string;
+  srcAddress: string;
+  srcPort?: number | string;
+  dstAddress: string;
+  dstPort?: number | string;
+  protocol: string;
+  txRateBps: number;
+  rxRateBps: number;
+  txPackets?: number;
+  rxPackets?: number;
+  serviceLabel?: string;
+  customerId?: string;
+  customerName?: string;
+  accountNo?: string;
+  planName?: string;
+}
+
+export interface TorchFilterOptions {
+  interfaceName: string;
+  srcAddress?: string;
+  dstAddress?: string;
+  port?: string;
+  protocol?: string;
+  mode?: 'top_talkers' | 'detailed_flows';
+  autoStopSeconds?: number;
+}
+

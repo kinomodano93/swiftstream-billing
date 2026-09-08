@@ -65,6 +65,7 @@ import {
   RouterHealthInfo,
 } from '../../services/mikrotikApiService';
 import { PppoeManager } from './PppoeManager';
+import { MikrotikTorchMonitor } from './MikrotikTorchMonitor';
 
 // Detect dynamic PPPoE session interfaces in a raw RouterOS interface entry
 const isPppoeSessionIface = (i: any): boolean => {
@@ -87,9 +88,13 @@ export interface TelemetryPoint {
 
 interface MikrotikDeviceManagerProps {
   onOpenTerminal?: (deviceId?: string) => void;
+  onSelectCustomer?: (customerId: string) => void;
 }
 
-export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({ onOpenTerminal }) => {
+export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({
+  onOpenTerminal,
+  onSelectCustomer,
+}) => {
   const {
     mikrotikDevices,
     addMikrotikDevice,
@@ -132,8 +137,9 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({ on
       location: 'Main POP Operations Rack, Lagonoy',
     };
 
-  // 4 Primary Streamlined Tabs
-  const [activeTab, setActiveTab] = useState<'overview' | 'interfaces' | 'pppoe' | 'pppoe_sessions' | 'queues' | 'fleet'>('overview');
+  // Streamlined Tabs
+  const [activeTab, setActiveTab] = useState<'overview' | 'interfaces' | 'torch' | 'pppoe_sessions' | 'pppoe' | 'queues' | 'fleet'>('overview');
+  const [torchPreselect, setTorchPreselect] = useState<{ iface?: string; ip?: string } | null>(null);
 
   // Live Telemetry & Polling State
   const [isLiveStreaming, setIsLiveStreaming] = useState<boolean>(true);
@@ -1060,6 +1066,21 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({ on
         </button>
 
         <button
+          onClick={() => {
+            setTorchPreselect(null);
+            setActiveTab('torch');
+          }}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+            activeTab === 'torch'
+              ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+          }`}
+        >
+          <Flame className={`w-4 h-4 ${activeTab === 'torch' ? 'text-slate-950 fill-current' : 'text-amber-400'}`} />
+          <span>Torch Monitor</span>
+        </button>
+
+        <button
           onClick={() => setActiveTab('pppoe_sessions')}
           className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
             activeTab === 'pppoe_sessions'
@@ -1811,6 +1832,16 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({ on
         </div>
       )}
 
+      {/* TAB: MIKROTIK TORCH TRAFFIC MONITOR */}
+      {activeTab === 'torch' && (
+        <MikrotikTorchMonitor
+          device={selectedDevice}
+          initialInterface={torchPreselect?.iface}
+          initialSubscriberIp={torchPreselect?.ip}
+          onSelectCustomer={onSelectCustomer}
+        />
+      )}
+
       {/* TAB: LIVE PPPoE SESSION INTERFACES (separated from hardware ports) */}
       {activeTab === 'pppoe_sessions' && (
         <div className="p-6 rounded-3xl bg-slate-900/90 border border-slate-800 shadow-2xl space-y-5">
@@ -1870,6 +1901,7 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({ on
                     <th className="px-4 py-3">MAC Address</th>
                     <th className="px-4 py-3 text-right">RX Total</th>
                     <th className="px-4 py-3 text-right">TX Total</th>
+                    <th className="px-4 py-3 text-right">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60">
@@ -1891,6 +1923,19 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({ on
                       <td className="px-4 py-2.5 text-slate-400">{sess.macAddress || '—'}</td>
                       <td className="px-4 py-2.5 text-right text-emerald-400">{(sess.rxBytes / 1073741824).toFixed(2)} GB</td>
                       <td className="px-4 py-2.5 text-right text-cyan-400">{(sess.txBytes / 1073741824).toFixed(2)} GB</td>
+                      <td className="px-4 py-2.5 text-right">
+                        <button
+                          onClick={() => {
+                            setTorchPreselect({ iface: sess.name });
+                            setActiveTab('torch');
+                          }}
+                          className="px-2.5 py-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 transition-all cursor-pointer"
+                          title="Torch This Subscriber Session"
+                        >
+                          <Flame className="w-3 h-3" />
+                          <span>Torch</span>
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
