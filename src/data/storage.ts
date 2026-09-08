@@ -310,6 +310,7 @@ export const resetAllDataToDefault = () => {
   localStorage.removeItem('swiftstream_online_applications');
   localStorage.removeItem('swiftstream_online_applications_v4');
   localStorage.removeItem('swiftstream_genieacs_devices');
+  localStorage.removeItem('swiftstream_genieacs_devices_v4');
   localStorage.removeItem('swiftstream_ipoe_leases');
   localStorage.removeItem('swiftstream_radius_users');
   localStorage.removeItem('swiftstream_radius_sessions');

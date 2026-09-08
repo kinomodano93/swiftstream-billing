@@ -39,7 +39,7 @@ export const SYSTEM_ROLES_CONFIG: Record<SystemRole, SystemRoleMeta> = {
     role: 'technician',
     label: 'Field Technician',
     badge: 'NOC / Field Tech',
-    description: 'Fiber GIS map, NAP closures, ONT/GenieACS provisioning, installation logger, and repairs.',
+    description: 'Fiber GIS map, NAP closures, ONT provisioning, installation logger, and repairs.',
     color: 'from-amber-500 to-orange-600',
     badgeBg: 'bg-amber-500/10',
     badgeBorder: 'border-amber-500/30',
@@ -91,7 +91,6 @@ export const ROLE_PERMISSIONS: Record<SystemRole, RolePermissions> = {
       'plans',
       'reports',
       'mikrotik',
-      'genieacs',
       'ipoe_dhcp',
       'network',
       'coverage',
@@ -144,7 +143,6 @@ export const ROLE_PERMISSIONS: Record<SystemRole, RolePermissions> = {
       'network',
       'coverage',
       'mikrotik',
-      'genieacs',
       'ipoe_dhcp',
       'reminders',
     ],
@@ -1102,34 +1100,7 @@ export interface RadiusSession {
 }
 
 // -------------------------------------------------------------
-// 11. GenieACS (TR-069 CPE Management)
-// -------------------------------------------------------------
-export interface GenieAcsDevice {
-  id: string;
-  serialNumber: string;
-  manufacturer: string;
-  productClass: string;
-  hardwareVersion: string;
-  softwareVersion: string;
-  ipAddress: string;
-  macAddress: string;
-  connectionRequestUrl?: string;
-  lastInform: string;
-  isOnline: boolean;
-  subscriberName?: string;
-  pppoeUsername?: string;
-  opticalRxPowerDbm?: number;
-  opticalTxPowerDbm?: number;
-  opticalTemperature?: number;
-  opticalVoltage?: number;
-  wifiSsid?: string;
-  wifiChannel?: number;
-  wanMode?: 'PPPoE' | 'DHCP' | 'Static';
-  uptimeSeconds?: number;
-}
-
-// -------------------------------------------------------------
-// 12. IPoE / DHCP Management
+// 11. IPoE / DHCP Management
 // -------------------------------------------------------------
 export interface DhcpLease {
   id: string;

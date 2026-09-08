@@ -24,7 +24,6 @@ import {
   ChevronLeft,
   FileCheck2,
   ShieldCheck,
-  Router,
   Cable,
   CheckCircle2,
   Receipt,
@@ -187,13 +186,6 @@ export const Sidebar: React.FC = () => {
           icon: Server,
           badge: 'Online',
           badgeColor: 'bg-emerald-500/20 text-emerald-300 font-bold font-mono',
-        },
-        {
-          id: 'genieacs',
-          label: 'GenieACS (TR-069)',
-          icon: Router,
-          badge: 'ACS',
-          badgeColor: 'bg-teal-500/20 text-teal-300 font-bold font-mono',
         },
         {
           id: 'ipoe_dhcp',

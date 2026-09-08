@@ -30,7 +30,6 @@ import { FieldTechHub } from './components/field/FieldTechHub';
 import { GeminiAiAssistant } from './components/ai/GeminiAiAssistant';
 import { AuthModal } from './components/auth/AuthModal';
 import { ClientApplicationManager } from './components/portal/ClientApplicationManager';
-import { GenieAcsManager } from './components/network/GenieAcsManager';
 import { IpoeDhcpManager } from './components/network/IpoeDhcpManager';
 import { StaffUserManager } from './components/users/StaffUserManager';
 import { SystemLogsViewer } from './components/logs/SystemLogsViewer';
@@ -223,8 +222,6 @@ const MainLayout: React.FC = () => {
                   onSelectCustomer={(id) => setSelectedCustomerId(id)}
                 />
               )}
-
-              {activeTab === 'genieacs' && <GenieAcsManager />}
 
               {activeTab === 'ipoe_dhcp' && <IpoeDhcpManager />}
 
