@@ -307,9 +307,10 @@ export const CoverageAreaManager: React.FC = () => {
       </div>
 
       {/* Coverage Areas List / Table */}
-      <div className="space-y-3">
+      {/* Coverage Areas Table */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
         {filteredAreas.length === 0 ? (
-          <div className="p-12 text-center rounded-3xl bg-slate-900 border border-slate-800 space-y-3">
+          <div className="p-12 text-center space-y-3">
             <MapPin className="w-10 h-10 text-slate-600 mx-auto" />
             <h3 className="text-base font-bold text-slate-300">No coverage areas match your filter</h3>
             <p className="text-xs text-slate-500 max-w-sm mx-auto">
@@ -317,141 +318,208 @@ export const CoverageAreaManager: React.FC = () => {
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredAreas.map((area) => {
-              const isFiberReady = area.status === 'fiber_ready';
-              const isExpansion = area.status === 'expansion_ongoing';
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead className="bg-slate-950/80 text-slate-400 font-semibold uppercase text-[10px] tracking-wider border-b border-slate-800">
+                <tr>
+                  <th className="py-3 px-4">Barangay / Sector</th>
+                  <th className="py-3 px-4">Fiber Readiness</th>
+                  <th className="py-3 px-4 text-center">Website Visibility</th>
+                  <th className="py-3 px-4">Network Footprint</th>
+                  <th className="py-3 px-4 hidden lg:table-cell">Description / NOC Notes</th>
+                  <th className="py-3 px-4 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/60">
+                {filteredAreas.map((area) => {
+                  const isFiberReady = area.status === 'fiber_ready';
+                  const isExpansion = area.status === 'expansion_ongoing';
 
-              // Match NAP count and active subscribers in this barangay
-              const matchedNaps = napBoxes.filter(
-                (n) => n.barangay.toLowerCase() === area.barangay.toLowerCase()
-              );
-              const matchedCustomers = customers.filter(
-                (c) => c.address.barangay.toLowerCase() === area.barangay.toLowerCase()
-              );
+                  // Match NAP count and active subscribers in this barangay
+                  const matchedNaps = napBoxes.filter(
+                    (n) => n.barangay.toLowerCase() === area.barangay.toLowerCase()
+                  );
+                  const matchedCustomers = customers.filter(
+                    (c) => c.address.barangay.toLowerCase() === area.barangay.toLowerCase()
+                  );
 
-              return (
-                <div
-                  key={area.id}
-                  className={`p-5 rounded-3xl bg-slate-900/90 border transition-all hover:border-cyan-500/50 flex flex-col justify-between space-y-4 ${
-                    !area.isPubliclyVisible ? 'border-slate-800/60 opacity-75' : 'border-slate-800'
-                  }`}
-                >
-                  <div className="space-y-3">
-                    {/* Top Status & Visibility Badges */}
-                    <div className="flex items-center justify-between gap-2">
-                      <button
-                        type="button"
-                        onClick={() => toggleCoverageFiberReady(area.id)}
-                        className={`px-2.5 py-1 rounded-full text-[11px] font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                          isFiberReady
-                            ? 'bg-emerald-950 text-emerald-300 border border-emerald-800/60 hover:scale-105'
-                            : isExpansion
-                            ? 'bg-amber-950 text-amber-300 border border-amber-800/60 hover:scale-105'
-                            : 'bg-blue-950 text-blue-300 border border-blue-800/60 hover:scale-105'
-                        }`}
-                        title="Click to toggle between Fiber Ready and Under Expansion"
-                      >
-                        <span
-                          className={`w-2 h-2 rounded-full ${
+                  return (
+                    <tr
+                      key={area.id}
+                      className={`hover:bg-slate-800/40 transition-colors ${
+                        !area.isPubliclyVisible ? 'opacity-70 bg-slate-950/20' : ''
+                      }`}
+                    >
+                      {/* Barangay / Sector */}
+                      <td className="py-3 px-4">
+                        <div className="flex items-start gap-2.5">
+                          <div
+                            className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${
+                              isFiberReady
+                                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                                : isExpansion
+                                ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                                : 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
+                            }`}
+                          >
+                            <MapPin className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <div className="font-bold text-slate-100 text-sm flex items-center gap-1.5">
+                              <span>{area.name}</span>
+                            </div>
+                            <div className="text-[11px] text-slate-400 flex items-center gap-1 mt-0.5">
+                              <span>Brgy. {area.barangay}</span>
+                              <span className="text-slate-600">•</span>
+                              <span>{area.city}, {area.province}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+
+                      {/* Fiber Readiness Status */}
+                      <td className="py-3 px-4">
+                        <button
+                          type="button"
+                          onClick={() => toggleCoverageFiberReady(area.id)}
+                          className={`px-2.5 py-1 rounded-full text-[11px] font-bold flex items-center gap-1.5 transition-all cursor-pointer border ${
                             isFiberReady
-                              ? 'bg-emerald-400 animate-pulse'
+                              ? 'bg-emerald-950/80 text-emerald-300 border-emerald-800/60 hover:bg-emerald-900/90'
                               : isExpansion
-                              ? 'bg-amber-400'
-                              : 'bg-blue-400'
+                              ? 'bg-amber-950/80 text-amber-300 border-amber-800/60 hover:bg-amber-900/90'
+                              : 'bg-blue-950/80 text-blue-300 border-blue-800/60 hover:bg-blue-900/90'
                           }`}
-                        />
-                        <span>
-                          {isFiberReady
-                            ? 'Fiber Ready'
-                            : isExpansion
-                            ? 'Expansion Ongoing'
-                            : 'Planned Survey'}
-                        </span>
-                      </button>
+                          title="Click to toggle between Fiber Ready and Under Expansion"
+                        >
+                          <span
+                            className={`w-2 h-2 rounded-full ${
+                              isFiberReady
+                                ? 'bg-emerald-400 animate-pulse'
+                                : isExpansion
+                                ? 'bg-amber-400'
+                                : 'bg-blue-400'
+                            }`}
+                          />
+                          <span>
+                            {isFiberReady
+                              ? 'Fiber Ready'
+                              : isExpansion
+                              ? 'Under Expansion'
+                              : 'Planned Survey'}
+                          </span>
+                        </button>
+                      </td>
 
-                      {/* Public Visibility Checkbox Toggle */}
-                      <label className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-300 cursor-pointer select-none bg-slate-950 px-2.5 py-1 rounded-xl border border-slate-800 hover:border-slate-700">
-                        <input
-                          type="checkbox"
-                          checked={area.isPubliclyVisible}
-                          onChange={() => toggleCoverageVisibility(area.id)}
-                          className="w-3.5 h-3.5 accent-cyan-500 rounded cursor-pointer"
-                        />
-                        <span className={area.isPubliclyVisible ? 'text-cyan-300' : 'text-slate-500'}>
-                          {area.isPubliclyVisible ? 'Public' : 'Hidden'}
-                        </span>
-                      </label>
-                    </div>
+                      {/* Website Visibility */}
+                      <td className="py-3 px-4 text-center">
+                        <button
+                          type="button"
+                          onClick={() => toggleCoverageVisibility(area.id)}
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-[11px] font-semibold border transition-all cursor-pointer ${
+                            area.isPubliclyVisible
+                              ? 'bg-purple-950/60 text-purple-300 border-purple-800/50 hover:bg-purple-900/60'
+                              : 'bg-slate-950 text-slate-500 border-slate-800 hover:text-slate-300'
+                          }`}
+                          title="Click to toggle website public visibility"
+                        >
+                          {area.isPubliclyVisible ? (
+                            <>
+                              <Eye className="w-3.5 h-3.5 text-purple-400" />
+                              <span>Public</span>
+                            </>
+                          ) : (
+                            <>
+                              <EyeOff className="w-3.5 h-3.5 text-slate-500" />
+                              <span>Hidden</span>
+                            </>
+                          )}
+                        </button>
+                      </td>
 
-                    {/* Area Name & Municipality */}
-                    <div>
-                      <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
-                        <span>{area.name}</span>
-                      </h3>
-                      <p className="text-xs text-slate-400 flex items-center gap-1 mt-0.5">
-                        <MapPin className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-                        <span>
-                          Brgy. {area.barangay}, {area.city}, {area.province}
-                        </span>
-                      </p>
-                    </div>
+                      {/* Network Footprint */}
+                      <td className="py-3 px-4">
+                        <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-1.5 text-slate-300 font-medium" title="NAP Distribution Boxes">
+                            <Server className="w-3.5 h-3.5 text-slate-400" />
+                            <span>
+                              <strong className="text-slate-100 font-bold">{area.napBoxCount || matchedNaps.length}</strong> NAPs
+                            </span>
+                          </div>
+                          <span className="text-slate-700">|</span>
+                          <div className="flex items-center gap-1.5 text-cyan-300 font-medium font-mono" title="Active Connected Subscribers">
+                            <Radio className="w-3.5 h-3.5 text-cyan-400" />
+                            <span>
+                              <strong className="font-bold">{matchedCustomers.length}</strong> Lines
+                            </span>
+                          </div>
+                        </div>
+                      </td>
 
-                    {/* Description */}
-                    {area.description && (
-                      <p className="text-xs text-slate-300 bg-slate-950/60 p-2.5 rounded-xl border border-slate-800/80 leading-relaxed">
-                        {area.description}
-                      </p>
-                    )}
+                      {/* Description / NOC Notes */}
+                      <td className="py-3 px-4 hidden lg:table-cell max-w-xs">
+                        {area.description ? (
+                          <p className="text-[11px] text-slate-300 truncate" title={area.description}>
+                            {area.description}
+                          </p>
+                        ) : area.notes ? (
+                          <p className="text-[11px] text-slate-500 italic truncate" title={area.notes}>
+                            Note: {area.notes}
+                          </p>
+                        ) : (
+                          <span className="text-slate-600 text-[11px]">No notes</span>
+                        )}
+                      </td>
 
-                    {/* Meta Indicators */}
-                    <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-400 font-medium">
-                      <div className="p-2 rounded-xl bg-slate-950 border border-slate-800">
-                        <span className="text-[10px] text-slate-500 block">Deployed NAPs:</span>
-                        <span className="font-bold text-slate-200">
-                          {area.napBoxCount || matchedNaps.length} NAP Boxes
-                        </span>
-                      </div>
-                      <div className="p-2 rounded-xl bg-slate-950 border border-slate-800">
-                        <span className="text-[10px] text-slate-500 block">Connected Clients:</span>
-                        <span className="font-bold text-cyan-300 font-mono">
-                          {matchedCustomers.length} Active Lines
-                        </span>
-                      </div>
-                    </div>
-
-                    {area.notes && (
-                      <p className="text-[11px] text-slate-500 italic">
-                        NOC Note: {area.notes}
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Actions Footer */}
-                  <div className="pt-3 border-t border-slate-800 flex items-center justify-between text-xs">
-                    <button
-                      type="button"
-                      onClick={() => handleOpenEditModal(area)}
-                      className="flex items-center gap-1 text-slate-400 hover:text-cyan-300 font-semibold cursor-pointer"
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
-                      <span>Edit Details</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setAreaToDelete(area)}
-                      className="p-1.5 text-rose-400 hover:text-rose-200 hover:bg-rose-950/50 rounded-lg transition-colors cursor-pointer"
-                      title="Delete Coverage Area"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
+                      {/* Actions */}
+                      <td className="py-3 px-4 text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditModal(area)}
+                            className="p-1.5 text-slate-400 hover:text-cyan-300 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                            title="Edit Coverage Barangay"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setAreaToDelete(area)}
+                            className="p-1.5 text-rose-400 hover:text-rose-200 hover:bg-rose-950/50 rounded-lg transition-colors cursor-pointer"
+                            title="Delete Coverage Barangay"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         )}
+
+        {/* Table Footer Summary */}
+        <div className="px-4 py-3 bg-slate-950/80 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-400">
+          <div>
+            Showing <strong className="text-slate-200">{filteredAreas.length}</strong> of{' '}
+            <strong className="text-slate-200">{coverageAreas.length}</strong> coverage sectors
+          </div>
+          <div className="flex items-center gap-4 text-[11px]">
+            <span className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" />
+              <span>{fiberReadyCount} Ready</span>
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-amber-400 inline-block" />
+              <span>{expansionCount} Expansion</span>
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-purple-400 inline-block" />
+              <span>{visibleCount} Public</span>
+            </span>
+          </div>
+        </div>
       </div>
 
       {/* ================= MODAL: ADD / EDIT COVERAGE AREA ================= */}
