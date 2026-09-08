@@ -189,13 +189,6 @@ export const Sidebar: React.FC = () => {
           badgeColor: 'bg-emerald-500/20 text-emerald-300 font-bold font-mono',
         },
         {
-          id: 'radius',
-          label: 'RADIUS / AAA',
-          icon: ShieldCheck,
-          badge: 'FreeRADIUS',
-          badgeColor: 'bg-amber-500/20 text-amber-300 font-bold font-mono',
-        },
-        {
           id: 'genieacs',
           label: 'GenieACS (TR-069)',
           icon: Router,

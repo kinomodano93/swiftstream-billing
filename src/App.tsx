@@ -30,7 +30,6 @@ import { FieldTechHub } from './components/field/FieldTechHub';
 import { GeminiAiAssistant } from './components/ai/GeminiAiAssistant';
 import { AuthModal } from './components/auth/AuthModal';
 import { ClientApplicationManager } from './components/portal/ClientApplicationManager';
-import { RadiusAaaManager } from './components/network/RadiusAaaManager';
 import { GenieAcsManager } from './components/network/GenieAcsManager';
 import { IpoeDhcpManager } from './components/network/IpoeDhcpManager';
 import { StaffUserManager } from './components/users/StaffUserManager';
@@ -219,8 +218,6 @@ const MainLayout: React.FC = () => {
               )}
 
               {activeTab === 'mikrotik' && <MikrotikDeviceManager onOpenTerminal={handleOpenTerminal} />}
-
-              {activeTab === 'radius' && <RadiusAaaManager />}
 
               {activeTab === 'genieacs' && <GenieAcsManager />}
 

@@ -309,7 +309,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     'reports',
     'transaction_logs',
     'mikrotik',
-    'radius',
     'genieacs',
     'ipoe_dhcp',
     'network',
