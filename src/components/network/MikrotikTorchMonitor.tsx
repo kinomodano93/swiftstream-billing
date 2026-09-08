@@ -5,15 +5,10 @@ import {
   Square,
   RefreshCw,
   Search,
-  Filter,
-  ShieldAlert,
   ArrowDownRight,
   ArrowUpRight,
   Activity,
-  User,
   ExternalLink,
-  Clock,
-  Layers,
   Download,
   AlertTriangle,
   Server,
@@ -21,11 +16,18 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { MikrotikDevice, TorchFlow, TorchFilterOptions } from '../../types';
-import { runMikrotikTorch, MikrotikCredentials } from '../../services/mikrotikApiService';
-import { formatCurrency } from '../../utils/formatters';
+import {
+  runMikrotikTorch,
+  getMikrotikInterfaces,
+  fetchInterfaces,
+  fetchPppoeActiveSessions,
+  MikrotikCredentials,
+} from '../../services/mikrotikApiService';
 
 interface MikrotikTorchMonitorProps {
   device: MikrotikDevice;
+  availableInterfaces?: any[];
+  availablePppoeSessions?: any[];
   initialInterface?: string;
   initialSubscriberIp?: string;
   onSelectCustomer?: (customerId: string) => void;
@@ -33,16 +35,29 @@ interface MikrotikTorchMonitorProps {
 
 export const MikrotikTorchMonitor: React.FC<MikrotikTorchMonitorProps> = ({
   device,
+  availableInterfaces,
+  availablePppoeSessions,
   initialInterface,
   initialSubscriberIp,
   onSelectCustomer,
 }) => {
   const { customers, showToast } = useApp();
 
+  // Interface State strictly fetched from the connected router
+  const [routerInterfaces, setRouterInterfaces] = useState<any[]>(() => {
+    const list: any[] = [];
+    if (Array.isArray(availableInterfaces) && availableInterfaces.length > 0) {
+      list.push(...availableInterfaces);
+    }
+    if (Array.isArray(availablePppoeSessions) && availablePppoeSessions.length > 0) {
+      list.push(...availablePppoeSessions);
+    }
+    return list;
+  });
+  const [isLoadingInterfaces, setIsLoadingInterfaces] = useState<boolean>(false);
+
   // Filter & Control States
-  const [selectedInterface, setSelectedInterface] = useState<string>(
-    initialInterface || 'ether1'
-  );
+  const [selectedInterface, setSelectedInterface] = useState<string>(initialInterface || '');
   const [targetIp, setTargetIp] = useState<string>(initialSubscriberIp || '');
   const [protocolFilter, setProtocolFilter] = useState<string>('any');
   const [portFilter, setPortFilter] = useState<string>('any');
@@ -55,25 +70,19 @@ export const MikrotikTorchMonitor: React.FC<MikrotikTorchMonitorProps> = ({
   const [flows, setFlows] = useState<TorchFlow[]>([]);
   const [isLoadingFlows, setIsLoadingFlows] = useState<boolean>(false);
   const [filterSearch, setFilterSearch] = useState<string>('');
+  const [torchError, setTorchError] = useState<string | null>(null);
 
-  // Interface Options (Physical + Dynamic)
-  const interfaceOptions = React.useMemo(() => {
-    const list = ['ether1', 'ether2', 'ether3', 'sfp-plus1', 'bridge-LAN'];
-    if (device.interfaces && Array.isArray(device.interfaces)) {
-      device.interfaces.forEach((iface: any) => {
-        const name = iface.name || iface.interface;
-        if (name && !list.includes(name)) {
-          list.push(name);
-        }
-      });
-    }
-    if (initialInterface && !list.includes(initialInterface)) {
-      list.unshift(initialInterface);
-    }
-    return list;
-  }, [device, initialInterface]);
+  // Real Hardware Interface Telemetry from Router
+  const [hardwareTraffic, setHardwareTraffic] = useState<{
+    rxBps: number;
+    txBps: number;
+    rxPps: number;
+    txPps: number;
+    rxDrops?: number;
+    txDrops?: number;
+  } | null>(null);
 
-  // Polling interval ref
+  // Polling interval refs
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const countdownRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -87,7 +96,116 @@ export const MikrotikTorchMonitor: React.FC<MikrotikTorchMonitorProps> = ({
     useHttps: dev.useSsl || false,
   });
 
+  // Actively query the router for all hardware, virtual, and subscriber session interfaces
+  const syncRouterInterfaces = async () => {
+    setIsLoadingInterfaces(true);
+    try {
+      const creds = getDeviceCreds(device);
+      const ifaceRes = await getMikrotikInterfaces(creds);
+      const ifaces = ifaceRes.success && Array.isArray(ifaceRes.interfaces) && ifaceRes.interfaces.length > 0
+        ? ifaceRes.interfaces
+        : await fetchInterfaces(creds);
+
+      let pppoeList: any[] = [];
+      try {
+        const pppActive = await fetchPppoeActiveSessions(creds);
+        if (pppActive.success && Array.isArray(pppActive.data)) {
+          pppoeList = pppActive.data.map((p: any) => ({
+            name: p.name ? (p.name.startsWith('<pppoe') ? p.name : `<pppoe-${p.name}>`) : (p.sessionId || 'pppoe-in'),
+            type: 'pppoe-in',
+            running: true,
+            comment: `Subscriber: ${p.name || ''} (${p.address || ''})`,
+            macAddress: p.callerId || '',
+            ipAddress: p.address || '',
+          }));
+        }
+      } catch (_) {}
+
+      const allFetched = [...(Array.isArray(ifaces) ? ifaces : []), ...pppoeList];
+      if (allFetched.length > 0) {
+        setRouterInterfaces(allFetched);
+        showToast('success', 'Interfaces Synced', `Loaded ${allFetched.length} live interfaces from ${device.name}`);
+        if (!selectedInterface || !allFetched.some((i: any) => (i.name || i.interface) === selectedInterface)) {
+          const firstUp = allFetched.find((i: any) => i.running === true || i.running === 'true' || i.status === 'running') || allFetched[0];
+          if (firstUp) {
+            setSelectedInterface(firstUp.name || firstUp.interface);
+          }
+        }
+      } else {
+        showToast('warning', 'No Interfaces', `No interfaces detected on ${device.name}`);
+      }
+    } catch (err: any) {
+      console.warn('[Torch] Sync router interfaces error:', err);
+      showToast('error', 'Interface Sync Failed', err.message || 'Could not reach router');
+    } finally {
+      setIsLoadingInterfaces(false);
+    }
+  };
+
+  // Sync interfaces from props or router on initial load
+  useEffect(() => {
+    if (Array.isArray(availableInterfaces) && availableInterfaces.length > 0) {
+      const combined = [...availableInterfaces, ...(availablePppoeSessions || [])];
+      setRouterInterfaces(combined);
+      if (!selectedInterface && combined.length > 0) {
+        const firstUp = combined.find((i: any) => i.running === true || i.running === 'true' || i.status === 'running') || combined[0];
+        setSelectedInterface(firstUp.name || firstUp.interface);
+      }
+    } else {
+      syncRouterInterfaces();
+    }
+  }, [device.id, availableInterfaces, availablePppoeSessions]);
+
+  // Group interfaces by category for the dropdown
+  const categorizedInterfaces = React.useMemo(() => {
+    const physical: any[] = [];
+    const bridges: any[] = [];
+    const pppoe: any[] = [];
+
+    const seen = new Set<string>();
+
+    routerInterfaces.forEach((i: any) => {
+      const name = i.name || i.interface;
+      if (!name || seen.has(name)) return;
+      seen.add(name);
+
+      const typeStr = String(i.type || '').toLowerCase();
+      const nameStr = String(name).toLowerCase();
+      const isRunning = i.running === true || i.running === 'true' || i.status === 'running';
+
+      if (nameStr.startsWith('<pppoe') || typeStr.includes('pppoe') || nameStr.includes('@')) {
+        const cleanUser = name.replace(/^<pppoe-/, '').replace(/>$/, '').toLowerCase();
+        const sub = customers.find(
+          (c) =>
+            c.network?.pppoeUsername?.toLowerCase() === cleanUser ||
+            c.network?.ipAddress === i.ipAddress
+        );
+        pppoe.push({
+          name,
+          comment: sub ? `${sub.fullName} (${sub.accountNo})` : (i.comment || i.ipAddress || ''),
+          running: isRunning,
+        });
+      } else if (nameStr.includes('bridge') || typeStr.includes('bridge') || nameStr.includes('vlan') || typeStr.includes('vlan')) {
+        bridges.push({
+          name,
+          comment: i.comment || (nameStr.includes('bridge') ? 'Bridge Switch' : 'VLAN Interface'),
+          running: isRunning,
+        });
+      } else {
+        physical.push({
+          name,
+          comment: i.comment || '',
+          running: isRunning,
+        });
+      }
+    });
+
+    return { physical, bridges, pppoe };
+  }, [routerInterfaces, customers]);
+
+  // Fetch real traffic snapshot from router
   const fetchTorchSnapshot = async () => {
+    if (!selectedInterface) return;
     const creds = getDeviceCreds(device);
     const options: TorchFilterOptions = {
       interfaceName: selectedInterface,
@@ -97,13 +215,21 @@ export const MikrotikTorchMonitor: React.FC<MikrotikTorchMonitorProps> = ({
     };
 
     setIsLoadingFlows(true);
+    setTorchError(null);
     try {
       const res = await runMikrotikTorch(creds, options, customers);
-      if (res.success && Array.isArray(res.flows)) {
-        setFlows(res.flows);
+      if (res.interfaceTraffic) {
+        setHardwareTraffic(res.interfaceTraffic);
+      }
+      if (res.success) {
+        setFlows(res.flows || []);
+      } else {
+        setTorchError(res.error || res.errorMessage || 'No response from router');
+        setFlows([]);
       }
     } catch (err: any) {
       console.warn('[Torch Monitor Error]:', err.message);
+      setTorchError(err.message || 'Error communicating with router');
     } finally {
       setIsLoadingFlows(false);
     }
@@ -111,10 +237,14 @@ export const MikrotikTorchMonitor: React.FC<MikrotikTorchMonitorProps> = ({
 
   // Start / Stop Handlers
   const handleStartTorch = () => {
+    if (!selectedInterface) {
+      showToast('warning', 'Select Interface', 'Please select a router interface to monitor');
+      return;
+    }
     setRemainingSeconds(autoStopDuration);
     setIsRunning(true);
     fetchTorchSnapshot();
-    showToast('info', 'Torch Started', `Analyzing live packets on ${selectedInterface}`);
+    showToast('info', 'Torch Started', `Monitoring live router traffic on ${selectedInterface}`);
   };
 
   const handleStopTorch = () => {
@@ -132,15 +262,12 @@ export const MikrotikTorchMonitor: React.FC<MikrotikTorchMonitorProps> = ({
       return;
     }
 
-    // Immediate sample
     fetchTorchSnapshot();
 
-    // Sample every 2.5 seconds
     timerRef.current = setInterval(() => {
       fetchTorchSnapshot();
     }, 2500);
 
-    // Countdown timer
     countdownRef.current = setInterval(() => {
       setRemainingSeconds((prev) => {
         if (prev <= 1) {
@@ -215,12 +342,24 @@ export const MikrotikTorchMonitor: React.FC<MikrotikTorchMonitorProps> = ({
     );
   }, [flows, filterSearch]);
 
-  // Total Throughput KPIs
-  const totalDownloadMbps = (flows.reduce((acc, f) => acc + f.rxRateBps, 0) / 1000000).toFixed(1);
-  const totalUploadMbps = (flows.reduce((acc, f) => acc + f.txRateBps, 0) / 1000000).toFixed(1);
+  // Total Throughput KPIs (Prioritizes real router hardware counters)
+  const displayDownloadMbps = hardwareTraffic
+    ? (hardwareTraffic.rxBps / 1000000).toFixed(2)
+    : (flows.reduce((acc, f) => acc + f.rxRateBps, 0) / 1000000).toFixed(1);
+
+  const displayUploadMbps = hardwareTraffic
+    ? (hardwareTraffic.txBps / 1000000).toFixed(2)
+    : (flows.reduce((acc, f) => acc + f.txRateBps, 0) / 1000000).toFixed(1);
+
+  const displayPps = hardwareTraffic
+    ? (hardwareTraffic.rxPps + hardwareTraffic.txPps).toLocaleString()
+    : flows.reduce((acc, f) => acc + ((f.rxPackets || 0) + (f.txPackets || 0)), 0).toLocaleString();
 
   // Helper formatter for bandwidth
   const formatBps = (bps: number) => {
+    if (bps >= 1000000000) {
+      return `${(bps / 1000000000).toFixed(2)} Gbps`;
+    }
     if (bps >= 1000000) {
       return `${(bps / 1000000).toFixed(2)} Mbps`;
     }
@@ -288,7 +427,7 @@ export const MikrotikTorchMonitor: React.FC<MikrotikTorchMonitorProps> = ({
                 )}
               </div>
               <p className="text-xs text-slate-400 mt-0.5">
-                Real-time packet inspection on <strong>{device.name}</strong> • Deep flow & bandwidth analysis
+                Authentic router packet inspection on <strong>{device.name}</strong> • Real-time connection & interface counters
               </p>
             </div>
           </div>
@@ -308,7 +447,8 @@ export const MikrotikTorchMonitor: React.FC<MikrotikTorchMonitorProps> = ({
               <button
                 type="button"
                 onClick={handleStartTorch}
-                className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-orange-500/30 cursor-pointer"
+                disabled={!selectedInterface}
+                className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-orange-500/30 cursor-pointer disabled:opacity-50"
               >
                 <Play className="w-3.5 h-3.5 fill-current" />
                 <span>Start Torch</span>
@@ -318,12 +458,12 @@ export const MikrotikTorchMonitor: React.FC<MikrotikTorchMonitorProps> = ({
             <button
               type="button"
               onClick={fetchTorchSnapshot}
-              disabled={isLoadingFlows}
+              disabled={isLoadingFlows || !selectedInterface}
               className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold transition-all border border-slate-700 cursor-pointer disabled:opacity-50"
               title="Manual Snapshot Refresh"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${isLoadingFlows ? 'animate-spin' : ''}`} />
-              <span>Refresh</span>
+              <span>Sample Flow</span>
             </button>
 
             <button
@@ -340,20 +480,61 @@ export const MikrotikTorchMonitor: React.FC<MikrotikTorchMonitorProps> = ({
 
         {/* Filter Inputs Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3 pt-3 border-t border-slate-800/80 text-xs">
-          {/* Interface Selector */}
+          {/* Interface Selector with Real Router Sync */}
           <div>
-            <label className="block text-slate-400 mb-1 font-semibold text-[11px]">Interface *</label>
-            <select
-              value={selectedInterface}
-              onChange={(e) => setSelectedInterface(e.target.value)}
-              className="w-full px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-cyan-300 font-mono text-xs focus:outline-none focus:border-cyan-500 cursor-pointer"
-            >
-              {interfaceOptions.map((iface) => (
-                <option key={iface} value={iface}>
-                  {iface}
-                </option>
-              ))}
-            </select>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-slate-400 font-semibold text-[11px]">Interface (Live Router) *</label>
+              <button
+                type="button"
+                onClick={syncRouterInterfaces}
+                disabled={isLoadingInterfaces}
+                className="text-[10px] text-cyan-400 hover:text-cyan-300 flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                title="Query /rest/interface directly from router"
+              >
+                <RefreshCw className={`w-2.5 h-2.5 ${isLoadingInterfaces ? 'animate-spin' : ''}`} />
+                <span>Sync</span>
+              </button>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <select
+                value={selectedInterface}
+                onChange={(e) => setSelectedInterface(e.target.value)}
+                disabled={isLoadingInterfaces}
+                className="w-full px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-cyan-300 font-mono text-xs focus:outline-none focus:border-cyan-500 cursor-pointer disabled:opacity-50"
+              >
+                {isLoadingInterfaces && <option value="">Fetching router interfaces...</option>}
+                {!isLoadingInterfaces && routerInterfaces.length === 0 && (
+                  <option value="">No interfaces found on router</option>
+                )}
+                {categorizedInterfaces.physical.length > 0 && (
+                  <optgroup label="Physical & WAN Interfaces">
+                    {categorizedInterfaces.physical.map((i) => (
+                      <option key={i.name} value={i.name}>
+                        {i.name} {i.comment ? `(${i.comment})` : ''} — {i.running ? '🟢 UP' : '⚪ DOWN'}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {categorizedInterfaces.bridges.length > 0 && (
+                  <optgroup label="Bridges & VLANs">
+                    {categorizedInterfaces.bridges.map((i) => (
+                      <option key={i.name} value={i.name}>
+                        {i.name} {i.comment ? `(${i.comment})` : ''} — {i.running ? '🟢 UP' : '⚪ DOWN'}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {categorizedInterfaces.pppoe.length > 0 && (
+                  <optgroup label={`Active PPPoE Sessions (${categorizedInterfaces.pppoe.length})`}>
+                    {categorizedInterfaces.pppoe.map((i) => (
+                      <option key={i.name} value={i.name}>
+                        {i.name} {i.comment ? `(${i.comment})` : ''} — 🟢 ACTIVE
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+              </select>
+            </div>
           </div>
 
           {/* Target IP Address (Optional Filter) */}
@@ -396,6 +577,7 @@ export const MikrotikTorchMonitor: React.FC<MikrotikTorchMonitorProps> = ({
               <option value="80">80 (HTTP / Web)</option>
               <option value="53">53 (DNS)</option>
               <option value="51820">51820 (WireGuard)</option>
+              <option value="8291">8291 (WinBox)</option>
               <option value="27015">27015 (Steam Gaming)</option>
             </select>
           </div>
@@ -417,72 +599,99 @@ export const MikrotikTorchMonitor: React.FC<MikrotikTorchMonitorProps> = ({
         </div>
       </div>
 
+      {/* ERROR BANNER IF ROUTER UNREACHABLE */}
+      {torchError && (
+        <div className="p-4 rounded-2xl bg-rose-950/40 border border-rose-800/60 text-rose-300 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in duration-200">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-rose-400 flex-shrink-0" />
+            <span className="font-mono">{torchError}</span>
+          </div>
+          <button
+            type="button"
+            onClick={fetchTorchSnapshot}
+            className="px-3 py-1.5 bg-rose-600/30 hover:bg-rose-600/50 text-rose-200 border border-rose-500/40 rounded-xl text-xs font-bold cursor-pointer transition-all self-start sm:self-auto"
+          >
+            Retry Query
+          </button>
+        </div>
+      )}
+
       {/* 2. LIVE THROUGHPUT & SUMMARY STATS CARDS */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 shadow-md">
           <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
             <ArrowDownRight className="w-3.5 h-3.5 text-emerald-400" />
-            Torched Download
+            Live Download (Rx)
           </span>
           <div className="mt-1 flex items-baseline gap-1.5">
             <span className="text-xl sm:text-2xl font-black text-emerald-400 font-mono">
-              {totalDownloadMbps}
+              {displayDownloadMbps}
             </span>
             <span className="text-xs text-slate-400 font-bold">Mbps</span>
           </div>
+          <span className="text-[10px] text-slate-500 block mt-1">
+            {hardwareTraffic ? 'Router Hardware Interface Counter' : 'Aggregated Flows'}
+          </span>
         </div>
 
         <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 shadow-md">
           <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
             <ArrowUpRight className="w-3.5 h-3.5 text-cyan-400" />
-            Torched Upload
+            Live Upload (Tx)
           </span>
           <div className="mt-1 flex items-baseline gap-1.5">
             <span className="text-xl sm:text-2xl font-black text-cyan-400 font-mono">
-              {totalUploadMbps}
+              {displayUploadMbps}
             </span>
             <span className="text-xs text-slate-400 font-bold">Mbps</span>
           </div>
+          <span className="text-[10px] text-slate-500 block mt-1">
+            {hardwareTraffic ? 'Router Hardware Interface Counter' : 'Aggregated Flows'}
+          </span>
         </div>
 
         <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 shadow-md">
           <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
             <Activity className="w-3.5 h-3.5 text-amber-400" />
-            Active Packet Flows
+            Packets Throughput
           </span>
           <div className="mt-1 flex items-baseline gap-1.5">
-            <span className="text-xl sm:text-2xl font-black text-slate-100 font-mono">
-              {flows.length}
+            <span className="text-xl sm:text-2xl font-black text-amber-400 font-mono">
+              {displayPps}
             </span>
-            <span className="text-xs text-slate-400">concurrent</span>
+            <span className="text-xs text-slate-400 font-bold">pkts/s</span>
           </div>
+          <span className="text-[10px] text-slate-500 block mt-1">
+            {hardwareTraffic?.rxDrops ? `Drops: ${hardwareTraffic.rxDrops}/s` : 'Zero Packet Drops'}
+          </span>
         </div>
 
         <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 shadow-md">
           <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-            <Server className="w-3.5 h-3.5 text-indigo-400" />
-            Router CPU Status
+            <Server className="w-3.5 h-3.5 text-purple-400" />
+            Active Connections
           </span>
           <div className="mt-1 flex items-baseline gap-1.5">
-            <span className={`text-xl sm:text-2xl font-black font-mono ${
-              device.cpuLoad > 80 ? 'text-rose-400' : device.cpuLoad > 50 ? 'text-amber-400' : 'text-emerald-400'
-            }`}>
-              {device.cpuLoad}%
+            <span className="text-xl sm:text-2xl font-black text-purple-400 font-mono">
+              {flows.length}
             </span>
-            <span className="text-xs text-slate-400">{device.cpuLoad > 80 ? 'Heavy Load' : 'Nominal'}</span>
+            <span className="text-xs text-slate-400 font-bold">flows</span>
           </div>
+          <span className="text-[10px] text-slate-500 block mt-1">
+            {device.cpuLoad !== undefined ? `Router CPU: ${device.cpuLoad}%` : 'RouterOS Connected'}
+          </span>
         </div>
       </div>
 
-      {/* 3. VIEW MODE TOGGLE & IN-TABLE SEARCH */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-900/80 p-3 rounded-2xl border border-slate-800">
-        <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800">
+      {/* 3. VIEW MODE TOGGLE & SEARCH */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
+        <div className="flex items-center p-1 bg-slate-950 border border-slate-800 rounded-2xl w-fit">
           <button
             type="button"
             onClick={() => setViewMode('top_talkers')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+            className={`px-4 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
               viewMode === 'top_talkers'
-                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
+                ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
@@ -491,9 +700,9 @@ export const MikrotikTorchMonitor: React.FC<MikrotikTorchMonitorProps> = ({
           <button
             type="button"
             onClick={() => setViewMode('detailed_flows')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+            className={`px-4 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
               viewMode === 'detailed_flows'
-                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
+                ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
@@ -534,7 +743,9 @@ export const MikrotikTorchMonitor: React.FC<MikrotikTorchMonitorProps> = ({
               {topTalkers.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="text-center py-10 text-slate-500 text-xs font-mono">
-                    No active subscriber traffic detected on {selectedInterface}. Click <strong>Start Torch</strong> to begin sampling.
+                    {isRunning
+                      ? `Live monitoring active on ${selectedInterface}. Router reported 0 active connections (interface is idle).`
+                      : `No active subscriber traffic recorded on ${selectedInterface || 'selected interface'}. Click Start Torch to sample router.`}
                   </td>
                 </tr>
               ) : (
@@ -600,73 +811,110 @@ export const MikrotikTorchMonitor: React.FC<MikrotikTorchMonitorProps> = ({
           </table>
         </div>
       ) : (
-        /* Detailed Raw Connection Flows */
+        /* Detailed Raw Flows Table */
         <div className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-900/80 shadow-2xl">
-          <table className="w-full text-left text-xs">
-            <thead className="bg-slate-950 text-slate-400 uppercase text-[10px] tracking-wider font-mono border-b border-slate-800">
+          <table className="w-full text-left text-xs font-mono">
+            <thead className="bg-slate-950 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-800">
               <tr>
-                <th className="px-4 py-3">Proto</th>
-                <th className="px-4 py-3">Source (Client)</th>
-                <th className="px-4 py-3">Destination (Server / CDN)</th>
-                <th className="px-4 py-3">Identified Service</th>
+                <th className="px-4 py-3">Protocol</th>
+                <th className="px-4 py-3">Source Address</th>
+                <th className="px-4 py-3">Destination Address</th>
+                <th className="px-4 py-3">Service</th>
                 <th className="px-4 py-3">Download (Rx)</th>
                 <th className="px-4 py-3">Upload (Tx)</th>
                 <th className="px-4 py-3">Packets</th>
+                <th className="px-4 py-3">Identified Subscriber</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-800/60 font-mono text-[11px]">
+            <tbody className="divide-y divide-slate-800/60">
               {filteredFlows.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="text-center py-10 text-slate-500 text-xs font-mono">
-                    No active connection flows matched the current filters.
+                  <td colSpan={8} className="text-center py-10 text-slate-500 text-xs">
+                    {isRunning
+                      ? `No matching connection flows found on ${selectedInterface}. Interface is idle.`
+                      : `No active connections captured on ${selectedInterface || 'selected interface'}. Click Start Torch to sample router.`}
                   </td>
                 </tr>
               ) : (
-                filteredFlows.map((flow) => (
-                  <tr key={flow.id} className="hover:bg-slate-800/40 transition-colors">
-                    <td className="px-4 py-3">
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                        flow.protocol === 'tcp'
-                          ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
-                          : flow.protocol === 'udp'
-                          ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
-                          : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                      }`}>
-                        {flow.protocol}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="truncate max-w-[200px]">
-                        {flow.customerName && (
-                          <span className="text-slate-100 font-bold block truncate">{flow.customerName}</span>
-                        )}
-                        <span className="text-cyan-300">
-                          {flow.srcAddress}{flow.srcPort ? `:${flow.srcPort}` : ''}
+                filteredFlows.map((flow) => {
+                  const maxRx = Math.max(...filteredFlows.map((f) => f.rxRateBps || 1));
+                  const flowPercent = Math.min(100, Math.round((flow.rxRateBps / maxRx) * 100));
+
+                  return (
+                    <tr key={flow.id} className="hover:bg-slate-800/40 transition-colors">
+                      <td className="px-4 py-2.5">
+                        <span
+                          className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                            flow.protocol === 'tcp'
+                              ? 'bg-blue-950 text-blue-400 border border-blue-800/50'
+                              : flow.protocol === 'udp'
+                              ? 'bg-amber-950 text-amber-400 border border-amber-800/50'
+                              : 'bg-emerald-950 text-emerald-400 border border-emerald-800/50'
+                          }`}
+                        >
+                          {flow.protocol}
                         </span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="truncate max-w-[220px]">
-                        <span className="text-slate-200 block font-mono">{flow.dstAddress}</span>
-                        {flow.dstPort && (
-                          <span className="text-[10px] text-slate-400">Port {flow.dstPort}</span>
+                      </td>
+                      <td className="px-4 py-2.5 text-slate-200">
+                        <span className="text-cyan-300 font-bold">{flow.srcAddress}</span>
+                        {flow.srcPort && (
+                          <span className="text-slate-500 text-[10px]">:{flow.srcPort}</span>
                         )}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="text-amber-300 font-semibold">{flow.serviceLabel || 'Generic Data'}</span>
-                    </td>
-                    <td className="px-4 py-3 text-emerald-400 font-bold">
-                      {formatBps(flow.rxRateBps)}
-                    </td>
-                    <td className="px-4 py-3 text-cyan-400 font-bold">
-                      {formatBps(flow.txRateBps)}
-                    </td>
-                    <td className="px-4 py-3 text-slate-400">
-                      {flow.rxPackets ? `${flow.rxPackets.toLocaleString()} pkts` : '—'}
-                    </td>
-                  </tr>
-                ))
+                      </td>
+                      <td className="px-4 py-2.5 text-slate-300">
+                        <span>{flow.dstAddress}</span>
+                        {flow.dstPort && (
+                          <span className="text-slate-500 text-[10px]">:{flow.dstPort}</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-300 text-[10px] border border-slate-700">
+                          {flow.serviceLabel || 'Generic'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <div className="space-y-1">
+                          <span className="text-emerald-400 font-bold block">
+                            {formatBps(flow.rxRateBps)}
+                          </span>
+                          <div className="w-16 h-1 bg-slate-800 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-emerald-500 rounded-full"
+                              style={{ width: `${flowPercent}%` }}
+                            />
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-2.5 text-cyan-400 font-bold">
+                        {formatBps(flow.txRateBps)}
+                      </td>
+                      <td className="px-4 py-2.5 text-slate-400 text-[11px]">
+                        {((flow.rxPackets || 0) + (flow.txPackets || 0)).toLocaleString()} pkts
+                      </td>
+                      <td className="px-4 py-2.5">
+                        {flow.customerName ? (
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-slate-200 font-bold font-sans">
+                              {flow.customerName}
+                            </span>
+                            {flow.customerId && onSelectCustomer && (
+                              <button
+                                type="button"
+                                onClick={() => onSelectCustomer(flow.customerId!)}
+                                className="text-cyan-400 hover:text-cyan-300 p-0.5 cursor-pointer"
+                                title="Open subscriber profile"
+                              >
+                                <ExternalLink className="w-3 h-3" />
+                              </button>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-slate-500">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -675,4 +923,3 @@ export const MikrotikTorchMonitor: React.FC<MikrotikTorchMonitorProps> = ({
     </div>
   );
 };
-

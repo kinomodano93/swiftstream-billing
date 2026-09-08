@@ -1836,6 +1836,8 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({
       {activeTab === 'torch' && (
         <MikrotikTorchMonitor
           device={selectedDevice}
+          availableInterfaces={liveInterfaces}
+          availablePppoeSessions={livePppoeSessions}
           initialInterface={torchPreselect?.iface}
           initialSubscriberIp={torchPreselect?.ip}
           onSelectCustomer={onSelectCustomer}

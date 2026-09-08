@@ -2096,9 +2096,25 @@ export const runMikrotikTorch = async (
   creds: MikrotikCredentials,
   options: TorchFilterOptions,
   customers: Customer[] = []
-): Promise<{ success: boolean; flows: TorchFlow[]; errorMessage?: string }> => {
-  const cleanHost = (creds.ipAddress || '').replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+): Promise<{
+  success: boolean;
+  flows: TorchFlow[];
+  error?: string;
+  errorMessage?: string;
+  interfaceTraffic?: {
+    rxBps: number;
+    txBps: number;
+    rxPps: number;
+    txPps: number;
+    rxDrops?: number;
+    txDrops?: number;
+  };
+}> => {
+  const cleanHost = (creds.ipAddress || 'remote.oxapsph.com').replace(/^https?:\/\//, '').replace(/\/.*$/, '');
   const port = creds.port || (creds.useHttps ? 443 : 10988);
+  const protocol = creds.useHttps ? 'https' : 'http';
+  const baseUrl = `${protocol}://${cleanHost}:${port}/rest`;
+  const authHeaders = getAuthHeaders(creds.username, creds.password || '');
 
   const identifyService = (portNum?: number | string, protocol?: string): string => {
     const p = Number(portNum);
@@ -2118,6 +2134,7 @@ export const runMikrotikTorch = async (
     if (p === 3478 || p === 3479) return 'STUN / Voice Chat';
     if (p >= 6881 && p <= 6889) return 'BitTorrent P2P';
     if (p === 5060 || p === 5061) return 'SIP VoIP Telephony';
+    if (p === 8291) return 'MikroTik WinBox';
     return `${proto.toUpperCase()} : ${p}`;
   };
 
@@ -2131,26 +2148,47 @@ export const runMikrotikTorch = async (
     );
   };
 
-  // Try live RouterOS REST API via proxy
+  // 1. Fetch Real Hardware Interface Bandwidth & Packet Counters (/rest/interface/monitor-traffic)
+  let interfaceTraffic: { rxBps: number; txBps: number; rxPps: number; txPps: number; rxDrops?: number; txDrops?: number } | undefined;
   try {
-    const protocol = creds.useHttps ? 'https' : 'http';
-    const targetUrl = `${protocol}://${cleanHost}:${port}/rest/tool/torch`;
-    const authHeaders = getAuthHeaders(creds.username, creds.password || '');
+    const trafficData = await fetchInterfaceTraffic(options.interfaceName || 'ether1', creds);
+    if (trafficData) {
+      interfaceTraffic = {
+        rxBps: trafficData.rxBps,
+        txBps: trafficData.txBps,
+        rxPps: trafficData.rxPps,
+        txPps: trafficData.txPps,
+        rxDrops: trafficData.rxDrops,
+        txDrops: trafficData.txDrops,
+      };
+    }
+  } catch (err: any) {
+    console.debug('[MikroTik Torch] Interface traffic check note:', err?.message);
+  }
 
+  // 2. Primary: Try RouterOS /rest/tool/torch via proxy
+  try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 4500);
+    const timeoutId = setTimeout(() => controller.abort(), 3500);
 
-    const res = await executeMikrotikRequest(targetUrl, {
+    const torchBody: Record<string, any> = {
+      interface: options.interfaceName || 'ether1',
+      duration: 1,
+    };
+    if (options.srcAddress && options.srcAddress !== '0.0.0.0/0') {
+      torchBody['src-address'] = options.srcAddress;
+    }
+    if (options.protocol && options.protocol !== 'any') {
+      torchBody.protocol = options.protocol;
+    }
+    if (options.port && options.port !== 'any') {
+      torchBody.port = options.port;
+    }
+
+    const res = await executeMikrotikRequest(`${baseUrl}/tool/torch`, {
       method: 'POST',
       headers: authHeaders,
-      body: JSON.stringify({
-        interface: options.interfaceName || 'ether1',
-        'src-address': options.srcAddress || '0.0.0.0/0',
-        'dst-address': options.dstAddress || '0.0.0.0/0',
-        port: options.port && options.port !== 'any' ? options.port : undefined,
-        protocol: options.protocol && options.protocol !== 'any' ? options.protocol : undefined,
-        duration: 2,
-      }),
+      body: JSON.stringify(torchBody),
       signal: controller.signal,
     });
     clearTimeout(timeoutId);
@@ -2191,71 +2229,168 @@ export const runMikrotikTorch = async (
           };
         });
 
-        return { success: true, flows: liveFlows };
+        return { success: true, flows: liveFlows, interfaceTraffic };
+      }
+    }
+  } catch (_) {
+    // RouterOS REST API often cannot stream /tool/torch, fallback to authentic RouterOS connection tracking table
+  }
+
+  // 3. Secondary: Fetch Authentic Live Connection Tracking Table from Router (/rest/ip/firewall/connection)
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 4000);
+
+    const connRes = await executeMikrotikRequest(`${baseUrl}/ip/firewall/connection`, {
+      method: 'GET',
+      headers: authHeaders,
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    if (connRes.ok) {
+      const connData = await connRes.json();
+      if (Array.isArray(connData) && connData.length > 0) {
+        let rawConns = connData;
+
+        // Filter by user options
+        if (options.srcAddress && options.srcAddress !== '0.0.0.0/0') {
+          const cleanTarget = options.srcAddress.replace(/\/.*/, '').trim();
+          rawConns = rawConns.filter((c: any) => {
+            const s = String(c['src-address'] || '');
+            const d = String(c['dst-address'] || '');
+            return s.startsWith(cleanTarget) || d.startsWith(cleanTarget);
+          });
+        }
+        if (options.protocol && options.protocol !== 'any') {
+          rawConns = rawConns.filter((c: any) =>
+            String(c.protocol || '').toLowerCase() === options.protocol?.toLowerCase()
+          );
+        }
+        if (options.port && options.port !== 'any') {
+          rawConns = rawConns.filter((c: any) => {
+            const s = String(c['src-address'] || '');
+            const d = String(c['dst-address'] || '');
+            return s.endsWith(`:${options.port}`) || d.endsWith(`:${options.port}`);
+          });
+        }
+
+        const realFlows: TorchFlow[] = rawConns.slice(0, 80).map((item: any, idx: number) => {
+          const srcRaw = String(item['src-address'] || '');
+          const dstRaw = String(item['dst-address'] || '');
+
+          const [srcIp, srcPort] = srcRaw.includes(':')
+            ? [srcRaw.substring(0, srcRaw.lastIndexOf(':')), srcRaw.substring(srcRaw.lastIndexOf(':') + 1)]
+            : [srcRaw, ''];
+          const [dstIp, dstPort] = dstRaw.includes(':')
+            ? [dstRaw.substring(0, dstRaw.lastIndexOf(':')), dstRaw.substring(dstRaw.lastIndexOf(':') + 1)]
+            : [dstRaw, ''];
+          const proto = item.protocol || 'tcp';
+
+          const origPkts = parseInt(item['orig-packets'] || '0', 10) || 0;
+          const replPkts = parseInt(item['repl-packets'] || '0', 10) || 0;
+          const origRate = parseInt(item['orig-rate'] || '0', 10) || 0;
+          const replRate = parseInt(item['repl-rate'] || '0', 10) || 0;
+
+          const sub = resolveSubscriber(srcIp) || resolveSubscriber(dstIp);
+
+          return {
+            id: item['.id'] || item['id'] || `conn-${idx}`,
+            srcAddress: srcIp,
+            srcPort,
+            dstAddress: dstIp,
+            dstPort,
+            protocol: proto,
+            txRateBps: origRate,
+            rxRateBps: replRate,
+            txPackets: origPkts,
+            rxPackets: replPkts,
+            serviceLabel: identifyService(dstPort || srcPort, proto),
+            customerId: sub?.id,
+            customerName: sub?.fullName,
+            accountNo: sub?.accountNo,
+            planName: sub?.planName,
+          };
+        });
+
+        if (realFlows.length > 0) {
+          realFlows.sort((a, b) => ((b.rxRateBps || b.rxPackets || 0) as number) - ((a.rxRateBps || a.rxPackets || 0) as number));
+          return { success: true, flows: realFlows, interfaceTraffic };
+        }
       }
     }
   } catch (err: any) {
-    console.info('[MikroTik Torch] Live REST query fell back to high-fidelity telemetry simulation:', err.message);
+    console.debug('[MikroTik Torch] Connection tracking check note:', err?.message);
   }
 
-  // Realistic ISP Traffic Telemetry Generator (for simulation / demo / offline routers)
-  const cdnPool = [
-    { ip: '142.250.190.46', label: 'Google / YouTube CDN', port: 443, proto: 'tcp' },
-    { ip: '157.240.22.35', label: 'Meta / Facebook / Instagram', port: 443, proto: 'tcp' },
-    { ip: '198.38.118.151', label: 'Netflix OpenConnect CDN', port: 443, proto: 'tcp' },
-    { ip: '104.16.132.229', label: 'Cloudflare Edge CDN', port: 443, proto: 'tcp' },
-    { ip: '162.254.197.36', label: 'Valve / Steam Game Delivery', port: 27015, proto: 'udp' },
-    { ip: '8.8.8.8', label: 'Google Public DNS', port: 53, proto: 'udp' },
-    { ip: '1.1.1.1', label: 'Cloudflare 1.1.1.1 DNS', port: 53, proto: 'udp' },
-    { ip: '13.226.112.54', label: 'Amazon CloudFront Edge', port: 443, proto: 'tcp' },
-    { ip: '143.244.52.12', label: 'TikTok / ByteDance CDN', port: 443, proto: 'udp' },
-    { ip: '185.125.190.36', label: 'Ubuntu / Microsoft OS Update', port: 80, proto: 'tcp' },
-  ];
+  // 4. Tertiary: Fetch Real Simple Queues from Router (/rest/queue/simple)
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3500);
 
-  const activeCustList = customers.filter((c) => c.status === 'active');
-  const targetSub = options.srcAddress
-    ? customers.find((c) => c.network?.ipAddress === options.srcAddress)
-    : undefined;
-
-  const simulatedFlows: TorchFlow[] = [];
-  const count = targetSub ? 8 : Math.min(14, Math.max(6, activeCustList.length));
-
-  for (let i = 0; i < count; i++) {
-    const cust = targetSub || activeCustList[i % activeCustList.length] || {
-      id: `cust-sim-${i}`,
-      fullName: `Subscriber ${i + 1}`,
-      accountNo: `ACC-2026-00${i + 1}`,
-      network: { ipAddress: `10.10.0.${15 + i}` } as any,
-      planName: 'Fiber 50M',
-    };
-
-    const cdn = cdnPool[i % cdnPool.length];
-    const baseBandwidth = Math.floor(Math.random() * 25000000) + 1500000; // 1.5 Mbps to 26.5 Mbps
-    const isHeavy = i === 0 || i === 2;
-    const rxRate = isHeavy ? baseBandwidth * 2.2 : baseBandwidth;
-    const txRate = Math.floor(rxRate * 0.12);
-
-    simulatedFlows.push({
-      id: `sim-flow-${Date.now()}-${i}`,
-      srcAddress: cust.network?.ipAddress || `10.10.0.${15 + i}`,
-      srcPort: Math.floor(Math.random() * 30000) + 20000,
-      dstAddress: cdn.ip,
-      dstPort: cdn.port,
-      protocol: cdn.proto,
-      rxRateBps: rxRate,
-      txRateBps: txRate,
-      rxPackets: Math.floor(rxRate / 1100),
-      txPackets: Math.floor(txRate / 900),
-      serviceLabel: cdn.label,
-      customerId: cust.id,
-      customerName: cust.fullName,
-      accountNo: cust.accountNo,
-      planName: cust.planName,
+    const queueRes = await executeMikrotikRequest(`${baseUrl}/queue/simple`, {
+      method: 'GET',
+      headers: authHeaders,
+      signal: controller.signal,
     });
+    clearTimeout(timeoutId);
+
+    if (queueRes.ok) {
+      const queues = await queueRes.json();
+      if (Array.isArray(queues) && queues.length > 0) {
+        const queueFlows: TorchFlow[] = [];
+        queues.forEach((q: any, idx: number) => {
+          const target = String(q.target || '').replace(/\/.*/, '');
+          const rateStr = String(q.rate || '0/0');
+          const [txRate, rxRate] = rateStr.split('/').map((r) => parseInt(r || '0', 10) || 0);
+          const bytesStr = String(q.bytes || '0/0');
+          const [txBytes, rxBytes] = bytesStr.split('/').map((b) => parseInt(b || '0', 10) || 0);
+
+          if (rxRate > 0 || txRate > 0 || rxBytes > 0) {
+            const sub = resolveSubscriber(target) || customers.find((c) => c.network?.pppoeUsername === q.name);
+            queueFlows.push({
+              id: q['.id'] || `queue-${idx}`,
+              srcAddress: target || q.name,
+              srcPort: '',
+              dstAddress: 'WAN Internet',
+              dstPort: '443',
+              protocol: 'ip',
+              rxRateBps: rxRate,
+              txRateBps: txRate,
+              rxPackets: Math.floor(rxBytes / 1200),
+              txPackets: Math.floor(txBytes / 1000),
+              serviceLabel: `${q.name} Traffic Queue`,
+              customerId: sub?.id,
+              customerName: sub?.fullName,
+              accountNo: sub?.accountNo,
+              planName: sub?.planName,
+            });
+          }
+        });
+
+        if (queueFlows.length > 0) {
+          queueFlows.sort((a, b) => b.rxRateBps - a.rxRateBps);
+          return { success: true, flows: queueFlows, interfaceTraffic };
+        }
+      }
+    }
+  } catch (_) {}
+
+  // 5. Authentic Final State: If interface hardware traffic exists, return real idle flow state
+  if (interfaceTraffic && (interfaceTraffic.rxBps > 0 || interfaceTraffic.txBps > 0 || interfaceTraffic.rxPps > 0)) {
+    return {
+      success: true,
+      flows: [],
+      interfaceTraffic,
+    };
   }
 
-  // Sort descending by highest download throughput
-  simulatedFlows.sort((a, b) => b.rxRateBps - a.rxRateBps);
-
-  return { success: true, flows: simulatedFlows };
+  // If router could not be reached, return genuine error - NEVER mock data
+  return {
+    success: false,
+    flows: [],
+    interfaceTraffic,
+    error: `No traffic or connection flows returned by router ${cleanHost}:${port} for interface '${options.interfaceName}'. Verify the router is reachable and REST API is accessible.`,
+    errorMessage: `No traffic or connection flows returned by router ${cleanHost}:${port} for interface '${options.interfaceName}'. Verify the router is reachable and REST API is accessible.`,
+  };
 };
