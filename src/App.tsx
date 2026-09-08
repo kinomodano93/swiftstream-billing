@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
 import { Sidebar } from './components/layout/Sidebar';
 import { Header } from './components/layout/Header';
@@ -55,7 +55,23 @@ const MainLayout: React.FC = () => {
   const [showPaymentModal, setShowPaymentModal] = useState<boolean>(false);
   const [paymentCustomerId, setPaymentCustomerId] = useState<string | undefined>();
   const [paymentInvoiceId, setPaymentInvoiceId] = useState<string | undefined>();
-  const [portalCustomerId, setPortalCustomerId] = useState<string | null>(null);
+  const [portalCustomerId, setPortalCustomerId] = useState<string | null>(() => {
+    try {
+      return sessionStorage.getItem('swiftstream_portal_customer_id');
+    } catch {
+      return null;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      if (portalCustomerId) {
+        sessionStorage.setItem('swiftstream_portal_customer_id', portalCustomerId);
+      } else {
+        sessionStorage.removeItem('swiftstream_portal_customer_id');
+      }
+    } catch {}
+  }, [portalCustomerId]);
 
   const [showCustomerModal, setShowCustomerModal] = useState<boolean>(false);
   const [customerToEdit, setCustomerToEdit] = useState<Customer | null>(null);

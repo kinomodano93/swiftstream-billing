@@ -294,12 +294,46 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     initial.coverageAreas && initial.coverageAreas.length > 0 ? initial.coverageAreas : initialCoverageAreas
   );
 
+  const VALID_TABS = new Set([
+    'home',
+    'portal',
+    'dashboard',
+    'customers',
+    'applications',
+    'field_ops',
+    'repairs',
+    'billing',
+    'payments',
+    'verification_queue',
+    'plans',
+    'reports',
+    'transaction_logs',
+    'mikrotik',
+    'radius',
+    'genieacs',
+    'ipoe_dhcp',
+    'network',
+    'coverage',
+    'reminders',
+    'staff_users',
+    'system_logs',
+    'settings',
+  ]);
+
   const [activeTab, setActiveTab] = useState<string>(() => {
     try {
+      // 1. Check URL hash first (e.g. #customers, #billing, #dashboard, #portal)
+      if (typeof window !== 'undefined') {
+        const hash = window.location.hash.replace(/^#\/?/, '').trim();
+        if (hash && VALID_TABS.has(hash)) {
+          return hash;
+        }
+      }
+      // 2. Check saved tab in localStorage
       const saved = localStorage.getItem('swiftstream_active_tab');
-      // Always start at the public home page on a fresh visit.
-      // Only restore the saved tab if it's a non-sensitive section (home / portal).
-      if (saved && (saved === 'home' || saved === 'portal')) return saved;
+      if (saved && VALID_TABS.has(saved)) {
+        return saved;
+      }
     } catch {}
     return 'home';
   });
@@ -307,7 +341,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     try {
       localStorage.setItem('swiftstream_active_tab', activeTab);
+      if (typeof window !== 'undefined') {
+        const currentHash = window.location.hash.replace(/^#\/?/, '').trim();
+        if (currentHash !== activeTab) {
+          window.history.replaceState(null, '', `#${activeTab}`);
+        }
+      }
     } catch {}
+  }, [activeTab]);
+
+  // Support browser forward/back buttons and direct hash navigation
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleHashChange = () => {
+      try {
+        const hash = window.location.hash.replace(/^#\/?/, '').trim();
+        if (hash && VALID_TABS.has(hash) && hash !== activeTab) {
+          setActiveTab(hash);
+        }
+      } catch {}
+    };
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
   }, [activeTab]);
 
   const [searchTerm, setSearchTerm] = useState<string>('');
@@ -347,7 +402,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Firebase Authentication State
-  const [currentAuthUser, setCurrentAuthUser] = useState<AppUserProfile | null>(null);
+  const [currentAuthUser, setCurrentAuthUser] = useState<AppUserProfile | null>(() => {
+    try {
+      const localRaw = localStorage.getItem('swiftstream_current_auth_user');
+      if (localRaw) {
+        return JSON.parse(localRaw) as AppUserProfile;
+      }
+    } catch {}
+    return null;
+  });
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
   const [authModalMode, setAuthModalMode] = useState<'signin' | 'signup' | 'forgot'>('signin');
   const [authModalEmail, setAuthModalEmail] = useState<string>('');
@@ -436,6 +499,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
     setCurrentAuthUser(null);
     setActiveTab('home');
+    try {
+      localStorage.setItem('swiftstream_active_tab', 'home');
+      if (typeof window !== 'undefined') {
+        window.history.replaceState(null, '', '#home');
+      }
+    } catch {}
     setSearchTerm('');
     showToast('info', 'Signed Out', 'You have been signed out of SwiftStream.');
   };
