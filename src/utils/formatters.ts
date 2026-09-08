@@ -107,18 +107,26 @@ export const getPaymentMethodLabel = (method: PaymentMethod): { label: string; i
 
 export const getRepairStatusBadge = (status: RepairStatus): { text: string; bg: string; textCol: string } => {
   switch (status) {
+    case 'open':
+      return { text: 'Open Ticket', bg: 'bg-cyan-500/10 border border-cyan-500/30', textCol: 'text-cyan-400' };
     case 'received':
-      return { text: 'Received', bg: 'bg-blue-500/10', textCol: 'text-blue-400' };
+      return { text: 'Received', bg: 'bg-blue-500/10 border border-blue-500/30', textCol: 'text-blue-400' };
     case 'diagnosing':
-      return { text: 'Diagnosing', bg: 'bg-purple-500/10', textCol: 'text-purple-400' };
+      return { text: 'Diagnosing', bg: 'bg-purple-500/10 border border-purple-500/30', textCol: 'text-purple-400' };
     case 'in_progress':
-      return { text: 'In Progress', bg: 'bg-amber-500/10', textCol: 'text-amber-400' };
+      return { text: 'In Progress / Dispatched', bg: 'bg-amber-500/10 border border-amber-500/30', textCol: 'text-amber-400' };
     case 'ready':
-      return { text: 'Ready / Fixed', bg: 'bg-cyan-500/10', textCol: 'text-cyan-400' };
+      return { text: 'Ready / Fixed', bg: 'bg-teal-500/10 border border-teal-500/30', textCol: 'text-teal-400' };
+    case 'resolved':
+      return { text: 'Resolved', bg: 'bg-emerald-500/10 border border-emerald-500/30', textCol: 'text-emerald-400' };
     case 'completed':
-      return { text: 'Completed / Released', bg: 'bg-emerald-500/10', textCol: 'text-emerald-400' };
+      return { text: 'Completed / Released', bg: 'bg-emerald-500/10 border border-emerald-500/30', textCol: 'text-emerald-400' };
+    case 'closed':
+      return { text: 'Closed', bg: 'bg-slate-500/10 border border-slate-700/50', textCol: 'text-slate-400' };
     case 'cancelled':
-      return { text: 'Cancelled', bg: 'bg-slate-500/10', textCol: 'text-slate-400' };
+      return { text: 'Cancelled', bg: 'bg-rose-500/10 border border-rose-700/30', textCol: 'text-rose-400' };
+    default:
+      return { text: status, bg: 'bg-slate-500/10', textCol: 'text-slate-400' };
   }
 };
 

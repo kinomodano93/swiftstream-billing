@@ -167,7 +167,16 @@ export type InvoiceStatus = 'unpaid' | 'paid' | 'partially_paid' | 'overdue' | '
 
 export type PaymentMethod = 'cash' | 'gcash' | 'maya' | 'bank_transfer' | 'check' | 'xendit' | 'other';
 
-export type RepairStatus = 'received' | 'diagnosing' | 'in_progress' | 'ready' | 'completed' | 'cancelled';
+export type RepairStatus =
+  | 'open'
+  | 'in_progress'
+  | 'resolved'
+  | 'closed'
+  | 'received'
+  | 'diagnosing'
+  | 'ready'
+  | 'completed'
+  | 'cancelled';
 
 export type ReminderType = 'upcoming_due' | 'due_today' | 'overdue_warning' | 'disconnection_notice' | 'payment_confirmation';
 
@@ -502,6 +511,16 @@ export interface RepairPart {
   quantity: number;
 }
 
+export interface TicketMessage {
+  id: string;
+  senderId?: string;
+  senderName: string;
+  senderRole: 'customer' | 'technician' | 'admin' | 'system';
+  message: string;
+  timestamp: string;
+  attachments?: string[];
+}
+
 export interface RepairOrder {
   id: string;
   orderNumber: string;
@@ -523,6 +542,8 @@ export interface RepairOrder {
   isPaid: boolean;
   notes?: string;
   createdAt: string;
+  updatedAt?: string;
+  messages?: TicketMessage[];
 }
 
 export interface ReminderLog {
@@ -1133,8 +1154,39 @@ export interface DhcpLease {
 }
 
 // -------------------------------------------------------------
-// 13. MikroTik Torch Traffic Flow Monitor
+// 13. MikroTik Torch Traffic Flow & Application Statistics Monitor
 // -------------------------------------------------------------
+export type ApplicationCategory =
+  | 'web_streaming'
+  | 'gaming'
+  | 'voip_conferencing'
+  | 'vpn_remote'
+  | 'dns_infra'
+  | 'p2p_transfer'
+  | 'other';
+
+export interface ApplicationStatItem {
+  category: ApplicationCategory;
+  name: string;
+  description: string;
+  color: string;
+  badgeBg: string;
+  rxBps: number;
+  txBps: number;
+  totalBps: number;
+  rxPackets: number;
+  txPackets: number;
+  flowsCount: number;
+  percentageShare: number;
+  dominantPorts: (string | number)[];
+  topSubscribers?: {
+    customerName?: string;
+    accountNo?: string;
+    ip: string;
+    bps: number;
+  }[];
+}
+
 export interface TorchFlow {
   id: string;
   srcAddress: string;
@@ -1147,6 +1199,7 @@ export interface TorchFlow {
   txPackets?: number;
   rxPackets?: number;
   serviceLabel?: string;
+  category?: ApplicationCategory;
   customerId?: string;
   customerName?: string;
   accountNo?: string;
@@ -1159,7 +1212,23 @@ export interface TorchFilterOptions {
   dstAddress?: string;
   port?: string;
   protocol?: string;
-  mode?: 'top_talkers' | 'detailed_flows';
+  mode?: 'top_talkers' | 'detailed_flows' | 'app_stats';
   autoStopSeconds?: number;
+}
+
+export interface TorchResult {
+  success: boolean;
+  flows: TorchFlow[];
+  error?: string;
+  errorMessage?: string;
+  interfaceTraffic?: {
+    rxBps: number;
+    txBps: number;
+    rxPps: number;
+    txPps: number;
+    rxDrops?: number;
+    txDrops?: number;
+  };
+  applicationStats?: ApplicationStatItem[];
 }
 

@@ -72,7 +72,7 @@ export const Sidebar: React.FC = () => {
   const activeSubscribers = customers.filter((c) => c.status === 'active').length;
   const overdueCount = customers.filter((c) => c.status === 'overdue' || c.status === 'suspended').length;
   const unpaidInvoicesCount = invoices.filter((i) => i.status === 'unpaid' || i.status === 'overdue').length;
-  const openRepairsCount = repairOrders.filter((r) => r.status !== 'completed' && r.status !== 'cancelled').length;
+  const openRepairsCount = repairOrders.filter((r) => r.status !== 'completed' && r.status !== 'closed' && r.status !== 'cancelled').length;
   const pendingInstallsCount = customers.filter((c) => c.status === 'pending_install').length;
   const fiberReadyCount = coverageAreas.filter((a) => a.status === 'fiber_ready').length;
   const pendingProofsCount = paymentSubmissions.filter((s) => s.status === 'pending_review').length;

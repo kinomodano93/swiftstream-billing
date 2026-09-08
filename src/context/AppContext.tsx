@@ -649,6 +649,47 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setAuditLogs(sorted);
       }
     });
+    const unsubReminders = subscribeToCollection<ReminderLog>(COLLECTIONS.REMINDERS, (data) => {
+      if (data && data.length > 0) setReminders(data);
+    });
+    const unsubAddonCatalog = subscribeToCollection<AddonCatalogItem>(COLLECTIONS.ADDON_CATALOG, (data) => {
+      if (data && data.length > 0) setAddonCatalog(data);
+    });
+    const unsubOltNodes = subscribeToCollection<OltPopNode>(COLLECTIONS.OLT_NODES, (data) => {
+      if (data && data.length > 0) setOltNode(data[0]);
+    });
+    const unsubSystemUsers = subscribeToCollection<any>(COLLECTIONS.SYSTEM_USERS, (data) => {
+      if (data && data.length > 0) {
+        const remoteStaff: StaffUser[] = data
+          .filter((u: any) => u.role && u.role !== 'customer')
+          .map((u: any) => ({
+            id: u.id || u.uid,
+            fullName: u.displayName || u.fullName || 'Staff User',
+            email: u.email,
+            mobile: u.mobile,
+            role: u.role,
+            status: u.status || (u.isApproved ? 'active' : 'suspended'),
+            createdAt: u.createdAt || new Date().toISOString(),
+            updatedAt: u.updatedAt,
+            lastLoginAt: u.lastLoginAt,
+            notes: u.notes,
+          }));
+        if (remoteStaff.length > 0) {
+          setStaffUsers((prev) => {
+            const map = new Map<string, StaffUser>();
+            prev.forEach((p) => {
+              const k = p.email ? p.email.toLowerCase().trim() : p.id;
+              map.set(k, p);
+            });
+            remoteStaff.forEach((r) => {
+              const k = r.email ? r.email.toLowerCase().trim() : r.id;
+              map.set(k, { ...map.get(k), ...r });
+            });
+            return Array.from(map.values());
+          });
+        }
+      }
+    });
     const unsubProfile = subscribeToDocument<BusinessProfile>(
       COLLECTIONS.BUSINESS_PROFILE,
       'company_profile',
@@ -674,6 +715,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       unsubExpenses();
       unsubRemittances();
       unsubAuditLogs();
+      unsubReminders();
+      unsubAddonCatalog();
+      unsubOltNodes();
+      unsubSystemUsers();
       unsubProfile();
     };
   }, []);
@@ -2011,11 +2056,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const addPlan = (planData: Omit<Plan, 'id'>) => {
     const newPlan: Plan = { ...planData, id: generateId('PLAN') };
     setPlans((prev) => [...prev, newPlan]);
+    saveFirestoreDoc(COLLECTIONS.PLANS, newPlan);
     showToast('success', 'Plan Created', `Internet plan "${newPlan.name}" is now available.`);
   };
 
   const updatePlan = (id: string, updates: Partial<Plan>) => {
-    setPlans((prev) => prev.map((p) => (p.id === id ? { ...p, ...updates } : p)));
+    setPlans((prev) =>
+      prev.map((p) => {
+        if (p.id === id) {
+          const updated = { ...p, ...updates };
+          saveFirestoreDoc(COLLECTIONS.PLANS, updated);
+          return updated;
+        }
+        return p;
+      })
+    );
     showToast('info', 'Plan Updated', 'Package details modified.');
   };
 
@@ -2358,19 +2413,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     setReminders((prev) => [newReminder, ...prev]);
+    saveFirestoreDoc(COLLECTIONS.REMINDERS, newReminder);
 
     if (invoice) {
+      const updatedInv: Invoice = {
+        ...invoice,
+        sentViaSms: channel === 'sms' || channel === 'both' ? true : invoice.sentViaSms,
+        sentViaEmail: channel === 'email' || channel === 'both' ? true : invoice.sentViaEmail,
+      };
       setInvoices((prev) =>
-        prev.map((inv) =>
-          inv.id === invoice.id
-            ? {
-                ...inv,
-                sentViaSms: channel === 'sms' || channel === 'both' ? true : inv.sentViaSms,
-                sentViaEmail: channel === 'email' || channel === 'both' ? true : inv.sentViaEmail,
-              }
-            : inv
-        )
+        prev.map((inv) => (inv.id === invoice.id ? updatedInv : inv))
       );
+      saveFirestoreDoc(COLLECTIONS.INVOICES, updatedInv);
     }
 
     logAuditEvent({

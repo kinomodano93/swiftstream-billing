@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   FileCheck2,
   Search,
@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { OnlineApplication, OnlineApplicationStatus } from '../../types';
+import { saveFirestoreDoc, subscribeToCollection, COLLECTIONS } from '../../services/firestoreService';
 
 export const ClientApplicationManager: React.FC = () => {
   const {
@@ -36,11 +37,24 @@ export const ClientApplicationManager: React.FC = () => {
     return [];
   });
 
-  const saveApplications = (newApps: OnlineApplication[]) => {
+  // Real-time Cloud Firestore synchronization
+  useEffect(() => {
+    const unsub = subscribeToCollection<OnlineApplication>(COLLECTIONS.APPLICATIONS, (data) => {
+      if (data && data.length > 0) {
+        setApplications(data);
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  const saveApplications = (newApps: OnlineApplication[], changedDoc?: OnlineApplication) => {
     setApplications(newApps);
     try {
       localStorage.setItem('swiftstream_online_applications_v4', JSON.stringify(newApps));
     } catch (_) {}
+    if (changedDoc) {
+      saveFirestoreDoc(COLLECTIONS.APPLICATIONS, changedDoc);
+    }
   };
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -117,7 +131,7 @@ export const ClientApplicationManager: React.FC = () => {
     };
 
     const updated = [newRecord, ...applications];
-    saveApplications(updated);
+    saveApplications(updated, newRecord);
     setIsNewAppModalOpen(false);
     showToast(`Application ${newRecord.applicationNumber} created successfully!`);
 
@@ -165,42 +179,31 @@ export const ClientApplicationManager: React.FC = () => {
       notes: `Converted from Online Application ${app.applicationNumber}. Notes: ${app.notes || 'None'}`,
     });
 
-    const updated = applications.map((a) =>
-      a.id === app.id
-        ? {
-            ...a,
-            status: 'approved' as OnlineApplicationStatus,
-            approvedAt: new Date().toISOString(),
-          }
-        : a
-    );
-    saveApplications(updated);
+    const approvedApp: OnlineApplication = {
+      ...app,
+      status: 'approved',
+      approvedAt: new Date().toISOString(),
+    };
+    const updated = applications.map((a) => (a.id === app.id ? approvedApp : a));
+    saveApplications(updated, approvedApp);
     if (selectedApp?.id === app.id) {
-      setSelectedApp({ ...selectedApp, status: 'approved', approvedAt: new Date().toISOString() });
+      setSelectedApp(approvedApp);
     }
     showToast(`Approved! Subscriber account created for ${app.applicantName}. Ready for installation.`);
   };
 
   const handleScheduleSurvey = (app: OnlineApplication) => {
     if (!surveyDateInput) return;
-    const updated = applications.map((a) =>
-      a.id === app.id
-        ? {
-            ...a,
-            status: 'survey_scheduled' as OnlineApplicationStatus,
-            surveyDate: surveyDateInput,
-            assignedTechnician: assignedTechInput || 'Field Operations Crew',
-          }
-        : a
-    );
-    saveApplications(updated);
+    const surveyApp: OnlineApplication = {
+      ...app,
+      status: 'survey_scheduled',
+      surveyDate: surveyDateInput,
+      assignedTechnician: assignedTechInput || 'Field Operations Crew',
+    };
+    const updated = applications.map((a) => (a.id === app.id ? surveyApp : a));
+    saveApplications(updated, surveyApp);
     if (selectedApp?.id === app.id) {
-      setSelectedApp({
-        ...selectedApp,
-        status: 'survey_scheduled',
-        surveyDate: surveyDateInput,
-        assignedTechnician: assignedTechInput || 'Field Operations Crew',
-      });
+      setSelectedApp(surveyApp);
     }
     setSurveyDateInput('');
     setAssignedTechInput('');
@@ -208,22 +211,15 @@ export const ClientApplicationManager: React.FC = () => {
   };
 
   const handleRejectApplication = (app: OnlineApplication) => {
-    const updated = applications.map((a) =>
-      a.id === app.id
-        ? {
-            ...a,
-            status: 'rejected' as OnlineApplicationStatus,
-            rejectionReason: rejectionReasonInput || 'Unable to service address at this time.',
-          }
-        : a
-    );
-    saveApplications(updated);
+    const rejectedApp: OnlineApplication = {
+      ...app,
+      status: 'rejected',
+      rejectionReason: rejectionReasonInput || 'Unable to service address at this time.',
+    };
+    const updated = applications.map((a) => (a.id === app.id ? rejectedApp : a));
+    saveApplications(updated, rejectedApp);
     if (selectedApp?.id === app.id) {
-      setSelectedApp({
-        ...selectedApp,
-        status: 'rejected',
-        rejectionReason: rejectionReasonInput || 'Unable to service address at this time.',
-      });
+      setSelectedApp(rejectedApp);
     }
     setRejectionReasonInput('');
     showToast(`Application ${app.applicationNumber} updated to Rejected.`);

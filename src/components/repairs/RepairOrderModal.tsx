@@ -316,10 +316,13 @@ export const RepairOrderModal: React.FC<RepairOrderModalProps> = ({ orderToEdit,
                 onChange={(e) => setStatus(e.target.value as RepairStatus)}
                 className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500"
               >
+                <option value="open">Open Ticket</option>
+                <option value="in_progress">In Progress / Dispatched</option>
+                <option value="resolved">Resolved / Repaired</option>
+                <option value="closed">Closed / Finished</option>
                 <option value="received">Received / Logged</option>
                 <option value="diagnosing">Diagnosing</option>
-                <option value="in_progress">In Progress</option>
-                <option value="ready">Ready for Pickup / Fixed</option>
+                <option value="ready">Ready for Pickup</option>
                 <option value="completed">Completed & Released</option>
                 <option value="cancelled">Cancelled</option>
               </select>

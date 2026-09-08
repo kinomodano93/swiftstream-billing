@@ -13,9 +13,23 @@ import {
   AlertTriangle,
   Server,
   Zap,
+  Globe,
+  Gamepad2,
+  PhoneCall,
+  ShieldCheck,
+  Radio,
+  Layers,
+  PieChart,
+  HardDrive,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { MikrotikDevice, TorchFlow, TorchFilterOptions } from '../../types';
+import {
+  MikrotikDevice,
+  TorchFlow,
+  TorchFilterOptions,
+  ApplicationStatItem,
+  ApplicationCategory,
+} from '../../types';
 import {
   runMikrotikTorch,
   getMikrotikInterfaces,
@@ -61,13 +75,14 @@ export const MikrotikTorchMonitor: React.FC<MikrotikTorchMonitorProps> = ({
   const [targetIp, setTargetIp] = useState<string>(initialSubscriberIp || '');
   const [protocolFilter, setProtocolFilter] = useState<string>('any');
   const [portFilter, setPortFilter] = useState<string>('any');
-  const [viewMode, setViewMode] = useState<'top_talkers' | 'detailed_flows'>('top_talkers');
+  const [viewMode, setViewMode] = useState<'top_talkers' | 'detailed_flows' | 'app_stats'>('top_talkers');
   const [autoStopDuration, setAutoStopDuration] = useState<number>(30); // seconds
 
   // Torch Execution States
   const [isRunning, setIsRunning] = useState<boolean>(Boolean(initialSubscriberIp || initialInterface));
   const [remainingSeconds, setRemainingSeconds] = useState<number>(30);
   const [flows, setFlows] = useState<TorchFlow[]>([]);
+  const [applicationStats, setApplicationStats] = useState<ApplicationStatItem[]>([]);
   const [isLoadingFlows, setIsLoadingFlows] = useState<boolean>(false);
   const [filterSearch, setFilterSearch] = useState<string>('');
   const [torchError, setTorchError] = useState<string | null>(null);
@@ -221,6 +236,9 @@ export const MikrotikTorchMonitor: React.FC<MikrotikTorchMonitorProps> = ({
       if (res.interfaceTraffic) {
         setHardwareTraffic(res.interfaceTraffic);
       }
+      if (res.applicationStats) {
+        setApplicationStats(res.applicationStats);
+      }
       if (res.success) {
         setFlows(res.flows || []);
       } else {
@@ -367,6 +385,44 @@ export const MikrotikTorchMonitor: React.FC<MikrotikTorchMonitorProps> = ({
       return `${(bps / 1000).toFixed(1)} kbps`;
     }
     return `${bps} bps`;
+  };
+
+  const getCategoryIcon = (category: ApplicationCategory) => {
+    switch (category) {
+      case 'web_streaming':
+        return <Globe className="w-4 h-4 text-emerald-400" />;
+      case 'gaming':
+        return <Gamepad2 className="w-4 h-4 text-amber-400" />;
+      case 'voip_conferencing':
+        return <PhoneCall className="w-4 h-4 text-sky-400" />;
+      case 'vpn_remote':
+        return <ShieldCheck className="w-4 h-4 text-purple-400" />;
+      case 'dns_infra':
+        return <Radio className="w-4 h-4 text-cyan-400" />;
+      case 'p2p_transfer':
+        return <HardDrive className="w-4 h-4 text-orange-400" />;
+      default:
+        return <Layers className="w-4 h-4 text-slate-400" />;
+    }
+  };
+
+  const getCategoryBarColor = (category: ApplicationCategory) => {
+    switch (category) {
+      case 'web_streaming':
+        return 'bg-emerald-500';
+      case 'gaming':
+        return 'bg-amber-500';
+      case 'voip_conferencing':
+        return 'bg-sky-500';
+      case 'vpn_remote':
+        return 'bg-purple-500';
+      case 'dns_infra':
+        return 'bg-cyan-500';
+      case 'p2p_transfer':
+        return 'bg-orange-500';
+      default:
+        return 'bg-slate-500';
+    }
   };
 
   // CSV Exporter
@@ -683,9 +739,55 @@ export const MikrotikTorchMonitor: React.FC<MikrotikTorchMonitorProps> = ({
         </div>
       </div>
 
+      {/* APPLICATION CATEGORY BANDWIDTH DISTRIBUTION BAR */}
+      {applicationStats.length > 0 && (
+        <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-lg space-y-2.5">
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-bold text-slate-300 flex items-center gap-2">
+              <PieChart className="w-4 h-4 text-amber-400" />
+              Live Application Traffic Distribution
+            </span>
+            <span className="text-[11px] text-slate-500 font-mono">
+              {applicationStats.reduce((acc, s) => acc + s.flowsCount, 0)} Active Sockets Classified
+            </span>
+          </div>
+
+          {/* Progress segments bar */}
+          <div className="h-3 w-full bg-slate-950 rounded-full overflow-hidden flex border border-slate-800/80">
+            {applicationStats.map((stat) => {
+              if (stat.percentageShare <= 0) return null;
+              return (
+                <div
+                  key={stat.category}
+                  className={`${getCategoryBarColor(stat.category)} h-full transition-all duration-500 hover:brightness-125 cursor-pointer`}
+                  style={{ width: `${Math.max(1.5, stat.percentageShare)}%` }}
+                  title={`${stat.name}: ${stat.percentageShare}% (${formatBps(stat.totalBps)})`}
+                />
+              );
+            })}
+          </div>
+
+          {/* Category legend pills */}
+          <div className="flex items-center gap-2 flex-wrap pt-1">
+            {applicationStats.map((stat) => (
+              <button
+                key={stat.category}
+                type="button"
+                onClick={() => setViewMode('app_stats')}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-800 text-[11px] font-mono transition-all cursor-pointer"
+              >
+                <span className={`w-2 h-2 rounded-full ${getCategoryBarColor(stat.category)}`} />
+                <span className="text-slate-300 font-sans font-medium">{stat.name.split(' (')[0]}</span>
+                <span className={`font-bold ${stat.color}`}>{stat.percentageShare}%</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* 3. VIEW MODE TOGGLE & SEARCH */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
-        <div className="flex items-center p-1 bg-slate-950 border border-slate-800 rounded-2xl w-fit">
+        <div className="flex items-center p-1 bg-slate-950 border border-slate-800 rounded-2xl w-fit flex-wrap gap-1">
           <button
             type="button"
             onClick={() => setViewMode('top_talkers')}
@@ -708,6 +810,18 @@ export const MikrotikTorchMonitor: React.FC<MikrotikTorchMonitorProps> = ({
           >
             Raw Connection Flows ({filteredFlows.length})
           </button>
+          <button
+            type="button"
+            onClick={() => setViewMode('app_stats')}
+            className={`px-4 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+              viewMode === 'app_stats'
+                ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <PieChart className="w-3.5 h-3.5" />
+            <span>Application Statistics ({applicationStats.length})</span>
+          </button>
         </div>
 
         <div className="relative w-full sm:w-64">
@@ -722,8 +836,8 @@ export const MikrotikTorchMonitor: React.FC<MikrotikTorchMonitorProps> = ({
         </div>
       </div>
 
-      {/* 4. MAIN FLOWS DISPLAY TABLE */}
-      {viewMode === 'top_talkers' ? (
+      {/* 4. MAIN FLOWS & APPLICATION STATS DISPLAY */}
+      {viewMode === 'top_talkers' && (
         /* Top Talkers Table */
         <div className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-900/80 shadow-2xl">
           <table className="w-full text-left text-xs">
@@ -810,7 +924,9 @@ export const MikrotikTorchMonitor: React.FC<MikrotikTorchMonitorProps> = ({
             </tbody>
           </table>
         </div>
-      ) : (
+      )}
+
+      {viewMode === 'detailed_flows' && (
         /* Detailed Raw Flows Table */
         <div className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-900/80 shadow-2xl">
           <table className="w-full text-left text-xs font-mono">
@@ -918,6 +1034,174 @@ export const MikrotikTorchMonitor: React.FC<MikrotikTorchMonitorProps> = ({
               )}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {viewMode === 'app_stats' && (
+        /* Application Traffic Statistics View */
+        <div className="space-y-5 animate-in fade-in duration-200">
+          {/* Category Cards Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+            {applicationStats.length === 0 ? (
+              <div className="col-span-full p-8 rounded-2xl bg-slate-900/60 border border-slate-800 text-center text-slate-500 text-xs font-mono">
+                {isRunning
+                  ? `Monitoring active on ${selectedInterface}. Analyzing application protocol signatures...`
+                  : `No application statistics captured yet. Click Start Torch to inspect live application traffic.`}
+              </div>
+            ) : (
+              applicationStats.map((stat) => (
+                <div
+                  key={stat.category}
+                  className="p-4 rounded-2xl bg-slate-900/85 border border-slate-800 hover:border-slate-700 transition-all shadow-lg flex flex-col justify-between"
+                >
+                  <div>
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <div className="flex items-center gap-2.5">
+                        <div className="p-2 rounded-xl bg-slate-950 border border-slate-800">
+                          {getCategoryIcon(stat.category)}
+                        </div>
+                        <div>
+                          <h3 className="text-xs font-bold text-slate-100">{stat.name}</h3>
+                          <p className="text-[10px] text-slate-400 leading-snug">{stat.description}</p>
+                        </div>
+                      </div>
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold font-mono border ${stat.badgeBg}`}>
+                        {stat.percentageShare}%
+                      </span>
+                    </div>
+
+                    {/* Bandwidth Breakdown */}
+                    <div className="grid grid-cols-2 gap-2 mt-3 pt-2.5 border-t border-slate-800/80 text-xs font-mono">
+                      <div>
+                        <span className="text-[10px] text-slate-500 block uppercase">Rx (Download)</span>
+                        <span className="text-emerald-400 font-bold">{formatBps(stat.rxBps)}</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-500 block uppercase">Tx (Upload)</span>
+                        <span className="text-cyan-400 font-bold">{formatBps(stat.txBps)}</span>
+                      </div>
+                    </div>
+
+                    {/* Observed Ports */}
+                    {stat.dominantPorts.length > 0 && (
+                      <div className="mt-2.5 flex items-center gap-1.5 flex-wrap">
+                        <span className="text-[10px] text-slate-500">Ports:</span>
+                        {stat.dominantPorts.map((p) => (
+                          <span
+                            key={p}
+                            className="px-1.5 py-0.5 rounded bg-slate-950 text-slate-300 text-[10px] font-mono border border-slate-800"
+                          >
+                            {p}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Top Subscribers Consuming This App */}
+                  {stat.topSubscribers && stat.topSubscribers.length > 0 && (
+                    <div className="mt-3 pt-2.5 border-t border-slate-800/80">
+                      <span className="text-[10px] text-slate-500 uppercase tracking-wider block mb-1">
+                        Top Active Users:
+                      </span>
+                      <div className="space-y-1">
+                        {stat.topSubscribers.map((sub, sIdx) => (
+                          <div key={sIdx} className="flex items-center justify-between text-[11px]">
+                            <span className="text-slate-300 truncate max-w-[150px]">
+                              {sub.customerName || sub.ip}
+                            </span>
+                            <span className="text-amber-400 font-mono font-bold text-[10px]">
+                              {formatBps(sub.bps)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+
+          {/* Detailed Application Protocol Breakdown Table */}
+          {applicationStats.length > 0 && (
+            <div className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-900/80 shadow-2xl">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-950 text-slate-400 uppercase text-[10px] tracking-wider font-mono border-b border-slate-800">
+                  <tr>
+                    <th className="px-4 py-3">Category / Application</th>
+                    <th className="px-4 py-3">Observed Ports</th>
+                    <th className="px-4 py-3">Download (Rx)</th>
+                    <th className="px-4 py-3">Upload (Tx)</th>
+                    <th className="px-4 py-3">Total Throughput</th>
+                    <th className="px-4 py-3">Traffic Share</th>
+                    <th className="px-4 py-3">Active Sockets</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60 font-mono">
+                  {applicationStats.map((stat) => (
+                    <tr key={stat.category} className="hover:bg-slate-800/40 transition-colors">
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2.5">
+                          <div className="p-1.5 rounded-lg bg-slate-950 border border-slate-800">
+                            {getCategoryIcon(stat.category)}
+                          </div>
+                          <div>
+                            <span className="font-bold text-slate-100 font-sans block">{stat.name}</span>
+                            <span className="text-[10px] text-slate-400 font-sans">{stat.description}</span>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        {stat.dominantPorts.length > 0 ? (
+                          <div className="flex items-center gap-1 flex-wrap">
+                            {stat.dominantPorts.map((p) => (
+                              <span
+                                key={p}
+                                className="px-1.5 py-0.5 rounded bg-slate-950 text-slate-300 text-[10px] border border-slate-800"
+                              >
+                                {p}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-slate-500">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-emerald-400 font-bold">
+                        {formatBps(stat.rxBps)}
+                      </td>
+                      <td className="px-4 py-3 text-cyan-400 font-bold">
+                        {formatBps(stat.txBps)}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="font-bold text-slate-100 block">{formatBps(stat.totalBps)}</span>
+                        <span className="text-[10px] text-slate-500">
+                          {((stat.rxPackets || 0) + (stat.txPackets || 0)).toLocaleString()} pkts
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="space-y-1">
+                          <div className="flex items-center justify-between text-[10px]">
+                            <span className={`font-bold ${stat.color}`}>{stat.percentageShare}%</span>
+                          </div>
+                          <div className="w-24 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full ${getCategoryBarColor(stat.category)} rounded-full`}
+                              style={{ width: `${Math.min(100, Math.max(2, stat.percentageShare))}%` }}
+                            />
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-purple-400 font-bold">
+                        {stat.flowsCount}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
     </div>

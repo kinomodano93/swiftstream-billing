@@ -28,6 +28,11 @@ import {
   DailyRemittanceRecord,
   AddonCatalogItem,
   BusinessProfile,
+  ReminderLog,
+  CoverageArea,
+  StaffUser,
+  OnlineApplication,
+  OutageBroadcastRecord,
 } from '../types';
 
 export const COLLECTIONS = {
@@ -48,6 +53,10 @@ export const COLLECTIONS = {
   ADDON_CATALOG: 'addon_catalog',
   BUSINESS_PROFILE: 'business_profile',
   COVERAGE_AREAS: 'coverage_areas',
+  REMINDERS: 'reminders',
+  SYSTEM_USERS: 'system_users',
+  APPLICATIONS: 'online_applications',
+  OUTAGE_BROADCASTS: 'outage_broadcasts',
 } as const;
 
 /**
@@ -210,6 +219,11 @@ export const seedFirestoreFromLocalData = async (
     dailyRemittances: DailyRemittanceRecord[];
     addonCatalog: AddonCatalogItem[];
     businessProfile: BusinessProfile;
+    reminders?: ReminderLog[];
+    coverageAreas?: CoverageArea[];
+    staffUsers?: StaffUser[];
+    applications?: OnlineApplication[];
+    outageBroadcasts?: OutageBroadcastRecord[];
   },
   onProgress?: MigrationProgressCallback
 ): Promise<{ success: boolean; totalUploaded: number; error?: string }> => {
@@ -281,7 +295,44 @@ export const seedFirestoreFromLocalData = async (
     // 14. Addon Catalog
     await uploadBatch(COLLECTIONS.ADDON_CATALOG, data.addonCatalog, 'Add-on Catalog');
 
-    // 15. Singletons: OLT Node & Business Profile
+    // 15. Barangay Coverage Areas
+    if (data.coverageAreas && data.coverageAreas.length > 0) {
+      await uploadBatch(COLLECTIONS.COVERAGE_AREAS, data.coverageAreas, 'Coverage Areas');
+    }
+
+    // 16. Billing Reminders & Dispatched Advisories
+    if (data.reminders && data.reminders.length > 0) {
+      await uploadBatch(COLLECTIONS.REMINDERS, data.reminders, 'Billing Reminders');
+    }
+
+    // 17. Online Subscriber Applications
+    if (data.applications && data.applications.length > 0) {
+      await uploadBatch(COLLECTIONS.APPLICATIONS, data.applications, 'Online Applications');
+    }
+
+    // 18. Community Outage Broadcasts
+    if (data.outageBroadcasts && data.outageBroadcasts.length > 0) {
+      await uploadBatch(COLLECTIONS.OUTAGE_BROADCASTS, data.outageBroadcasts, 'Outage Advisories');
+    }
+
+    // 19. Staff & System Users
+    if (data.staffUsers && data.staffUsers.length > 0) {
+      const staffPayload = data.staffUsers.map((u) => ({
+        id: u.id,
+        uid: u.id,
+        email: u.email,
+        displayName: u.fullName,
+        role: u.role,
+        mobile: u.mobile,
+        status: u.status,
+        isApproved: u.status === 'active',
+        createdAt: u.createdAt,
+        notes: u.notes,
+      }));
+      await uploadBatch(COLLECTIONS.SYSTEM_USERS, staffPayload, 'Staff Users');
+    }
+
+    // 20. Singletons: OLT Node & Business Profile
     const singletonsBatch = writeBatch(db);
     singletonsBatch.set(doc(db, COLLECTIONS.OLT_NODES, data.oltNode.id || 'primary_olt'), data.oltNode, { merge: true });
     singletonsBatch.set(doc(db, COLLECTIONS.BUSINESS_PROFILE, 'company_profile'), data.businessProfile, { merge: true });
@@ -306,6 +357,7 @@ export const purgeFirestoreCollections = async (
     COLLECTIONS.INVOICES,
     COLLECTIONS.PAYMENTS,
     COLLECTIONS.PAYMENT_SUBMISSIONS,
+    COLLECTIONS.PLANS,
     COLLECTIONS.REPAIR_ORDERS,
     COLLECTIONS.NAP_BOXES,
     COLLECTIONS.FIBER_CABLES,
@@ -314,6 +366,11 @@ export const purgeFirestoreCollections = async (
     COLLECTIONS.EXPENSES,
     COLLECTIONS.DAILY_REMITTANCES,
     COLLECTIONS.AUDIT_LOGS,
+    COLLECTIONS.ADDON_CATALOG,
+    COLLECTIONS.COVERAGE_AREAS,
+    COLLECTIONS.REMINDERS,
+    COLLECTIONS.APPLICATIONS,
+    COLLECTIONS.OUTAGE_BROADCASTS,
   ],
   onProgress?: (msg: string) => void
 ): Promise<{ success: boolean; deletedCount: number; error?: string }> => {

@@ -19,13 +19,14 @@ import {
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { useApp } from '../../context/AppContext';
-import { Customer, NapBox } from '../../types';
+import { Customer, NapBox, RepairOrder } from '../../types';
 import { BarcodeScannerModal } from './BarcodeScannerModal';
-import { formatCurrency, formatDate } from '../../utils/formatters';
+import { formatCurrency, formatDate, generateId } from '../../utils/formatters';
 
 interface InstallationLoggerModalProps {
   customer: Customer;
   workOrderId?: string;
+  repairOrder?: RepairOrder;
   onClose: () => void;
   onSuccess?: () => void;
 }
@@ -33,23 +34,26 @@ interface InstallationLoggerModalProps {
 export const InstallationLoggerModal: React.FC<InstallationLoggerModalProps> = ({
   customer,
   workOrderId,
+  repairOrder,
   onClose,
   onSuccess,
 }) => {
-  const { napBoxes, updateCustomer, syncCustomerMikrotik, logAuditEvent, showToast, businessProfile } = useApp();
+  const { napBoxes, updateCustomer, updateRepairOrder, syncCustomerMikrotik, logAuditEvent, showToast, businessProfile } = useApp();
 
   const [selectedNapId, setSelectedNapId] = useState<string>(customer.network.napBoxId || napBoxes[0]?.id || '');
   const [selectedPort, setSelectedPort] = useState<number>(customer.network.napPortNumber || 1);
-  const [dropCableMeters, setDropCableMeters] = useState<number>(customer.installationDetails?.dropCableMeters || 65);
-  const [opticalDbm, setOpticalDbm] = useState<number>(customer.network.opticalPowerDbm || -18.5);
+  const [dropCableMeters, setDropCableMeters] = useState<number>(customer.installationDetails?.dropCableMeters || 0);
+  const [opticalDbm, setOpticalDbm] = useState<number>(customer.network?.opticalPowerDbm ?? -19.0);
   const [technician, setTechnician] = useState<string>(
-    customer.installationDetails?.technician || 'Leonardo Flojo (Lead Field Tech)'
+    repairOrder?.technician || customer.installationDetails?.technician || 'Leonardo Flojo (Lead Field Tech)'
   );
-  const [onuSerial, setOnuSerial] = useState<string>(customer.network.onuSerial || 'HWTC-48A9B2C1');
-  const [macAddress, setMacAddress] = useState<string>(customer.network.macAddress || 'BC:A9:93:41:02:19');
-  const [routerModel, setRouterModel] = useState<string>(customer.network.routerModel || 'Huawei EchoLife HG8145V5 Dual-Band');
+  const [onuSerial, setOnuSerial] = useState<string>(customer.network?.onuSerial || '');
+  const [macAddress, setMacAddress] = useState<string>(customer.network?.macAddress || '');
+  const [routerModel, setRouterModel] = useState<string>(customer.network?.routerModel || 'Huawei EchoLife Dual-Band ONU');
   const [surveyNotes, setSurveyNotes] = useState<string>(
-    customer.installationDetails?.surveyNotes || 'Pole span verified. Drop wire fastened with S-clamps. Optimal optical power.'
+    repairOrder
+      ? `Line inspected & verified for Repair Ticket #${repairOrder.orderNumber}.`
+      : (customer.installationDetails?.surveyNotes || '')
   );
 
   // GPS Coordinates state
@@ -156,6 +160,25 @@ export const InstallationLoggerModal: React.FC<InstallationLoggerModalProps> = (
       updatedAt: new Date().toISOString(),
     });
 
+    // If this session is resolving a customer repair ticket, update the ticket and chat thread
+    if (repairOrder) {
+      const resolutionMsg = {
+        id: generateId('SYS'),
+        senderName: technician,
+        senderRole: 'system' as const,
+        message: `Field technician completed on-site work. Optical Power: ${opticalDbm} dBm (${signalGrade.status.toUpperCase()}), Drop Cable: ${dropCableMeters}m. Status marked as RESOLVED.`,
+        timestamp: new Date().toISOString(),
+      };
+      updateRepairOrder(repairOrder.id, {
+        status: 'resolved',
+        diagnosisNotes: `On-site verified: Optical Power ${opticalDbm} dBm, Drop Wire ${dropCableMeters}m. ${surveyNotes}`,
+        dateCompleted: new Date().toISOString().slice(0, 10),
+        messages: [...(repairOrder.messages || []), resolutionMsg],
+        updatedAt: new Date().toISOString(),
+      });
+      showToast('success', 'Ticket Resolved', `Repair Ticket #${repairOrder.orderNumber} marked as resolved.`);
+    }
+
     // Auto-sync customer to MikroTik PPPoE profile
     syncCustomerMikrotik(customer.id);
 
@@ -172,17 +195,19 @@ export const InstallationLoggerModal: React.FC<InstallationLoggerModalProps> = (
 
     logAuditEvent({
       userName: technician,
-      action: 'ON_SITE_INSTALLATION_COMPLETED',
+      action: repairOrder ? 'REPAIR_ORDER_RESOLVED_ON_SITE' : 'ON_SITE_INSTALLATION_COMPLETED',
       category: 'network',
       severity: 'info',
-      details: `Completed on-site installation for ${customer.fullName} (${customer.accountNo}). NAP: ${selectedNap?.name} (Port ${selectedPort}), Drop Cable: ${dropCableMeters}m, Optical Power: ${opticalDbm} dBm (${signalGrade.status.toUpperCase()}), ONU: ${onuSerial}.`,
+      details: `Completed on-site ${repairOrder ? `repair #${repairOrder.orderNumber}` : 'installation'} for ${customer.fullName} (${customer.accountNo}). NAP: ${selectedNap?.name || 'N/A'} (Port ${selectedPort}), Drop Cable: ${dropCableMeters}m, Optical Power: ${opticalDbm} dBm (${signalGrade.status.toUpperCase()}), ONU: ${onuSerial}.`,
       status: 'success',
     });
 
     showToast(
       'success',
-      'Fiber Line Activated!',
-      `Subscriber ${customer.fullName} is now provisioned and online on ${customer.planName}.`
+      repairOrder ? 'Repair Completed & Logged!' : 'Fiber Line Activated!',
+      repairOrder
+        ? `Ticket #${repairOrder.orderNumber} resolved. Optical power: ${opticalDbm} dBm.`
+        : `Subscriber ${customer.fullName} is now provisioned and online on ${customer.planName}.`
     );
 
     if (onSuccess) onSuccess();
@@ -200,13 +225,13 @@ export const InstallationLoggerModal: React.FC<InstallationLoggerModalProps> = (
             </div>
             <div>
               <h3 className="font-bold text-sm text-slate-100 flex items-center gap-2">
-                <span>Field Installation & Signal Quality Logger</span>
-                <span className="px-2 py-0.5 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-800/40 text-[10px] font-mono">
-                  PWA Field Mode
+                <span>{repairOrder ? 'Field Service & Line Repair Logger' : 'Field Installation & Signal Quality Logger'}</span>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${repairOrder ? 'bg-amber-950 text-amber-300 border border-amber-800/40' : 'bg-cyan-950 text-cyan-300 border border-cyan-800/40'}`}>
+                  {repairOrder ? `Ticket #${repairOrder.orderNumber}` : 'PWA Field Mode'}
                 </span>
               </h3>
               <p className="text-[11px] text-slate-400">
-                {customer.fullName} • {customer.accountNo} • {customer.planName}
+                {customer.fullName} • {customer.accountNo} • {repairOrder ? `${repairOrder.deviceType} (${repairOrder.status.toUpperCase()})` : customer.planName}
               </p>
             </div>
           </div>
@@ -214,6 +239,7 @@ export const InstallationLoggerModal: React.FC<InstallationLoggerModalProps> = (
           <button
             onClick={onClose}
             className="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-xl transition-colors"
+            title="Close modal"
           >
             <X className="w-5 h-5" />
           </button>

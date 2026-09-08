@@ -38,6 +38,7 @@ import {
   Image as ImageIcon,
   Receipt,
   Eye,
+  MessageSquare,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import confetti from 'canvas-confetti';
@@ -48,11 +49,13 @@ import {
   formatDate,
   formatDateTime,
   formatPhoneNumber,
+  generateId,
   getCustomerStatusBadge,
   getInvoiceStatusBadge,
   getPaymentMethodLabel,
   getRepairStatusBadge,
 } from '../../utils/formatters';
+import { TicketChatModal } from '../support/TicketChatModal';
 import { generateInvoicePDF, generateOfficialReceiptPDF } from '../../utils/pdfGenerator';
 import {
   XENDIT_CHANNELS,
@@ -86,6 +89,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
     processIncomingPaymentWebhook,
     submitPaymentProof,
     addRepairOrder,
+    updateRepairOrder,
     logout,
     currentAuthUser,
     staffUsers,
@@ -99,6 +103,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
   const [currentCustomerId, setCurrentCustomerId] = useState<string | null>(
     initialCustomerId || null
   );
+  const [selectedChatTicket, setSelectedChatTicket] = useState<RepairOrder | null>(null);
   const [loginInput, setLoginInput] = useState<string>('');
   const [loginError, setLoginError] = useState<string>('');
 
@@ -399,9 +404,19 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
       partsUsed: [],
       laborCost: 0,
       totalCost: 0,
-      status: 'received',
+      status: 'open',
       dateReceived: new Date().toISOString().slice(0, 10),
       isPaid: false,
+      messages: [
+        {
+          id: generateId('MSG'),
+          senderId: customer.id,
+          senderName: customer.fullName,
+          senderRole: 'customer',
+          message: `MANUAL CASH COLLECTION REQUEST: Subscriber requested in-person cash payment pickup for ${targetInv?.invoiceNumber || 'Monthly Bill'}. Amount to collect: ${formatCurrency(amountNum)}.`,
+          timestamp: new Date().toISOString(),
+        },
+      ],
     });
 
     setCashCollectionRequested(true);
@@ -485,9 +500,19 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
       partsUsed: [],
       laborCost: 0,
       totalCost: 0,
-      status: 'received',
+      status: 'open',
       dateReceived: new Date().toISOString().slice(0, 10),
       isPaid: false,
+      messages: [
+        {
+          id: generateId('MSG'),
+          senderId: customer.id,
+          senderName: customer.fullName,
+          senderRole: 'customer',
+          message: ticketIssue.trim(),
+          timestamp: new Date().toISOString(),
+        },
+      ],
     });
 
     setTicketIssue('');
@@ -523,9 +548,19 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
       partsUsed: [],
       laborCost: 0,
       totalCost: 0,
-      status: 'received',
+      status: 'open',
       dateReceived: new Date().toISOString().slice(0, 10),
       isPaid: false,
+      messages: [
+        {
+          id: generateId('MSG'),
+          senderId: customer.id,
+          senderName: customer.fullName,
+          senderRole: 'customer',
+          message: `PLAN UPGRADE REQUEST: Upgrade to ${targetPlan.name} (${targetPlan.speedMbps} Mbps @ ${formatCurrency(targetPlan.monthlyFee)}).`,
+          timestamp: new Date().toISOString(),
+        },
+      ],
     });
 
     try {
@@ -560,9 +595,19 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
       partsUsed: [],
       laborCost: 0,
       totalCost: 0,
-      status: 'received',
+      status: 'open',
       dateReceived: new Date().toISOString().slice(0, 10),
       isPaid: false,
+      messages: [
+        {
+          id: generateId('MSG'),
+          senderId: customer.id,
+          senderName: customer.fullName,
+          senderRole: 'customer',
+          message: `ROUTER WIFI CONFIGURATION REQUEST: SSID set to "${wifiSsid}", Password set to "${wifiPassword}".`,
+          timestamp: new Date().toISOString(),
+        },
+      ],
     });
 
     setWifiSubmitted(true);
@@ -2419,9 +2464,20 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                             </p>
                           )}
 
-                          <div className="flex items-center justify-between pt-1 border-t border-slate-800/80 text-[11px] text-slate-400">
-                            <span>Filed on: {formatDate(t.dateReceived)}</span>
-                            <span className="text-slate-300">Tech: {t.technician}</span>
+                          <div className="flex items-center justify-between pt-2 border-t border-slate-800/80 text-[11px] text-slate-400 flex-wrap gap-2">
+                            <div className="flex items-center gap-3 flex-wrap">
+                              <span>Filed on: {formatDate(t.dateReceived)}</span>
+                              <span className="text-slate-300">Tech: {t.technician}</span>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => setSelectedChatTicket(t)}
+                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs transition-all shadow-md shadow-cyan-600/20 cursor-pointer hover:scale-105"
+                            >
+                              <MessageSquare className="w-3.5 h-3.5" />
+                              <span>Chat with Field Tech {t.messages && t.messages.length > 0 ? `(${t.messages.length})` : ''}</span>
+                            </button>
                           </div>
                         </div>
                       );
@@ -2708,6 +2764,21 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
 
       {/* 24/7 Gemini AI Client Support Agent */}
       <GeminiAiAssistant mode="client" activeCustomer={customer} />
+
+      {/* Real-time Field Technician Support Chat Modal */}
+      {selectedChatTicket && customer && (
+        <TicketChatModal
+          ticket={selectedChatTicket}
+          currentRole="customer"
+          currentUserName={customer.fullName}
+          currentUserId={customer.id}
+          onClose={() => setSelectedChatTicket(null)}
+          onUpdateTicket={(ticketId, updates) => {
+            updateRepairOrder(ticketId, updates);
+            setSelectedChatTicket((prev) => (prev && prev.id === ticketId ? { ...prev, ...updates } : prev));
+          }}
+        />
+      )}
     </div>
   );
 };

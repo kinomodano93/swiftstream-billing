@@ -21,6 +21,7 @@ import { useApp } from '../../context/AppContext';
 import { ReminderType, OutageBroadcastRecord } from '../../types';
 import { formatCurrency, formatDateTime, formatPhoneNumber } from '../../utils/formatters';
 import { OutageBroadcastModal } from './OutageBroadcastModal';
+import { saveFirestoreDoc, subscribeToCollection, COLLECTIONS } from '../../services/firestoreService';
 
 export const ReminderCenter: React.FC = () => {
   const { customers, reminders, businessProfile, sendReminder, sendBatchReminders } = useApp();
@@ -45,6 +46,16 @@ export const ReminderCenter: React.FC = () => {
       localStorage.setItem('swiftstream_outage_history_v4', JSON.stringify(outageHistory));
     } catch (_) {}
   }, [outageHistory]);
+
+  // Real-time Cloud Firestore synchronization for outage advisories
+  useEffect(() => {
+    const unsub = subscribeToCollection<OutageBroadcastRecord>(COLLECTIONS.OUTAGE_BROADCASTS, (data) => {
+      if (data && data.length > 0) {
+        setOutageHistory(data);
+      }
+    });
+    return () => unsub();
+  }, []);
 
   const selectedCustomer = customers.find((c) => c.id === selectedCustomerId);
 
@@ -439,6 +450,7 @@ export const ReminderCenter: React.FC = () => {
           onClose={() => setShowOutageModal(false)}
           onBroadcastComplete={(record) => {
             setOutageHistory((prev) => [record, ...prev]);
+            saveFirestoreDoc(COLLECTIONS.OUTAGE_BROADCASTS, record);
           }}
         />
       )}

@@ -38,6 +38,9 @@ export const FirebaseSettingsCard: React.FC = () => {
     dailyRemittances,
     addonCatalog,
     businessProfile,
+    coverageAreas,
+    reminders,
+    staffUsers,
     showToast,
     resetToDefault,
   } = useApp();
@@ -98,6 +101,9 @@ export const FirebaseSettingsCard: React.FC = () => {
         dailyRemittances,
         addonCatalog,
         businessProfile,
+        coverageAreas,
+        reminders,
+        staffUsers,
       },
       (step, current, total) => {
         setMigrationStatus(step);

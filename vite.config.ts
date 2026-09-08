@@ -7,20 +7,42 @@ import dns from 'dns';
 import net from 'net';
 import { exec } from 'child_process';
 
-// Ensure fast IPv4 resolution and reliable DNS fallbacks to prevent EAI_AGAIN on dynamic hosts
+// Ensure fast IPv4 resolution without breaking the host resolver
 try {
   if (dns.setDefaultResultOrder) {
     dns.setDefaultResultOrder('ipv4first');
   }
-  dns.setServers(['8.8.8.8', '1.1.1.1', '8.8.4.4']);
 } catch (_) {}
+
+// In-memory DNS cache to avoid repeated lookups and EAI_AGAIN
+const dnsCache = new Map<string, { ip: string; expires: number }>();
+
+const resolveHostIp = async (hostname: string): Promise<string> => {
+  if (net.isIP(hostname)) return hostname;
+  const now = Date.now();
+  const cached = dnsCache.get(hostname);
+  if (cached && cached.expires > now) {
+    return cached.ip;
+  }
+  return new Promise((resolve) => {
+    dns.lookup(hostname, { family: 4 }, (err, address) => {
+      if (!err && address) {
+        dnsCache.set(hostname, { ip: address, expires: now + 300000 }); // cache for 5 minutes
+        resolve(address);
+      } else {
+        // Fallback to hostname if lookup fails
+        resolve(hostname);
+      }
+    });
+  });
+};
 
 function mikrotikProxyPlugin(): Plugin {
   return {
     name: 'mikrotik-cors-proxy',
     configureServer(server) {
       // 1. Generic RouterOS REST CORS proxy
-      server.middlewares.use('/api/mikrotik-proxy', (req, res) => {
+      server.middlewares.use('/api/mikrotik-proxy', async (req, res) => {
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
         res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-target-url');
@@ -45,6 +67,7 @@ function mikrotikProxyPlugin(): Plugin {
           const parsed = new URL(targetUrl);
           const isHttps = parsed.protocol === 'https:';
           const transport = isHttps ? https : http;
+          const targetHostIp = await resolveHostIp(parsed.hostname);
 
           const forwardHeaders: Record<string, string> = {
             host: parsed.host,
@@ -59,7 +82,7 @@ function mikrotikProxyPlugin(): Plugin {
           const clientReq = transport.request(
             {
               protocol: parsed.protocol,
-              hostname: parsed.hostname,
+              hostname: targetHostIp,
               port: parsed.port || (isHttps ? 443 : 80),
               path: parsed.pathname + parsed.search,
               method: req.method,
@@ -250,6 +273,7 @@ function mikrotikProxyPlugin(): Plugin {
             } catch (_) {}
 
             const host = (body.host || 'remote.oxapsph.com').replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+            const targetHostIp = await resolveHostIp(host);
             const port = Number(body.port || 10988);
             const username = body.username || 'admin';
             const password = body.password || '';
@@ -274,7 +298,7 @@ function mikrotikProxyPlugin(): Plugin {
                 const cReq = transport.request(
                   {
                     protocol: isHttps ? 'https:' : 'http:',
-                    hostname: host,
+                    hostname: targetHostIp,
                     port: port,
                     path: `/rest${path}`,
                     method,

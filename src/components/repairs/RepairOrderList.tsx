@@ -12,11 +12,13 @@ import {
   ArrowRight,
   Edit2,
   Trash2,
+  MessageSquare,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { RepairOrder, RepairStatus } from '../../types';
 import { formatCurrency, formatDateTime, getRepairStatusBadge } from '../../utils/formatters';
 import { ConfirmDeleteModal } from '../common/ConfirmDeleteModal';
+import { TicketChatModal } from '../support/TicketChatModal';
 
 interface RepairOrderListProps {
   onOpenRepairModal: (repair?: RepairOrder) => void;
@@ -33,6 +35,7 @@ export const RepairOrderList: React.FC<RepairOrderListProps> = ({
 
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [orderToDelete, setOrderToDelete] = useState<RepairOrder | null>(null);
+  const [selectedChatTicket, setSelectedChatTicket] = useState<RepairOrder | null>(null);
 
   const filteredRepairs = repairOrders.filter((rep) => {
     const matchesSearch =
@@ -47,7 +50,7 @@ export const RepairOrderList: React.FC<RepairOrderListProps> = ({
   });
 
   const totalRepairRevenue = repairOrders.reduce((sum, r) => sum + r.totalCost, 0);
-  const pendingCount = repairOrders.filter((r) => r.status !== 'completed' && r.status !== 'cancelled').length;
+  const pendingCount = repairOrders.filter((r) => r.status !== 'completed' && r.status !== 'closed' && r.status !== 'cancelled').length;
 
   return (
     <div className="w-full px-3 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-4 sm:space-y-6 animate-in fade-in">
@@ -89,9 +92,9 @@ export const RepairOrderList: React.FC<RepairOrderListProps> = ({
         <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800">
           <p className="text-xs text-slate-400">Completed & Released</p>
           <h4 className="text-xl font-bold text-purple-400 mt-1">
-            {repairOrders.filter((r) => r.status === 'completed').length} Finished
+            {repairOrders.filter((r) => r.status === 'completed' || r.status === 'resolved' || r.status === 'closed').length} Finished
           </h4>
-          <span className="text-[11px] text-slate-500">Ready or delivered to customer</span>
+          <span className="text-[11px] text-slate-500">Resolved or released to customer</span>
         </div>
       </div>
 
@@ -101,11 +104,11 @@ export const RepairOrderList: React.FC<RepairOrderListProps> = ({
           <div className="flex flex-wrap items-center gap-1.5">
             {[
               { id: 'all', label: 'All Jobs' },
-              { id: 'received', label: 'Received' },
-              { id: 'diagnosing', label: 'Diagnosing' },
+              { id: 'open', label: 'Open' },
               { id: 'in_progress', label: 'In Progress' },
+              { id: 'resolved', label: 'Resolved' },
+              { id: 'closed', label: 'Closed' },
               { id: 'ready', label: 'Ready for Pickup' },
-              { id: 'completed', label: 'Completed' },
             ].map((tab) => (
               <button
                 key={tab.id}
@@ -218,6 +221,14 @@ export const RepairOrderList: React.FC<RepairOrderListProps> = ({
                       </button>
 
                       <button
+                        onClick={() => setSelectedChatTicket(order)}
+                        className="p-1.5 bg-slate-800 text-cyan-400 hover:text-white hover:bg-cyan-600 rounded-lg transition-colors cursor-pointer"
+                        title="Chat Thread with Subscriber"
+                      >
+                        <MessageSquare className="w-3.5 h-3.5" />
+                      </button>
+
+                      <button
                         onClick={() => setOrderToDelete(order)}
                         className="p-1.5 bg-slate-800 text-rose-400 hover:text-white hover:bg-rose-600 rounded-lg transition-colors cursor-pointer"
                         title="Delete Ticket"
@@ -266,6 +277,20 @@ export const RepairOrderList: React.FC<RepairOrderListProps> = ({
         }}
         onClose={() => setOrderToDelete(null)}
       />
+
+      {/* Desk Agent / Admin Ticket Chat Window */}
+      {selectedChatTicket && (
+        <TicketChatModal
+          ticket={selectedChatTicket}
+          currentRole="admin"
+          currentUserName="Desk Support Lead"
+          onClose={() => setSelectedChatTicket(null)}
+          onUpdateTicket={(ticketId, updates) => {
+            updateRepairOrder(ticketId, updates);
+            setSelectedChatTicket((prev) => (prev && prev.id === ticketId ? { ...prev, ...updates } : prev));
+          }}
+        />
+      )}
     </div>
   );
 };

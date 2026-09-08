@@ -23,12 +23,14 @@ import {
   UserCheck,
   Calendar,
   ExternalLink,
+  MessageSquare,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { Customer, RepairOrder, WorkOrder } from '../../types';
-import { formatCurrency, formatDate, formatDateTime, formatPhoneNumber } from '../../utils/formatters';
+import { Customer, RepairOrder, RepairStatus, WorkOrder } from '../../types';
+import { formatCurrency, formatDate, formatDateTime, formatPhoneNumber, getRepairStatusBadge } from '../../utils/formatters';
 import { InstallationLoggerModal } from './InstallationLoggerModal';
 import { BarcodeScannerModal } from './BarcodeScannerModal';
+import { TicketChatModal } from '../support/TicketChatModal';
 
 export const FieldTechHub: React.FC = () => {
   const {
@@ -38,32 +40,50 @@ export const FieldTechHub: React.FC = () => {
     businessProfile,
     showToast,
     addCustomer,
+    updateRepairOrder,
     setActiveTab,
   } = useApp();
 
   const [activeSubTab, setActiveSubTab] = useState<'installs' | 'repairs' | 'opm_tool' | 'history'>('installs');
   const [selectedTechFilter, setSelectedTechFilter] = useState<string>('all');
+  const [installFilter, setInstallFilter] = useState<'pending' | 'all'>('pending');
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [isMobileMode, setIsMobileMode] = useState<boolean>(false);
 
   // Modals
   const [selectedCustomerForInstall, setSelectedCustomerForInstall] = useState<Customer | null>(null);
+  const [selectedRepairOrderForLogger, setSelectedRepairOrderForLogger] = useState<RepairOrder | null>(null);
+  const [selectedChatTicket, setSelectedChatTicket] = useState<RepairOrder | null>(null);
   const [showStandaloneScanner, setShowStandaloneScanner] = useState<boolean>(false);
   const [scannedResult, setScannedResult] = useState<{ serial: string; mac?: string; model?: string } | null>(null);
 
   // Standalone Optical Power Meter (OPM) Tester Tool State
   const [testDbm, setTestDbm] = useState<number>(-19.2);
 
-  // Pending Installations (Customers pending install or recently provisioned)
+  // Real Average Optical Power calculation from actual monitored subscribers
+  const customersWithDbm = useMemo(() => {
+    return customers.filter(
+      (c) => c.network?.opticalPowerDbm != null && !isNaN(c.network.opticalPowerDbm)
+    );
+  }, [customers]);
+
+  const avgDbm = useMemo(() => {
+    if (customersWithDbm.length === 0) return '-19.2';
+    const sum = customersWithDbm.reduce((acc, c) => acc + (c.network.opticalPowerDbm || 0), 0);
+    return (sum / customersWithDbm.length).toFixed(1);
+  }, [customersWithDbm]);
+
+  // Pending Installations (Filterable between only pending or all customer drops)
   const pendingInstallations = useMemo(() => {
     return customers.filter((c) => {
+      const matchesFilter = installFilter === 'all' || c.status === 'pending_install';
       const matchesSearch =
         c.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
         c.accountNo.toLowerCase().includes(searchTerm.toLowerCase()) ||
         c.address.barangay.toLowerCase().includes(searchTerm.toLowerCase());
-      return matchesSearch;
+      return matchesFilter && matchesSearch;
     });
-  }, [customers, searchTerm]);
+  }, [customers, searchTerm, installFilter]);
 
   // Open Repair Work Orders
   const activeRepairTickets = useMemo(() => {
@@ -195,15 +215,16 @@ export const FieldTechHub: React.FC = () => {
           <span className="text-[10px] text-slate-500 block mt-0.5">Drop Wire Routing</span>
         </div>
 
+
         <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800">
           <div className="flex items-center justify-between text-slate-400 mb-1">
-            <span className="text-[11px] font-semibold">Active Line Repairs</span>
+            <span className="text-[11px] font-semibold">Active Service Tickets</span>
             <AlertTriangle className="w-4 h-4 text-amber-400" />
           </div>
           <span className="text-xl font-black font-mono text-amber-400">
-            {repairOrders.filter((r) => r.status !== 'completed' && r.status !== 'cancelled').length} Tickets
+            {repairOrders.filter((r) => r.status !== 'completed' && r.status !== 'closed' && r.status !== 'cancelled').length} Tickets
           </span>
-          <span className="text-[10px] text-slate-500 block mt-0.5">Fiber Cut / Splice</span>
+          <span className="text-[10px] text-slate-500 block mt-0.5">Field Dispatch Queue</span>
         </div>
 
         <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800">
@@ -211,8 +232,10 @@ export const FieldTechHub: React.FC = () => {
             <span className="text-[11px] font-semibold">Avg. Optical Power</span>
             <Activity className="w-4 h-4 text-emerald-400" />
           </div>
-          <span className="text-xl font-black font-mono text-emerald-400">-19.2 dBm</span>
-          <span className="text-[10px] text-emerald-400/80 block mt-0.5">Optimal Range</span>
+          <span className="text-xl font-black font-mono text-emerald-400">{avgDbm} dBm</span>
+          <span className="text-[10px] text-emerald-400/80 block mt-0.5">
+            {customersWithDbm.length} Monitored Lines
+          </span>
         </div>
 
         <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800">
@@ -237,7 +260,7 @@ export const FieldTechHub: React.FC = () => {
             }`}
           >
             <Wifi className="w-4 h-4" />
-            <span>Fiber Installation Dispatches ({customers.length})</span>
+            <span>Fiber Installations ({pendingInstallations.length})</span>
           </button>
 
           <button
@@ -371,69 +394,167 @@ export const FieldTechHub: React.FC = () => {
       {/* TAB 2: FIELD REPAIR & SPLICE ORDERS */}
       {activeSubTab === 'repairs' && (
         <div className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {activeRepairTickets.map((ticket) => (
-              <div
-                key={ticket.id}
-                className="p-5 rounded-3xl bg-slate-900 border border-slate-800 space-y-4 shadow-card flex flex-col justify-between"
-              >
-                <div className="space-y-2.5">
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wide bg-cyan-950 text-cyan-300 border border-cyan-800/60">
-                        {ticket.deviceType}
-                      </span>
-                      <h4 className="font-bold text-sm text-slate-100 mt-1">{ticket.customerName}</h4>
-                      <span className="font-mono text-[11px] text-slate-400">{ticket.orderNumber}</span>
-                    </div>
+          {activeRepairTickets.length === 0 ? (
+            <div className="text-center py-12 text-slate-500 text-xs bg-slate-900/60 rounded-3xl border border-slate-800">
+              No active repair tickets matching search filter. All subscriber lines are healthy.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {activeRepairTickets.map((ticket) => {
+                const matchedCust = customers.find(
+                  (c) =>
+                    (ticket.customerId && c.id === ticket.customerId) ||
+                    c.fullName.toLowerCase() === ticket.customerName.toLowerCase()
+                );
+                const badge = getRepairStatusBadge(ticket.status);
 
-                    <span
-                      className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                        ticket.status === 'ready' || ticket.status === 'completed'
-                          ? 'bg-emerald-950 text-emerald-300'
-                          : 'bg-amber-950 text-amber-300'
-                      }`}
-                    >
-                      {ticket.status}
-                    </span>
-                  </div>
-
-                  <p className="text-xs text-slate-300 bg-slate-950 p-2.5 rounded-xl border border-slate-800">
-                    {ticket.issueDescription}
-                  </p>
-
-                  <div className="space-y-1 text-xs text-slate-400">
-                    <div className="flex justify-between">
-                      <span>Address:</span>
-                      <span className="text-slate-200 truncate max-w-[180px]">{ticket.address}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Assigned Tech:</span>
-                      <span className="text-cyan-300 font-medium">{ticket.technician}</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="pt-3 border-t border-slate-800 flex items-center justify-between">
-                  <span className="font-mono text-emerald-400 font-bold">
-                    Cost: {formatCurrency(ticket.totalCost)}
-                  </span>
-
-                  <button
-                    onClick={() => {
-                      const matchedCust = customers.find((c) => c.fullName === ticket.customerName);
-                      if (matchedCust) setSelectedCustomerForInstall(matchedCust);
-                      else showToast('info', 'Repair Ticket', `Inspecting ticket ${ticket.orderNumber}`);
-                    }}
-                    className="flex items-center gap-1 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold transition-colors"
+                return (
+                  <div
+                    key={ticket.id}
+                    className="p-5 rounded-3xl bg-slate-900 border border-slate-800 space-y-4 shadow-card flex flex-col justify-between transition-all hover:border-slate-700"
                   >
-                    <span>Inspect Line</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
+                    <div className="space-y-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wide bg-cyan-950 text-cyan-300 border border-cyan-800/60">
+                              {ticket.deviceType}
+                            </span>
+                            <span className="font-mono text-[11px] text-cyan-400 font-bold">
+                              {ticket.orderNumber}
+                            </span>
+                          </div>
+                          <h4 className="font-bold text-sm text-slate-100 mt-1 flex items-center gap-1.5">
+                            <span>{ticket.customerName}</span>
+                            {matchedCust && (
+                              <span className="text-[10px] font-mono text-slate-400 font-normal">
+                                ({matchedCust.accountNo})
+                              </span>
+                            )}
+                          </h4>
+                        </div>
+
+                        {/* Status Switcher Dropdown */}
+                        <div className="flex flex-col items-end gap-1 shrink-0">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${badge.bg} ${badge.textCol}`}>
+                            {badge.text}
+                          </span>
+                          <select
+                            value={ticket.status}
+                            onChange={(e) => {
+                              const newStatus = e.target.value as RepairStatus;
+                              updateRepairOrder(ticket.id, {
+                                status: newStatus,
+                                dateCompleted: newStatus === 'resolved' || newStatus === 'closed' ? new Date().toISOString().slice(0, 10) : ticket.dateCompleted,
+                                updatedAt: new Date().toISOString(),
+                              });
+                              showToast('info', 'Status Updated', `Ticket #${ticket.orderNumber} marked as ${newStatus}.`);
+                            }}
+                            className="text-[10px] bg-slate-950 border border-slate-700 hover:border-cyan-500 rounded px-1.5 py-0.5 text-slate-300 cursor-pointer focus:outline-none"
+                          >
+                            <option value="open">Open</option>
+                            <option value="in_progress">In Progress</option>
+                            <option value="resolved">Resolved</option>
+                            <option value="closed">Closed</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <p className="text-xs text-slate-300 bg-slate-950/80 p-3 rounded-xl border border-slate-800">
+                        {ticket.issueDescription}
+                      </p>
+
+                      <div className="space-y-1.5 text-xs text-slate-400 bg-slate-950/40 p-2.5 rounded-xl border border-slate-800/60">
+                        <div className="flex justify-between items-start gap-2">
+                          <span className="text-slate-500">Address:</span>
+                          <span className="text-slate-200 text-right truncate max-w-[200px]">{ticket.address}</span>
+                        </div>
+                        {ticket.contactNumber && (
+                          <div className="flex justify-between items-center">
+                            <span className="text-slate-500">Mobile:</span>
+                            <a
+                              href={`tel:${ticket.contactNumber}`}
+                              className="text-cyan-400 hover:underline flex items-center gap-1 font-mono font-medium"
+                            >
+                              <Phone className="w-3 h-3" />
+                              <span>{formatPhoneNumber(ticket.contactNumber)}</span>
+                            </a>
+                          </div>
+                        )}
+                        {matchedCust?.network && (
+                          <div className="flex justify-between items-center text-[11px]">
+                            <span className="text-slate-500">NAP Port:</span>
+                            <span className="text-slate-300">
+                              {matchedCust.network.napBoxId || 'NAP'} (Port {matchedCust.network.napPortNumber || 1})
+                            </span>
+                          </div>
+                        )}
+                        <div className="flex justify-between items-center text-[11px] pt-1 border-t border-slate-800/80">
+                          <span className="text-slate-500">Assigned Tech:</span>
+                          <span className="text-cyan-300 font-medium">{ticket.technician}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="pt-3 border-t border-slate-800 flex items-center justify-between gap-2 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedChatTicket(ticket)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-600/20 hover:bg-cyan-600 hover:text-white text-cyan-300 border border-cyan-500/40 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                      >
+                        <MessageSquare className="w-3.5 h-3.5" />
+                        <span>Chat {ticket.messages && ticket.messages.length > 0 ? `(${ticket.messages.length})` : ''}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const targetCust: Customer = matchedCust || {
+                            id: ticket.customerId || ticket.id,
+                            accountNo: 'ACC-SR',
+                            fullName: ticket.customerName,
+                            email: '',
+                            mobile: ticket.contactNumber,
+                            address: {
+                              street: ticket.address,
+                              barangay: 'Lagonoy',
+                              city: 'Lagonoy',
+                              province: 'Camarines Sur',
+                            },
+                            planId: 'plan-custom',
+                            planName: 'Fiber Subscriber',
+                            monthlyFee: 0,
+                            billingDay: 1,
+                            status: 'active',
+                            installationDate: ticket.dateReceived || new Date().toISOString().slice(0, 10),
+                            balance: 0,
+                            walletBalance: 0,
+                            advanceDeposit: 0,
+                            network: {
+                              pppoeUsername: ticket.customerId || 'subscriber',
+                              ipAddress: '192.168.10.100',
+                              napBoxId: napBoxes[0]?.id || 'NAP-01',
+                              napPortNumber: 1,
+                              opticalPowerDbm: -19.0,
+                              isMikrotikSynced: false,
+                            },
+                            createdAt: ticket.createdAt,
+                            updatedAt: ticket.createdAt,
+                          };
+                          setSelectedCustomerForInstall(targetCust);
+                          setSelectedRepairOrderForLogger(ticket);
+                        }}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                      >
+                        <Wrench className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>Field Logger</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -538,9 +659,14 @@ export const FieldTechHub: React.FC = () => {
       {selectedCustomerForInstall && (
         <InstallationLoggerModal
           customer={selectedCustomerForInstall}
-          onClose={() => setSelectedCustomerForInstall(null)}
+          repairOrder={selectedRepairOrderForLogger || undefined}
+          onClose={() => {
+            setSelectedCustomerForInstall(null);
+            setSelectedRepairOrderForLogger(null);
+          }}
           onSuccess={() => {
             setSelectedCustomerForInstall(null);
+            setSelectedRepairOrderForLogger(null);
           }}
         />
       )}
@@ -553,6 +679,20 @@ export const FieldTechHub: React.FC = () => {
             showToast('success', 'Scanned Result', `Serial: ${data.serial} • Model: ${data.model || 'ONU'}`);
           }}
           onClose={() => setShowStandaloneScanner(false)}
+        />
+      )}
+
+      {/* ================= MODAL 3: SUBSCRIBER & FIELD TECH LIVE CHAT ================= */}
+      {selectedChatTicket && (
+        <TicketChatModal
+          ticket={selectedChatTicket}
+          currentRole="technician"
+          currentUserName="Leonardo Flojo (Lead Field Tech)"
+          onClose={() => setSelectedChatTicket(null)}
+          onUpdateTicket={(ticketId, updates) => {
+            updateRepairOrder(ticketId, updates);
+            setSelectedChatTicket((prev) => (prev && prev.id === ticketId ? { ...prev, ...updates } : prev));
+          }}
         />
       )}
     </div>
