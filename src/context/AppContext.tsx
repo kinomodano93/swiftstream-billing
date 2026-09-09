@@ -320,17 +320,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const [activeTab, setActiveTab] = useState<string>(() => {
     try {
-      // 1. Check URL hash first (e.g. #customers, #billing, #dashboard, #portal)
       if (typeof window !== 'undefined') {
         const hash = window.location.hash.replace(/^#\/?/, '').trim();
-        if (hash && VALID_TABS.has(hash)) {
-          return hash;
+        // If an explicit tab is specified in the URL (e.g. #customers, #billing, #dashboard, #portal, #home)
+        if (hash) {
+          if (VALID_TABS.has(hash)) {
+            return hash;
+          }
+        } else {
+          // If no hash in URL (direct root visit e.g. http://localhost:5173/ or domain), always land on public Home Page
+          return 'home';
         }
-      }
-      // 2. Check saved tab in localStorage
-      const saved = localStorage.getItem('swiftstream_active_tab');
-      if (saved && VALID_TABS.has(saved)) {
-        return saved;
       }
     } catch {}
     return 'home';
@@ -342,7 +342,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (typeof window !== 'undefined') {
         const currentHash = window.location.hash.replace(/^#\/?/, '').trim();
         if (currentHash !== activeTab) {
-          window.history.replaceState(null, '', `#${activeTab}`);
+          if (activeTab === 'home') {
+            // Keep clean URL on home page without forcing a hash if root was accessed
+            if (currentHash) {
+              window.history.replaceState(null, '', window.location.pathname + window.location.search);
+            }
+          } else {
+            window.history.replaceState(null, '', `#${activeTab}`);
+          }
         }
       }
     } catch {}
@@ -354,7 +361,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const handleHashChange = () => {
       try {
         const hash = window.location.hash.replace(/^#\/?/, '').trim();
-        if (hash && VALID_TABS.has(hash) && hash !== activeTab) {
+        if (!hash) {
+          setActiveTab('home');
+        } else if (VALID_TABS.has(hash) && hash !== activeTab) {
           setActiveTab(hash);
         }
       } catch {}
@@ -500,7 +509,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       localStorage.setItem('swiftstream_active_tab', 'home');
       if (typeof window !== 'undefined') {
-        window.history.replaceState(null, '', '#home');
+        window.history.replaceState(null, '', window.location.pathname + window.location.search);
       }
     } catch {}
     setSearchTerm('');
