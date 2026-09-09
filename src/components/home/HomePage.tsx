@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Radio,
   Wifi,
@@ -18,6 +18,7 @@ import {
   Search,
   X,
   Check,
+  Copy,
   Globe,
   Lock,
   Menu,
@@ -31,7 +32,8 @@ import {
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { useApp } from '../../context/AppContext';
-import { Plan } from '../../types';
+import { Plan, OnlineApplication } from '../../types';
+import { saveFirestoreDoc, COLLECTIONS } from '../../services/firestoreService';
 import { formatCurrency, formatPhoneNumber } from '../../utils/formatters';
 import { GeminiAiAssistant } from '../ai/GeminiAiAssistant';
 
@@ -53,6 +55,7 @@ export const HomePage: React.FC<HomePageProps> = ({
     openAuthModal,
     logout,
     coverageAreas,
+    showToast,
   } = useApp();
 
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
@@ -68,6 +71,16 @@ export const HomePage: React.FC<HomePageProps> = ({
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
 
   // Sign Up Modal State
+  interface SignUpSuccessData {
+    accountNo: string;
+    name: string;
+    planName: string;
+    speedMbps: number;
+    monthlyFee: number;
+    mobile: string;
+    address: string;
+    installDate: string;
+  }
   const [showSignUpModal, setShowSignUpModal] = useState<boolean>(false);
   const [signUpPlanId, setSignUpPlanId] = useState<string>(plans[1]?.id || plans[0]?.id || '');
   const [applicantName, setApplicantName] = useState<string>('');
@@ -79,16 +92,51 @@ export const HomePage: React.FC<HomePageProps> = ({
   const [applicantStreet, setApplicantStreet] = useState<string>('');
   const [applicantBarangay, setApplicantBarangay] = useState<string>('Binauahan');
   const [applicantLandmark, setApplicantLandmark] = useState<string>('');
-  const [signUpSuccessInfo, setSignUpSuccessInfo] = useState<{ accountNo: string; name: string } | null>(null);
+  const [signUpSuccessInfo, setSignUpSuccessInfo] = useState<SignUpSuccessData | null>(null);
+  const [isCopied, setIsCopied] = useState<boolean>(false);
 
-  // Filter plans
-  const filteredPlans = plans.filter((p) => {
-    if (selectedCategory === 'all') return true;
-    if (selectedCategory === 'residential') return p.category === 'residential';
-    if (selectedCategory === 'business') return p.category === 'business' || p.category === 'enterprise';
-    if (selectedCategory === 'piso_wifi') return p.category === 'piso_wifi';
-    return true;
-  });
+  // List of coverage barangays for selection
+  const barangayList = useMemo(() => {
+    const list = coverageAreas.map((a) => a.barangay);
+    const defaults = [
+      'Binauahan',
+      'San Isidro',
+      'San Vicente',
+      'San Jose',
+      'Santa Maria',
+      'Poblacion',
+      'Cabtac',
+      'Gimagnoc',
+      'Santa Cruz',
+      'Loho',
+    ];
+    return Array.from(new Set([...list, ...defaults])).filter(Boolean).sort();
+  }, [coverageAreas]);
+
+  // Filter & sort plans: prioritize residential plans first, and sort by monthly fee ascending
+  const filteredPlans = useMemo(() => {
+    return plans
+      .filter((p) => {
+        if (!p.isActive && p.isActive !== undefined) return false;
+        if (selectedCategory === 'all') return true;
+        if (selectedCategory === 'residential') return p.category === 'residential';
+        if (selectedCategory === 'business') return p.category === 'business' || p.category === 'enterprise';
+        if (selectedCategory === 'piso_wifi') return p.category === 'piso_wifi';
+        return true;
+      })
+      .sort((a, b) => {
+        if (selectedCategory === 'all') {
+          const aPriority = a.category === 'residential' ? 0 : 1;
+          const bPriority = b.category === 'residential' ? 0 : 1;
+          if (aPriority !== bPriority) return aPriority - bPriority;
+        }
+        return a.monthlyFee - b.monthlyFee;
+      });
+  }, [plans, selectedCategory]);
+
+  const currentSelectedPlan = useMemo(() => {
+    return plans.find((p) => p.id === signUpPlanId) || plans[0];
+  }, [plans, signUpPlanId]);
 
   // Calculate Recommended Plan based on interactive calculator
   const getRecommendedPlan = () => {
@@ -106,24 +154,38 @@ export const HomePage: React.FC<HomePageProps> = ({
   const recommendedPlan = getRecommendedPlan();
 
   const handleOpenSignUp = (planId?: string) => {
-    if (planId) setSignUpPlanId(planId);
+    if (planId) {
+      setSignUpPlanId(planId);
+    } else if (!signUpPlanId && plans.length > 0) {
+      const popular = plans.find((p) => p.speedMbps === 50) || plans[0];
+      setSignUpPlanId(popular.id);
+    }
     setSignUpSuccessInfo(null);
+    setIsCopied(false);
     setShowSignUpModal(true);
+  };
+
+  const handleCopyAccountNo = (accNo: string) => {
+    navigator.clipboard.writeText(accNo);
+    setIsCopied(true);
+    showToast('info', 'Copied to Clipboard', `Reference #${accNo} copied.`);
+    setTimeout(() => setIsCopied(false), 2000);
   };
 
   const handleSignUpSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!applicantName.trim() || !applicantMobile.trim() || !applicantStreet.trim()) {
-      alert('Please fill in your complete name, mobile number, and installation address.');
+      showToast('error', 'Missing Information', 'Please fill in your complete name, mobile number, and installation address.');
       return;
     }
 
-    const selectedPlan = plans.find((p) => p.id === signUpPlanId) || plans[0];
+    const selectedPlan = currentSelectedPlan || plans[0];
     const year = new Date().getFullYear();
     const generatedAccountNo = `SWIFT-${year}-${String(Math.floor(Math.random() * 900) + 100)}`;
     const randomIp = `192.168.10.${Math.floor(Math.random() * 200 + 20)}`;
     const assignedNap = napBoxes[0];
 
+    // 1. Add customer to database
     addCustomer({
       accountNo: generatedAccountNo,
       fullName: applicantName.trim(),
@@ -132,8 +194,8 @@ export const HomePage: React.FC<HomePageProps> = ({
       address: {
         street: applicantStreet.trim(),
         barangay: applicantBarangay.trim(),
-        city: businessProfile.address.city,
-        province: businessProfile.address.province,
+        city: businessProfile.address.city || 'Lagonoy',
+        province: businessProfile.address.province || 'Camarines Sur',
         landmark: applicantLandmark.trim(),
       },
       planId: selectedPlan.id,
@@ -155,12 +217,41 @@ export const HomePage: React.FC<HomePageProps> = ({
         oltPonPort: 'PON-1/1',
         isMikrotikSynced: false,
       },
-      notes: `New online application submitted via SwiftStream Website. Landmark: ${applicantLandmark || 'N/A'}`,
+      notes: `New online application submitted via SwiftStream Website. Landmark: ${applicantLandmark || 'N/A'}. Preferred Install: ${applicantInstallDate}`,
     });
+
+    // 2. Also log as an OnlineApplication in storage & Firestore
+    const newApp: OnlineApplication = {
+      id: `app_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+      applicationNumber: generatedAccountNo,
+      applicantName: applicantName.trim(),
+      phone: applicantMobile.trim(),
+      email: applicantEmail.trim(),
+      address: applicantStreet.trim(),
+      barangay: applicantBarangay.trim(),
+      city: businessProfile.address.city || 'Lagonoy',
+      province: businessProfile.address.province || 'Camarines Sur',
+      landmark: applicantLandmark.trim(),
+      preferredPlanId: selectedPlan.id,
+      preferredPlanName: selectedPlan.name,
+      preferredSpeedMbps: selectedPlan.speedMbps,
+      monthlyFee: selectedPlan.monthlyFee,
+      status: 'pending',
+      notes: `Applied online via website. Preferred date: ${applicantInstallDate || 'Earliest available'}`,
+      surveyDate: applicantInstallDate,
+      createdAt: new Date().toISOString(),
+    };
+
+    try {
+      const existingAppsStr = localStorage.getItem('swiftstream_online_applications_v4');
+      const existingApps: OnlineApplication[] = existingAppsStr ? JSON.parse(existingAppsStr) : [];
+      localStorage.setItem('swiftstream_online_applications_v4', JSON.stringify([newApp, ...existingApps]));
+      saveFirestoreDoc(COLLECTIONS.APPLICATIONS, newApp);
+    } catch (_) {}
 
     try {
       confetti({
-        particleCount: 80,
+        particleCount: 100,
         spread: 70,
         origin: { y: 0.6 },
       });
@@ -170,8 +261,20 @@ export const HomePage: React.FC<HomePageProps> = ({
 
     setSignUpSuccessInfo({
       accountNo: generatedAccountNo,
-      name: applicantName,
+      name: applicantName.trim(),
+      planName: selectedPlan.name,
+      speedMbps: selectedPlan.speedMbps,
+      monthlyFee: selectedPlan.monthlyFee,
+      mobile: applicantMobile.trim(),
+      address: `${applicantStreet.trim()}, Brgy. ${applicantBarangay.trim()}, ${businessProfile.address.city || 'Lagonoy'}`,
+      installDate: applicantInstallDate || new Date().toISOString().slice(0, 10),
     });
+
+    showToast(
+      'success',
+      'Application Submitted',
+      `Your application for ${selectedPlan.name} has been received! Account #${generatedAccountNo}`
+    );
 
     setApplicantName('');
     setApplicantMobile('09');
@@ -327,7 +430,7 @@ export const HomePage: React.FC<HomePageProps> = ({
 
               <button
                 type="button"
-                onClick={() => openAuthModal('signup')}
+                onClick={() => handleOpenSignUp()}
                 className="hidden xs:flex sm:flex items-center gap-1.5 px-3 sm:px-3.5 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-cyan-600/25 transition-all hover:scale-105 active:scale-95 cursor-pointer"
               >
                 <Zap className="w-3.5 h-3.5" />
@@ -377,9 +480,9 @@ export const HomePage: React.FC<HomePageProps> = ({
               type="button"
               onClick={() => {
                 setIsMobileNavOpen(false);
-                openAuthModal('signup');
+                handleOpenSignUp();
               }}
-              className="w-full py-2.5 bg-gradient-to-r from-cyan-600 to-blue-600 text-white rounded-xl text-xs font-bold text-center shadow-lg shadow-cyan-600/20"
+              className="w-full py-2.5 bg-gradient-to-r from-cyan-600 to-blue-600 text-white rounded-xl text-xs font-bold text-center shadow-lg shadow-cyan-600/20 cursor-pointer"
             >
               ⚡ Apply for Fiber Connection
             </button>
@@ -412,7 +515,7 @@ export const HomePage: React.FC<HomePageProps> = ({
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3.5 pt-2">
             <button
               type="button"
-              onClick={() => openAuthModal('signup')}
+              onClick={() => handleOpenSignUp()}
               className="w-full sm:w-auto flex items-center justify-center gap-2 px-8 py-3.5 bg-gradient-to-r from-cyan-600 via-sky-500 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-2xl text-sm font-bold shadow-xl shadow-cyan-600/30 transition-all hover:scale-105 active:scale-95 cursor-pointer"
             >
               <Zap className="w-4 h-4 text-amber-300" />
@@ -903,7 +1006,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                     type="button"
                     onClick={() => {
                       setApplicantBarangay(selectedArea.barangay);
-                      openAuthModal('signup');
+                      handleOpenSignUp();
                     }}
                     className="w-full sm:w-auto px-5 py-2.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-cyan-600/30 transition-all hover:scale-105 active:scale-95 cursor-pointer"
                   >
@@ -1052,6 +1155,371 @@ export const HomePage: React.FC<HomePageProps> = ({
           </div>
         </div>
       </footer>
+
+      {/* ================= 10. ONLINE FIBER APPLICATION MODAL ================= */}
+      {showSignUpModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
+          <div className="relative w-full max-w-2xl bg-slate-900 border border-slate-700/80 rounded-3xl shadow-2xl overflow-hidden my-8 animate-in fade-in zoom-in-95 duration-200">
+            {/* Modal Header */}
+            <div className="p-6 bg-gradient-to-r from-slate-900 via-slate-850 to-cyan-950/40 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400">
+                  <Zap className="w-5 h-5 fill-cyan-400/20" />
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-lg font-bold text-slate-100 flex items-center gap-2">
+                    <span>Apply for SwiftStream Fiber</span>
+                    <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-800/50">
+                      Digital Signup
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Fast 1-minute application • Free optical line installation promo
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowSignUpModal(false);
+                  setSignUpSuccessInfo(null);
+                }}
+                className="p-2 text-slate-400 hover:text-white bg-slate-800/60 hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+                aria-label="Close modal"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            {signUpSuccessInfo ? (
+              /* Success State */
+              <div className="p-6 sm:p-8 space-y-6">
+                <div className="text-center space-y-3">
+                  <div className="w-16 h-16 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center mx-auto text-emerald-400">
+                    <CheckCircle2 className="w-9 h-9" />
+                  </div>
+                  <h4 className="text-xl font-black text-slate-100">
+                    Application Received Successfully!
+                  </h4>
+                  <p className="text-xs sm:text-sm text-slate-300 max-w-md mx-auto">
+                    Mabuhay, <strong className="text-cyan-300">{signUpSuccessInfo.name}</strong>! Your fiber connection request has been recorded into our dispatch queue.
+                  </p>
+                </div>
+
+                {/* Account & Details Box */}
+                <div className="p-5 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-3.5">
+                  <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
+                        Assigned Account / Application #
+                      </span>
+                      <div className="text-base sm:text-lg font-black font-mono text-cyan-300">
+                        {signUpSuccessInfo.accountNo}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleCopyAccountNo(signUpSuccessInfo.accountNo)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 rounded-xl text-xs font-semibold transition-all cursor-pointer"
+                    >
+                      {isCopied ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-400" />
+                          <span className="text-emerald-400 font-bold">Copied!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5 text-slate-400" />
+                          <span>Copy</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                    <div>
+                      <span className="text-slate-400 block">Selected Package:</span>
+                      <strong className="text-slate-100 font-bold">
+                        {signUpSuccessInfo.planName} ({signUpSuccessInfo.speedMbps} Mbps)
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 block">Monthly Subscription:</span>
+                      <strong className="text-emerald-400 font-mono font-bold">
+                        {formatCurrency(signUpSuccessInfo.monthlyFee)} / mo
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 block">Installation Address:</span>
+                      <span className="text-slate-200">{signUpSuccessInfo.address}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 block">Target Installation:</span>
+                      <span className="text-cyan-300 font-semibold">{signUpSuccessInfo.installDate}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* What Happens Next */}
+                <div className="space-y-2.5">
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                    What happens next:
+                  </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+                    <div className="p-3 rounded-xl bg-slate-950/50 border border-slate-800/80 space-y-1">
+                      <div className="font-bold text-cyan-400 flex items-center gap-1.5">
+                        <Clock className="w-3.5 h-3.5" /> 1. Line Check
+                      </div>
+                      <p className="text-[11px] text-slate-400">
+                        We map the closest NAP distribution box to check optical drop wire distance.
+                      </p>
+                    </div>
+                    <div className="p-3 rounded-xl bg-slate-950/50 border border-slate-800/80 space-y-1">
+                      <div className="font-bold text-cyan-400 flex items-center gap-1.5">
+                        <Phone className="w-3.5 h-3.5" /> 2. Call Dispatch
+                      </div>
+                      <p className="text-[11px] text-slate-400">
+                        Our lineman calls <span className="font-mono text-slate-200">{signUpSuccessInfo.mobile}</span> to confirm arrival time.
+                      </p>
+                    </div>
+                    <div className="p-3 rounded-xl bg-slate-950/50 border border-slate-800/80 space-y-1">
+                      <div className="font-bold text-emerald-400 flex items-center gap-1.5">
+                        <Check className="w-3.5 h-3.5" /> 3. Hookup & WiFi
+                      </div>
+                      <p className="text-[11px] text-slate-400">
+                        Modem setup, fiber splice test, and connection handover at your home.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Success Actions */}
+                <div className="flex flex-col sm:flex-row items-center justify-end gap-3 pt-4 border-t border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowSignUpModal(false);
+                      setSignUpSuccessInfo(null);
+                    }}
+                    className="w-full sm:w-auto px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+                  >
+                    Done & Return to Website
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowSignUpModal(false);
+                      setSignUpSuccessInfo(null);
+                      onOpenClientPortal(signUpSuccessInfo.accountNo);
+                    }}
+                    className="w-full sm:w-auto px-6 py-2.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold rounded-xl text-xs shadow-lg shadow-cyan-600/25 transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    <span>View Client Portal</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* Application Form */
+              <form onSubmit={handleSignUpSubmit} className="p-6 sm:p-8 space-y-5">
+                {/* Selected Plan Display & Selector */}
+                <div className="p-4 rounded-2xl bg-gradient-to-br from-slate-950 to-cyan-950/30 border border-cyan-500/40 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="space-y-0.5">
+                      <span className="text-[10px] uppercase font-bold tracking-widest text-cyan-400">
+                        Selected Fiber Package
+                      </span>
+                      <h4 className="text-base font-bold text-slate-100 flex items-center gap-2">
+                        {currentSelectedPlan?.name || 'Selected Plan'}
+                        <span className="text-[10px] font-mono font-bold bg-cyan-950 text-cyan-300 px-2 py-0.5 rounded border border-cyan-800">
+                          {currentSelectedPlan?.speedMbps || 50} Mbps
+                        </span>
+                      </h4>
+                    </div>
+
+                    <div className="text-left sm:text-right">
+                      <div className="text-lg font-black font-mono text-slate-100">
+                        {formatCurrency(currentSelectedPlan?.monthlyFee || 1299)}
+                        <span className="text-xs text-slate-400 font-normal"> / month</span>
+                      </div>
+                      <span className="text-[10px] text-emerald-400 font-semibold block">
+                        FREE Installation Promo Included
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Switch Plan Dropdown */}
+                  <div className="pt-2 border-t border-slate-800 flex flex-col sm:flex-row sm:items-center gap-2">
+                    <label className="text-[11px] font-semibold text-slate-400 whitespace-nowrap">
+                      Change Plan:
+                    </label>
+                    <select
+                      value={signUpPlanId}
+                      onChange={(e) => setSignUpPlanId(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700 hover:border-cyan-500 rounded-xl text-slate-200 text-xs font-semibold focus:outline-none focus:border-cyan-400 cursor-pointer"
+                    >
+                      {plans
+                        .filter((p) => p.isActive !== false)
+                        .map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name} ({p.speedMbps} Mbps) — {formatCurrency(p.monthlyFee)}/mo
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Form Fields: Personal Info */}
+                <div className="space-y-3.5">
+                  <h5 className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+                    <Users className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Applicant Information</span>
+                  </h5>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                        Full Name <span className="text-rose-400">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g. Juan Dela Cruz"
+                        value={applicantName}
+                        onChange={(e) => setApplicantName(e.target.value)}
+                        className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-xs font-medium focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                        Mobile Number <span className="text-rose-400">*</span>
+                      </label>
+                      <input
+                        type="tel"
+                        required
+                        placeholder="0917 123 4567"
+                        value={applicantMobile}
+                        onChange={(e) => setApplicantMobile(e.target.value)}
+                        className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-xs font-mono font-medium focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                      Email Address <span className="text-slate-500 font-normal">(For e-Receipts & Billing Notices)</span>
+                    </label>
+                    <input
+                      type="email"
+                      placeholder="e.g. juan@gmail.com (Optional)"
+                      value={applicantEmail}
+                      onChange={(e) => setApplicantEmail(e.target.value)}
+                      className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-xs font-medium focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50"
+                    />
+                  </div>
+                </div>
+
+                {/* Form Fields: Installation Address & Schedule */}
+                <div className="space-y-3.5 pt-2 border-t border-slate-800/80">
+                  <h5 className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+                    <MapPin className="w-3.5 h-3.5 text-rose-400" />
+                    <span>Installation Address & Schedule (Lagonoy)</span>
+                  </h5>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                        Street / Purok / House # <span className="text-rose-400">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g. Purok 2, Main St."
+                        value={applicantStreet}
+                        onChange={(e) => setApplicantStreet(e.target.value)}
+                        className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-xs font-medium focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                        Barangay <span className="text-rose-400">*</span>
+                      </label>
+                      <select
+                        value={applicantBarangay}
+                        onChange={(e) => setApplicantBarangay(e.target.value)}
+                        className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-xs font-medium focus:outline-none focus:border-cyan-400 cursor-pointer"
+                      >
+                        {barangayList.map((bg) => (
+                          <option key={bg} value={bg}>
+                            {bg}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                        Nearby Landmark
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. In front of Elementary School / Yellow gate"
+                        value={applicantLandmark}
+                        onChange={(e) => setApplicantLandmark(e.target.value)}
+                        className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-xs font-medium focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                        Preferred Installation Date
+                      </label>
+                      <input
+                        type="date"
+                        min={new Date().toISOString().slice(0, 10)}
+                        value={applicantInstallDate}
+                        onChange={(e) => setApplicantInstallDate(e.target.value)}
+                        className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-xs font-medium focus:outline-none focus:border-cyan-400 cursor-pointer"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Trust Guarantee note */}
+                <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 text-[11px] text-slate-400 flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>
+                    No upfront payment required today. You only pay after your fiber line is spliced, tested, and active.
+                  </span>
+                </div>
+
+                {/* Form Buttons */}
+                <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setShowSignUpModal(false)}
+                    className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex items-center gap-2 px-6 py-2.5 bg-gradient-to-r from-cyan-600 via-sky-500 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold rounded-xl text-xs shadow-lg shadow-cyan-600/30 transition-all hover:scale-105 active:scale-95 cursor-pointer"
+                  >
+                    <Zap className="w-4 h-4 text-amber-300" />
+                    <span>Submit Fiber Application</span>
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* 24/7 Gemini AI Assistant for Sales Inquiries */}
       <GeminiAiAssistant mode="client" />
