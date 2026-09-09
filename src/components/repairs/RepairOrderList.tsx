@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { RepairOrder, RepairStatus } from '../../types';
-import { formatCurrency, formatDateTime, getRepairStatusBadge } from '../../utils/formatters';
+import { formatCurrency, formatDate, formatDateTime, getRepairStatusBadge } from '../../utils/formatters';
 import { ConfirmDeleteModal } from '../common/ConfirmDeleteModal';
 import { TicketChatModal } from '../support/TicketChatModal';
 
@@ -137,128 +137,168 @@ export const RepairOrderList: React.FC<RepairOrderListProps> = ({
         </div>
       </div>
 
-      {/* Orders Grid / Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      {/* Orders Table */}
+      <div className="rounded-2xl bg-slate-900/90 border border-slate-800 shadow-card overflow-hidden">
         {filteredRepairs.length === 0 ? (
-          <div className="col-span-3 py-12 text-center text-slate-500 text-xs">
-            No repair job tickets found matching your criteria.
+          <div className="p-12 text-center space-y-2 text-slate-500 text-xs">
+            <Wrench className="w-8 h-8 text-slate-600 mx-auto" />
+            <p>No repair job tickets found matching your criteria.</p>
           </div>
         ) : (
-          filteredRepairs.map((order) => {
-            const badge = getRepairStatusBadge(order.status);
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead className="bg-slate-950/80 text-slate-400 font-semibold uppercase text-[10px] tracking-wider border-b border-slate-800">
+                <tr>
+                  <th className="py-3 px-4">Ticket # & Date</th>
+                  <th className="py-3 px-4">Customer / Contact</th>
+                  <th className="py-3 px-4">Device & Problem Description</th>
+                  <th className="py-3 px-4">Parts & Diagnosis</th>
+                  <th className="py-3 px-4">Assigned Tech</th>
+                  <th className="py-3 px-4">Service Fee</th>
+                  <th className="py-3 px-4">Status</th>
+                  <th className="py-3 px-4 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/60">
+                {filteredRepairs.map((order) => {
+                  const badge = getRepairStatusBadge(order.status);
 
-            return (
-              <div
-                key={order.id}
-                className="p-5 rounded-3xl bg-slate-900/80 border border-slate-800 shadow-card flex flex-col justify-between hover:border-slate-700 transition-all space-y-4"
-              >
-                <div>
-                  {/* Top line */}
-                  <div className="flex items-center justify-between">
-                    <span className="font-mono font-bold text-xs text-cyan-400 bg-cyan-950 px-2 py-0.5 rounded border border-cyan-800/40">
-                      {order.orderNumber}
-                    </span>
-                    <span className={`px-2.5 py-0.5 rounded text-[10px] font-semibold ${badge.bg} ${badge.textCol}`}>
-                      {badge.text}
-                    </span>
-                  </div>
+                  return (
+                    <tr key={order.id} className="hover:bg-slate-800/40 transition-colors">
+                      {/* Ticket # & Date */}
+                      <td className="py-3 px-4">
+                        <span className="font-mono font-bold text-xs text-cyan-400 bg-cyan-950/80 px-2 py-0.5 rounded border border-cyan-800/40">
+                          {order.orderNumber}
+                        </span>
+                        {order.dateReceived && (
+                          <div className="text-[10px] text-slate-500 mt-1">
+                            {formatDate(order.dateReceived)}
+                          </div>
+                        )}
+                      </td>
 
-                  {/* Customer and Device */}
-                  <div className="mt-3">
-                    <h3 className="font-bold text-sm text-slate-100">{order.customerName}</h3>
-                    <p className="text-xs text-slate-400 font-mono mt-0.5">{order.contactNumber}</p>
-                    <span className="inline-block mt-2 px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-semibold text-[11px]">
-                      {order.deviceType}
-                    </span>
-                  </div>
+                      {/* Customer / Contact */}
+                      <td className="py-3 px-4 max-w-[200px]">
+                        <div className="font-bold text-slate-100 text-sm">{order.customerName}</div>
+                        {order.contactNumber && (
+                          <div className="text-[11px] text-cyan-400 font-mono mt-0.5 flex items-center gap-1">
+                            <Phone className="w-3 h-3 text-slate-500" />
+                            <a href={`tel:${order.contactNumber}`} className="hover:underline">
+                              {order.contactNumber}
+                            </a>
+                          </div>
+                        )}
+                        {order.address && (
+                          <div className="text-[10px] text-slate-400 truncate mt-0.5">
+                            {order.address}
+                          </div>
+                        )}
+                      </td>
 
-                  {/* Issue Description */}
-                  <p className="text-xs text-slate-300 mt-2.5 bg-slate-950/60 p-2.5 rounded-xl border border-slate-800/80">
-                    {order.issueDescription}
-                  </p>
+                      {/* Device & Problem Description */}
+                      <td className="py-3 px-4 max-w-[240px]">
+                        <span className="inline-block px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-semibold text-[10px] uppercase">
+                          {order.deviceType}
+                        </span>
+                        <p className="text-slate-200 mt-1 line-clamp-2 leading-snug">
+                          {order.issueDescription}
+                        </p>
+                      </td>
 
-                  {/* Tech notes */}
-                  {order.diagnosisNotes && (
-                    <p className="text-[11px] text-slate-400 mt-2 italic">
-                      Diagnosis: {order.diagnosisNotes}
-                    </p>
-                  )}
+                      {/* Parts & Diagnosis */}
+                      <td className="py-3 px-4 max-w-[180px]">
+                        {order.diagnosisNotes && (
+                          <p className="text-[11px] text-slate-400 italic line-clamp-2">
+                            {order.diagnosisNotes}
+                          </p>
+                        )}
+                        {order.partsUsed && order.partsUsed.length > 0 ? (
+                          <div className="text-[10px] text-emerald-400 mt-0.5 font-medium">
+                            {order.partsUsed.length} parts replaced
+                          </div>
+                        ) : (
+                          <span className="text-slate-600 text-[10px]">No hardware parts</span>
+                        )}
+                      </td>
 
-                  {/* Parts List */}
-                  {order.partsUsed.length > 0 && (
-                    <div className="mt-3 pt-2 border-t border-slate-800/80 space-y-1 text-[11px]">
-                      <span className="text-slate-500 font-semibold uppercase text-[10px]">Parts Replaced:</span>
-                      {order.partsUsed.map((p, idx) => (
-                        <div key={idx} className="flex justify-between text-slate-300">
-                          <span>• {p.name} (x{p.quantity})</span>
-                          <span className="font-mono text-slate-400">{formatCurrency(p.cost * p.quantity)}</span>
+                      {/* Assigned Tech */}
+                      <td className="py-3 px-4">
+                        <span className="text-slate-300 font-medium">{order.technician}</span>
+                      </td>
+
+                      {/* Service Fee */}
+                      <td className="py-3 px-4">
+                        <span className="font-mono font-bold text-sm text-emerald-400">
+                          {formatCurrency(order.totalCost)}
+                        </span>
+                      </td>
+
+                      {/* Status */}
+                      <td className="py-3 px-4">
+                        <span className={`px-2.5 py-0.5 rounded text-[10px] font-semibold uppercase ${badge.bg} ${badge.textCol}`}>
+                          {badge.text}
+                        </span>
+                      </td>
+
+                      {/* Actions */}
+                      <td className="py-3 px-4 text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedChatTicket(order)}
+                            className="p-1.5 bg-slate-800 text-cyan-400 hover:text-white hover:bg-cyan-600 rounded-lg transition-colors cursor-pointer"
+                            title="Chat Thread with Subscriber"
+                          >
+                            <MessageSquare className="w-3.5 h-3.5" />
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => onOpenRepairModal(order)}
+                            className="p-1.5 bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 rounded-lg transition-colors cursor-pointer"
+                            title="Edit Job Order"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+
+                          {!order.billedToInvoiceId ? (
+                            <button
+                              type="button"
+                              onClick={() => convertRepairToInvoice(order.id)}
+                              className="flex items-center gap-1 px-2.5 py-1.5 bg-cyan-600/20 text-cyan-400 hover:bg-cyan-600 hover:text-white rounded-lg text-[11px] font-semibold transition-colors cursor-pointer"
+                              title="Convert to Billing Invoice"
+                            >
+                              <FileText className="w-3.5 h-3.5" />
+                              <span className="hidden xl:inline">Bill</span>
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => onSelectInvoice(order.billedToInvoiceId!)}
+                              className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-800 text-cyan-300 hover:bg-slate-700 rounded-lg text-[11px] font-mono cursor-pointer"
+                              title="View Linked Invoice"
+                            >
+                              <span className="hidden xl:inline">Invoice</span>
+                              <ArrowRight className="w-3 h-3" />
+                            </button>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => setOrderToDelete(order)}
+                            className="p-1.5 bg-slate-800 text-rose-400 hover:text-white hover:bg-rose-600 rounded-lg transition-colors cursor-pointer"
+                            title="Delete Ticket"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* Footer Cost & Actions */}
-                <div className="pt-3 border-t border-slate-800 space-y-3">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-500">Assigned Tech: {order.technician}</span>
-                    <div className="text-right">
-                      <span className="text-[10px] text-slate-400 block">Total Service Fee:</span>
-                      <span className="font-mono font-bold text-sm text-emerald-400">
-                        {formatCurrency(order.totalCost)}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between gap-2 pt-1">
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => onOpenRepairModal(order)}
-                        className="p-1.5 bg-slate-800 text-slate-300 hover:text-white rounded-lg transition-colors"
-                        title="Edit Job Order"
-                      >
-                        <Edit2 className="w-3.5 h-3.5" />
-                      </button>
-
-                      <button
-                        onClick={() => setSelectedChatTicket(order)}
-                        className="p-1.5 bg-slate-800 text-cyan-400 hover:text-white hover:bg-cyan-600 rounded-lg transition-colors cursor-pointer"
-                        title="Chat Thread with Subscriber"
-                      >
-                        <MessageSquare className="w-3.5 h-3.5" />
-                      </button>
-
-                      <button
-                        onClick={() => setOrderToDelete(order)}
-                        className="p-1.5 bg-slate-800 text-rose-400 hover:text-white hover:bg-rose-600 rounded-lg transition-colors cursor-pointer"
-                        title="Delete Ticket"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-
-                    {!order.billedToInvoiceId ? (
-                      <button
-                        onClick={() => convertRepairToInvoice(order.id)}
-                        className="flex items-center gap-1 px-3 py-1.5 bg-cyan-600/20 text-cyan-400 hover:bg-cyan-600 hover:text-white rounded-lg text-[11px] font-semibold transition-colors"
-                      >
-                        <FileText className="w-3.5 h-3.5" />
-                        <span>Bill to Invoice</span>
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => onSelectInvoice(order.billedToInvoiceId!)}
-                        className="flex items-center gap-1 px-2.5 py-1 bg-slate-800 text-cyan-300 rounded-lg text-[11px] font-mono"
-                      >
-                        <span>View Invoice</span>
-                        <ArrowRight className="w-3 h-3" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          })
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 

@@ -302,259 +302,392 @@ export const FieldTechHub: React.FC = () => {
 
       {/* TAB 1: INSTALLATION WORK ORDERS */}
       {activeSubTab === 'installs' && (
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {pendingInstallations.map((cust) => {
-              const isPending = cust.status === 'pending_install';
-              const opticalGrade = evaluateSignalQuality(cust.network.opticalPowerDbm || -18.5);
+        <div className="space-y-3">
+          {/* Sub-filter pills */}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-1.5 bg-slate-900/80 p-1 rounded-xl border border-slate-800 text-xs">
+              <button
+                type="button"
+                onClick={() => setInstallFilter('pending')}
+                className={`px-3 py-1.5 rounded-lg font-semibold transition-all cursor-pointer ${
+                  installFilter === 'pending'
+                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Pending Installs ({customers.filter((c) => c.status === 'pending_install').length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setInstallFilter('all')}
+                className={`px-3 py-1.5 rounded-lg font-semibold transition-all cursor-pointer ${
+                  installFilter === 'all'
+                    ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                All Drops ({customers.length})
+              </button>
+            </div>
+            <span className="text-xs text-slate-500">
+              Showing {pendingInstallations.length} installation work orders
+            </span>
+          </div>
 
-              return (
-                <div
-                  key={cust.id}
-                  className={`p-5 rounded-3xl bg-slate-900 border transition-all hover:border-cyan-500/50 flex flex-col justify-between space-y-4 shadow-card ${
-                    isPending ? 'border-amber-500/40 bg-gradient-to-b from-slate-900 to-amber-950/20' : 'border-slate-800'
-                  }`}
-                >
-                  <div className="space-y-2.5">
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <span
-                          className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wide border ${
-                            isPending
-                              ? 'bg-amber-950 text-amber-300 border-amber-800/60'
-                              : 'bg-emerald-950 text-emerald-300 border-emerald-800/60'
+          <div className="rounded-2xl bg-slate-900/90 border border-slate-800 shadow-card overflow-hidden">
+            {pendingInstallations.length === 0 ? (
+              <div className="p-12 text-center space-y-2">
+                <Wifi className="w-8 h-8 text-slate-600 mx-auto" />
+                <h4 className="text-sm font-bold text-slate-300">No installation orders found</h4>
+                <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                  All scheduled fiber drops have been installed and provisioned.
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead className="bg-slate-950/80 text-slate-400 font-semibold uppercase text-[10px] tracking-wider border-b border-slate-800">
+                    <tr>
+                      <th className="py-3 px-4">Subscriber / Account</th>
+                      <th className="py-3 px-4">Service Address & Contact</th>
+                      <th className="py-3 px-4">Plan & Rate</th>
+                      <th className="py-3 px-4">NAP Box & Port</th>
+                      <th className="py-3 px-4">Optical Rx Signal</th>
+                      <th className="py-3 px-4">Assigned Lineman</th>
+                      <th className="py-3 px-4">Status</th>
+                      <th className="py-3 px-4 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60">
+                    {pendingInstallations.map((cust) => {
+                      const isPending = cust.status === 'pending_install';
+                      const dbm = cust.network?.opticalPowerDbm ?? -18.5;
+                      const opticalGrade = evaluateSignalQuality(dbm);
+
+                      return (
+                        <tr
+                          key={cust.id}
+                          className={`hover:bg-slate-800/40 transition-colors ${
+                            isPending ? 'bg-amber-950/10' : ''
                           }`}
                         >
-                          {isPending ? 'Pending Line Installation' : 'Active & Provisioned'}
-                        </span>
-                        <h4 className="font-bold text-sm text-slate-100 mt-1">{cust.fullName}</h4>
-                        <span className="font-mono text-[11px] text-cyan-400">{cust.accountNo}</span>
-                      </div>
+                          {/* Subscriber / Account */}
+                          <td className="py-3 px-4">
+                            <div className="font-bold text-slate-100 text-sm">{cust.fullName}</div>
+                            <div className="font-mono text-[11px] text-cyan-400 mt-0.5">{cust.accountNo}</div>
+                            {cust.installationDate && (
+                              <div className="text-[10px] text-slate-500 mt-0.5">
+                                Sched: {formatDate(cust.installationDate)}
+                              </div>
+                            )}
+                          </td>
 
-                      <div className="text-right">
-                        <span className="text-[10px] text-slate-400 block">Plan Speed:</span>
-                        <span className="font-bold text-slate-200 text-xs">{cust.planName}</span>
-                      </div>
-                    </div>
+                          {/* Address & Contact */}
+                          <td className="py-3 px-4 max-w-[220px]">
+                            <div className="flex items-center gap-1.5 text-slate-300 truncate">
+                              <MapPin className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                              <span className="truncate">{cust.address.street}, {cust.address.barangay}</span>
+                            </div>
+                            <div className="mt-1 flex items-center gap-1">
+                              <Phone className="w-3 h-3 text-slate-500" />
+                              <a
+                                href={`tel:${cust.mobile}`}
+                                className="font-mono text-cyan-400 hover:underline text-[11px]"
+                              >
+                                {formatPhoneNumber(cust.mobile)}
+                              </a>
+                            </div>
+                          </td>
 
-                    {/* Address and Contact Details */}
-                    <div className="p-3 rounded-2xl bg-slate-950/80 border border-slate-800/80 space-y-1.5 text-xs">
-                      <div className="flex items-center gap-1.5 text-slate-300">
-                        <MapPin className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-                        <span className="truncate">{cust.address.street}, {cust.address.barangay}</span>
-                      </div>
-                      <div className="flex items-center justify-between text-[11px]">
-                        <span className="text-slate-500">Contact:</span>
-                        <a href={`tel:${cust.mobile}`} className="text-cyan-400 font-mono hover:underline flex items-center gap-1">
-                          <Phone className="w-3 h-3" />
-                          <span>{formatPhoneNumber(cust.mobile)}</span>
-                        </a>
-                      </div>
-                    </div>
+                          {/* Plan */}
+                          <td className="py-3 px-4">
+                            <span className="font-bold text-slate-200 block">{cust.planName}</span>
+                            <span className="font-mono text-slate-400 text-[11px] block mt-0.5">
+                              {formatCurrency(cust.monthlyFee)}/mo
+                            </span>
+                          </td>
 
-                    {/* Network & Optical Specs */}
-                    <div className="grid grid-cols-2 gap-2 text-[11px]">
-                      <div className="p-2 rounded-xl bg-slate-950 border border-slate-800">
-                        <span className="text-slate-500 block text-[10px]">NAP Box & Port:</span>
-                        <span className="font-semibold text-slate-200 truncate block">
-                          {cust.network.napBoxId || 'NAP-01'} (P#{cust.network.napPortNumber})
-                        </span>
-                      </div>
+                          {/* NAP Box & Port */}
+                          <td className="py-3 px-4">
+                            <div className="font-semibold text-slate-200">
+                              {cust.network?.napBoxId || 'NAP-01'}
+                            </div>
+                            <div className="text-[11px] text-slate-400 mt-0.5 font-mono">
+                              Port #{cust.network?.napPortNumber || 1}
+                            </div>
+                          </td>
 
-                      <div className="p-2 rounded-xl bg-slate-950 border border-slate-800">
-                        <span className="text-slate-500 block text-[10px]">Optical Rx Signal:</span>
-                        <span className="font-mono font-bold text-emerald-400">
-                          {cust.network.opticalPowerDbm || -18.5} dBm
-                        </span>
-                      </div>
-                    </div>
-                  </div>
+                          {/* Optical Rx Signal */}
+                          <td className="py-3 px-4">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-mono font-bold text-slate-100">
+                                {dbm.toFixed(1)} dBm
+                              </span>
+                              <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase border ${opticalGrade.badge}`}>
+                                {opticalGrade.label.split(' ')[0]}
+                              </span>
+                            </div>
+                            {cust.installationDetails?.dropCableMeters && (
+                              <div className="text-[10px] text-slate-500 mt-0.5 font-mono">
+                                Drop: {cust.installationDetails.dropCableMeters}m
+                              </div>
+                            )}
+                          </td>
 
-                  {/* Actions */}
-                  <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between gap-2">
-                    <span className="text-[10px] text-slate-500 truncate">
-                      Tech: {cust.installationDetails?.technician || 'Leonardo Flojo'}
-                    </span>
+                          {/* Technician */}
+                          <td className="py-3 px-4">
+                            <span className="text-slate-300 font-medium">
+                              {cust.installationDetails?.technician || 'Leonardo Flojo'}
+                            </span>
+                          </td>
 
-                    <button
-                      onClick={() => setSelectedCustomerForInstall(cust)}
-                      className="flex items-center gap-1.5 px-3.5 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl font-bold shadow-sm transition-all hover:scale-105 text-xs"
-                    >
-                      <Wrench className="w-3.5 h-3.5" />
-                      <span>{isPending ? 'Open Field Logger' : 'Update Specs'}</span>
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
+                          {/* Status */}
+                          <td className="py-3 px-4">
+                            <span
+                              className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase border ${
+                                isPending
+                                  ? 'bg-amber-950/80 text-amber-300 border-amber-800/60'
+                                  : 'bg-emerald-950/80 text-emerald-300 border-emerald-800/60'
+                              }`}
+                            >
+                              {isPending ? 'Pending Install' : 'Active'}
+                            </span>
+                          </td>
+
+                          {/* Actions */}
+                          <td className="py-3 px-4 text-right">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedCustomerForInstall(cust)}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl font-bold shadow-sm transition-all hover:scale-105 text-xs cursor-pointer"
+                              title={isPending ? 'Open Field Logger' : 'Update Specs'}
+                            >
+                              <Wrench className="w-3.5 h-3.5" />
+                              <span>{isPending ? 'Field Logger' : 'Specs'}</span>
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       )}
 
       {/* TAB 2: FIELD REPAIR & SPLICE ORDERS */}
       {activeSubTab === 'repairs' && (
-        <div className="space-y-4">
-          {activeRepairTickets.length === 0 ? (
-            <div className="text-center py-12 text-slate-500 text-xs bg-slate-900/60 rounded-3xl border border-slate-800">
-              No active repair tickets matching search filter. All subscriber lines are healthy.
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {activeRepairTickets.map((ticket) => {
-                const matchedCust = customers.find(
-                  (c) =>
-                    (ticket.customerId && c.id === ticket.customerId) ||
-                    c.fullName.toLowerCase() === ticket.customerName.toLowerCase()
-                );
-                const badge = getRepairStatusBadge(ticket.status);
+        <div className="space-y-3">
+          <div className="rounded-2xl bg-slate-900/90 border border-slate-800 shadow-card overflow-hidden">
+            {activeRepairTickets.length === 0 ? (
+              <div className="p-12 text-center space-y-2">
+                <Wrench className="w-8 h-8 text-slate-600 mx-auto" />
+                <h4 className="text-sm font-bold text-slate-300">No active repair tickets matching filter</h4>
+                <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                  All subscriber lines and fiber drops are operational.
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead className="bg-slate-950/80 text-slate-400 font-semibold uppercase text-[10px] tracking-wider border-b border-slate-800">
+                    <tr>
+                      <th className="py-3 px-4">Ticket / Device</th>
+                      <th className="py-3 px-4">Subscriber & Location</th>
+                      <th className="py-3 px-4">Reported Issue / Fault</th>
+                      <th className="py-3 px-4">NAP & Port</th>
+                      <th className="py-3 px-4">Assigned Tech</th>
+                      <th className="py-3 px-4">Status & Switcher</th>
+                      <th className="py-3 px-4 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60">
+                    {activeRepairTickets.map((ticket) => {
+                      const matchedCust = customers.find(
+                        (c) =>
+                          (ticket.customerId && c.id === ticket.customerId) ||
+                          c.fullName.toLowerCase() === ticket.customerName.toLowerCase()
+                      );
+                      const badge = getRepairStatusBadge(ticket.status);
 
-                return (
-                  <div
-                    key={ticket.id}
-                    className="p-5 rounded-3xl bg-slate-900 border border-slate-800 space-y-4 shadow-card flex flex-col justify-between transition-all hover:border-slate-700"
-                  >
-                    <div className="space-y-3">
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wide bg-cyan-950 text-cyan-300 border border-cyan-800/60">
-                              {ticket.deviceType}
-                            </span>
-                            <span className="font-mono text-[11px] text-cyan-400 font-bold">
+                      return (
+                        <tr key={ticket.id} className="hover:bg-slate-800/40 transition-colors">
+                          {/* Ticket / Device */}
+                          <td className="py-3 px-4">
+                            <span className="font-mono font-bold text-cyan-400 bg-cyan-950/80 px-2 py-0.5 rounded border border-cyan-800/50 text-[11px]">
                               {ticket.orderNumber}
                             </span>
-                          </div>
-                          <h4 className="font-bold text-sm text-slate-100 mt-1 flex items-center gap-1.5">
-                            <span>{ticket.customerName}</span>
-                            {matchedCust && (
-                              <span className="text-[10px] font-mono text-slate-400 font-normal">
-                                ({matchedCust.accountNo})
+                            <div className="mt-1">
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide bg-slate-800 text-slate-300">
+                                {ticket.deviceType}
                               </span>
+                            </div>
+                          </td>
+
+                          {/* Subscriber & Location */}
+                          <td className="py-3 px-4 max-w-[200px]">
+                            <div className="font-bold text-slate-100 text-sm flex items-center gap-1.5">
+                              <span>{ticket.customerName}</span>
+                              {matchedCust && (
+                                <span className="text-[10px] font-mono text-slate-400 font-normal">
+                                  ({matchedCust.accountNo})
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-slate-400 text-[11px] truncate mt-0.5 flex items-center gap-1">
+                              <MapPin className="w-3 h-3 text-rose-400 shrink-0" />
+                              <span className="truncate">{ticket.address}</span>
+                            </div>
+                            {ticket.contactNumber && (
+                              <div className="text-[11px] mt-1 flex items-center gap-1">
+                                <Phone className="w-3 h-3 text-slate-500" />
+                                <a
+                                  href={`tel:${ticket.contactNumber}`}
+                                  className="text-cyan-400 hover:underline font-mono"
+                                >
+                                  {formatPhoneNumber(ticket.contactNumber)}
+                                </a>
+                              </div>
                             )}
-                          </h4>
-                        </div>
+                          </td>
 
-                        {/* Status Switcher Dropdown */}
-                        <div className="flex flex-col items-end gap-1 shrink-0">
-                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${badge.bg} ${badge.textCol}`}>
-                            {badge.text}
-                          </span>
-                          <select
-                            value={ticket.status}
-                            onChange={(e) => {
-                              const newStatus = e.target.value as RepairStatus;
-                              updateRepairOrder(ticket.id, {
-                                status: newStatus,
-                                dateCompleted: newStatus === 'resolved' || newStatus === 'closed' ? new Date().toISOString().slice(0, 10) : ticket.dateCompleted,
-                                updatedAt: new Date().toISOString(),
-                              });
-                              showToast('info', 'Status Updated', `Ticket #${ticket.orderNumber} marked as ${newStatus}.`);
-                            }}
-                            className="text-[10px] bg-slate-950 border border-slate-700 hover:border-cyan-500 rounded px-1.5 py-0.5 text-slate-300 cursor-pointer focus:outline-none"
-                          >
-                            <option value="open">Open</option>
-                            <option value="in_progress">In Progress</option>
-                            <option value="resolved">Resolved</option>
-                            <option value="closed">Closed</option>
-                          </select>
-                        </div>
-                      </div>
+                          {/* Reported Issue / Fault */}
+                          <td className="py-3 px-4 max-w-[240px]">
+                            <p className="text-slate-200 line-clamp-2 leading-snug">
+                              {ticket.issueDescription}
+                            </p>
+                            {ticket.diagnosisNotes && (
+                              <p className="text-[10px] text-slate-400 italic mt-0.5 truncate">
+                                Diag: {ticket.diagnosisNotes}
+                              </p>
+                            )}
+                          </td>
 
-                      <p className="text-xs text-slate-300 bg-slate-950/80 p-3 rounded-xl border border-slate-800">
-                        {ticket.issueDescription}
-                      </p>
+                          {/* NAP & Port */}
+                          <td className="py-3 px-4">
+                            {matchedCust?.network ? (
+                              <div>
+                                <span className="font-semibold text-slate-200 block">
+                                  {matchedCust.network.napBoxId || 'NAP'}
+                                </span>
+                                <span className="font-mono text-slate-400 text-[11px] block mt-0.5">
+                                  Port #{matchedCust.network.napPortNumber || 1}
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-slate-500 text-[11px]">Direct / In-Shop</span>
+                            )}
+                          </td>
 
-                      <div className="space-y-1.5 text-xs text-slate-400 bg-slate-950/40 p-2.5 rounded-xl border border-slate-800/60">
-                        <div className="flex justify-between items-start gap-2">
-                          <span className="text-slate-500">Address:</span>
-                          <span className="text-slate-200 text-right truncate max-w-[200px]">{ticket.address}</span>
-                        </div>
-                        {ticket.contactNumber && (
-                          <div className="flex justify-between items-center">
-                            <span className="text-slate-500">Mobile:</span>
-                            <a
-                              href={`tel:${ticket.contactNumber}`}
-                              className="text-cyan-400 hover:underline flex items-center gap-1 font-mono font-medium"
-                            >
-                              <Phone className="w-3 h-3" />
-                              <span>{formatPhoneNumber(ticket.contactNumber)}</span>
-                            </a>
-                          </div>
-                        )}
-                        {matchedCust?.network && (
-                          <div className="flex justify-between items-center text-[11px]">
-                            <span className="text-slate-500">NAP Port:</span>
-                            <span className="text-slate-300">
-                              {matchedCust.network.napBoxId || 'NAP'} (Port {matchedCust.network.napPortNumber || 1})
-                            </span>
-                          </div>
-                        )}
-                        <div className="flex justify-between items-center text-[11px] pt-1 border-t border-slate-800/80">
-                          <span className="text-slate-500">Assigned Tech:</span>
-                          <span className="text-cyan-300 font-medium">{ticket.technician}</span>
-                        </div>
-                      </div>
-                    </div>
+                          {/* Assigned Tech */}
+                          <td className="py-3 px-4">
+                            <span className="text-cyan-300 font-medium">{ticket.technician}</span>
+                          </td>
 
-                    <div className="pt-3 border-t border-slate-800 flex items-center justify-between gap-2 flex-wrap">
-                      <button
-                        type="button"
-                        onClick={() => setSelectedChatTicket(ticket)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-600/20 hover:bg-cyan-600 hover:text-white text-cyan-300 border border-cyan-500/40 rounded-xl text-xs font-bold transition-all cursor-pointer"
-                      >
-                        <MessageSquare className="w-3.5 h-3.5" />
-                        <span>Chat {ticket.messages && ticket.messages.length > 0 ? `(${ticket.messages.length})` : ''}</span>
-                      </button>
+                          {/* Status & Switcher */}
+                          <td className="py-3 px-4">
+                            <div className="flex items-center gap-2">
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${badge.bg} ${badge.textCol}`}>
+                                {badge.text}
+                              </span>
+                              <select
+                                value={ticket.status}
+                                onChange={(e) => {
+                                  const newStatus = e.target.value as RepairStatus;
+                                  updateRepairOrder(ticket.id, {
+                                    status: newStatus,
+                                    dateCompleted:
+                                      newStatus === 'resolved' || newStatus === 'closed'
+                                        ? new Date().toISOString().slice(0, 10)
+                                        : ticket.dateCompleted,
+                                    updatedAt: new Date().toISOString(),
+                                  });
+                                  showToast(
+                                    'info',
+                                    'Status Updated',
+                                    `Ticket #${ticket.orderNumber} marked as ${newStatus}.`
+                                  );
+                                }}
+                                className="text-[10px] bg-slate-950 border border-slate-700 hover:border-cyan-500 rounded px-1.5 py-0.5 text-slate-300 cursor-pointer focus:outline-none"
+                              >
+                                <option value="open">Open</option>
+                                <option value="in_progress">In Progress</option>
+                                <option value="resolved">Resolved</option>
+                                <option value="closed">Closed</option>
+                              </select>
+                            </div>
+                          </td>
 
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const targetCust: Customer = matchedCust || {
-                            id: ticket.customerId || ticket.id,
-                            accountNo: 'ACC-SR',
-                            fullName: ticket.customerName,
-                            email: '',
-                            mobile: ticket.contactNumber,
-                            address: {
-                              street: ticket.address,
-                              barangay: 'Lagonoy',
-                              city: 'Lagonoy',
-                              province: 'Camarines Sur',
-                            },
-                            planId: 'plan-custom',
-                            planName: 'Fiber Subscriber',
-                            monthlyFee: 0,
-                            billingDay: 1,
-                            status: 'active',
-                            installationDate: ticket.dateReceived || new Date().toISOString().slice(0, 10),
-                            balance: 0,
-                            walletBalance: 0,
-                            advanceDeposit: 0,
-                            network: {
-                              pppoeUsername: ticket.customerId || 'subscriber',
-                              ipAddress: '192.168.10.100',
-                              napBoxId: napBoxes[0]?.id || 'NAP-01',
-                              napPortNumber: 1,
-                              opticalPowerDbm: -19.0,
-                              isMikrotikSynced: false,
-                            },
-                            createdAt: ticket.createdAt,
-                            updatedAt: ticket.createdAt,
-                          };
-                          setSelectedCustomerForInstall(targetCust);
-                          setSelectedRepairOrderForLogger(ticket);
-                        }}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
-                      >
-                        <Wrench className="w-3.5 h-3.5 text-cyan-400" />
-                        <span>Field Logger</span>
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+                          {/* Actions */}
+                          <td className="py-3 px-4 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => setSelectedChatTicket(ticket)}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-cyan-600/20 hover:bg-cyan-600 hover:text-white text-cyan-300 border border-cyan-500/40 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                                title="Open Live Chat Thread"
+                              >
+                                <MessageSquare className="w-3.5 h-3.5" />
+                                <span>Chat{ticket.messages && ticket.messages.length > 0 ? ` (${ticket.messages.length})` : ''}</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const targetCust: Customer = matchedCust || {
+                                    id: ticket.customerId || ticket.id,
+                                    accountNo: 'ACC-SR',
+                                    fullName: ticket.customerName,
+                                    email: '',
+                                    mobile: ticket.contactNumber,
+                                    address: {
+                                      street: ticket.address,
+                                      barangay: 'Lagonoy',
+                                      city: 'Lagonoy',
+                                      province: 'Camarines Sur',
+                                    },
+                                    planId: 'plan-custom',
+                                    planName: 'Fiber Subscriber',
+                                    monthlyFee: 0,
+                                    billingDay: 1,
+                                    status: 'active',
+                                    installationDate:
+                                      ticket.dateReceived || new Date().toISOString().slice(0, 10),
+                                    balance: 0,
+                                    walletBalance: 0,
+                                    advanceDeposit: 0,
+                                    network: {
+                                      pppoeUsername: ticket.customerId || 'subscriber',
+                                      ipAddress: '192.168.10.100',
+                                      napBoxId: napBoxes[0]?.id || 'NAP-01',
+                                      napPortNumber: 1,
+                                      opticalPowerDbm: -19.0,
+                                      isMikrotikSynced: false,
+                                    },
+                                    createdAt: ticket.createdAt,
+                                    updatedAt: ticket.createdAt,
+                                  };
+                                  setSelectedCustomerForInstall(targetCust);
+                                  setSelectedRepairOrderForLogger(ticket);
+                                }}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                                title="Open Field Logger Modal"
+                              >
+                                <Wrench className="w-3.5 h-3.5 text-cyan-400" />
+                                <span>Logger</span>
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
