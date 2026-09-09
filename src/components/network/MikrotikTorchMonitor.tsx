@@ -261,7 +261,6 @@ export const MikrotikTorchMonitor: React.FC<MikrotikTorchMonitorProps> = ({
     }
     setRemainingSeconds(autoStopDuration);
     setIsRunning(true);
-    fetchTorchSnapshot();
     showToast('info', 'Torch Started', `Monitoring live router traffic on ${selectedInterface}`);
   };
 
@@ -857,9 +856,17 @@ export const MikrotikTorchMonitor: React.FC<MikrotikTorchMonitorProps> = ({
               {topTalkers.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="text-center py-10 text-slate-500 text-xs font-mono">
-                    {isRunning
-                      ? `Live monitoring active on ${selectedInterface}. Router reported 0 active connections (interface is idle).`
-                      : `No active subscriber traffic recorded on ${selectedInterface || 'selected interface'}. Click Start Torch to sample router.`}
+                    {isLoadingFlows ? (
+                      <div className="flex flex-col items-center justify-center gap-2 py-4">
+                        <RefreshCw className="w-5 h-5 text-amber-400 animate-spin" />
+                        <span className="text-slate-300 font-sans font-medium">Sampling live flows from {selectedInterface}...</span>
+                        <span className="text-[11px] text-slate-500 font-mono">Querying router connection tracking & subscriber queues</span>
+                      </div>
+                    ) : isRunning ? (
+                      `Live monitoring active on ${selectedInterface}. Router reported 0 active connections (interface is idle).`
+                    ) : (
+                      `No active subscriber traffic recorded on ${selectedInterface || 'selected interface'}. Click Start Torch to sample router.`
+                    )}
                   </td>
                 </tr>
               ) : (
@@ -946,9 +953,17 @@ export const MikrotikTorchMonitor: React.FC<MikrotikTorchMonitorProps> = ({
               {filteredFlows.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="text-center py-10 text-slate-500 text-xs">
-                    {isRunning
-                      ? `No matching connection flows found on ${selectedInterface}. Interface is idle.`
-                      : `No active connections captured on ${selectedInterface || 'selected interface'}. Click Start Torch to sample router.`}
+                    {isLoadingFlows ? (
+                      <div className="flex flex-col items-center justify-center gap-2 py-4">
+                        <RefreshCw className="w-5 h-5 text-amber-400 animate-spin" />
+                        <span className="text-slate-300 font-sans font-medium">Sampling raw connection flows from {selectedInterface}...</span>
+                        <span className="text-[11px] text-slate-500 font-mono">Inspecting active firewall sockets</span>
+                      </div>
+                    ) : isRunning ? (
+                      `No matching connection flows found on ${selectedInterface}. Interface is idle.`
+                    ) : (
+                      `No active connections captured on ${selectedInterface || 'selected interface'}. Click Start Torch to sample router.`
+                    )}
                   </td>
                 </tr>
               ) : (
@@ -1044,9 +1059,17 @@ export const MikrotikTorchMonitor: React.FC<MikrotikTorchMonitorProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
             {applicationStats.length === 0 ? (
               <div className="col-span-full p-8 rounded-2xl bg-slate-900/60 border border-slate-800 text-center text-slate-500 text-xs font-mono">
-                {isRunning
-                  ? `Monitoring active on ${selectedInterface}. Analyzing application protocol signatures...`
-                  : `No application statistics captured yet. Click Start Torch to inspect live application traffic.`}
+                {isLoadingFlows ? (
+                  <div className="flex flex-col items-center justify-center gap-2 py-4">
+                    <RefreshCw className="w-5 h-5 text-amber-400 animate-spin" />
+                    <span className="text-slate-300 font-sans font-medium">Analyzing application traffic signatures on {selectedInterface}...</span>
+                    <span className="text-[11px] text-slate-500 font-mono">Classifying protocols into Layer 7 categories</span>
+                  </div>
+                ) : isRunning ? (
+                  `Monitoring active on ${selectedInterface}. Analyzing application protocol signatures...`
+                ) : (
+                  `No application statistics captured yet. Click Start Torch to inspect live application traffic.`
+                )}
               </div>
             ) : (
               applicationStats.map((stat) => (

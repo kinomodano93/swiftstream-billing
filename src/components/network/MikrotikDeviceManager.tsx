@@ -197,6 +197,24 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({
   });
   const selectedPortRef = useRef<string>(selectedPort);
   selectedPortRef.current = selectedPort;
+  // PPPoE Sessions Search and Filter State
+  const [pppoeSearchTerm, setPppoeSearchTerm] = useState<string>('');
+  const [pppoeStatusFilter, setPppoeStatusFilter] = useState<'all' | 'active' | 'down'>('all');
+
+  const filteredPppoeSessions = useMemo(() => {
+    const term = pppoeSearchTerm.trim().toLowerCase();
+    return livePppoeSessions.filter((sess) => {
+      if (pppoeStatusFilter === 'active' && !sess.running) return false;
+      if (pppoeStatusFilter === 'down' && sess.running) return false;
+      if (!term) return true;
+      const name = String(sess.name || '').toLowerCase();
+      const comment = String(sess.comment || '').toLowerCase();
+      const mac = String(sess.macAddress || '').toLowerCase();
+      const type = String(sess.type || '').toLowerCase();
+      return name.includes(term) || comment.includes(term) || mac.includes(term) || type.includes(term);
+    });
+  }, [livePppoeSessions, pppoeSearchTerm, pppoeStatusFilter]);
+
   const [portTraffic, setPortTraffic] = useState<{
     rxMbps: number;
     txMbps: number;
@@ -1946,57 +1964,127 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({
               No active PPPoE session interfaces. They appear here automatically once subscribers connect.
             </div>
           ) : (
-            <div className="overflow-x-auto rounded-2xl border border-slate-800">
-              <table className="w-full text-left text-xs font-mono">
-                <thead className="bg-slate-950 text-slate-400 uppercase text-[10px] tracking-wider">
-                  <tr>
-                    <th className="px-4 py-3">Status</th>
-                    <th className="px-4 py-3">Session Interface</th>
-                    <th className="px-4 py-3">Type</th>
-                    <th className="px-4 py-3">Comment</th>
-                    <th className="px-4 py-3">MAC Address</th>
-                    <th className="px-4 py-3 text-right">RX Total</th>
-                    <th className="px-4 py-3 text-right">TX Total</th>
-                    <th className="px-4 py-3 text-right">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/60">
-                  {livePppoeSessions.map((sess) => (
-                    <tr key={sess.name} className="hover:bg-slate-800/30 transition-colors">
-                      <td className="px-4 py-2.5">
-                        <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                          sess.running
-                            ? 'bg-emerald-950 text-emerald-400 border border-emerald-800/60'
-                            : 'bg-slate-900 text-slate-500 border border-slate-700'
-                        }`}>
-                          <span className={`w-1.5 h-1.5 rounded-full ${sess.running ? 'bg-emerald-400' : 'bg-slate-600'}`} />
-                          {sess.running ? 'ACTIVE' : 'DOWN'}
-                        </span>
-                      </td>
-                      <td className="px-4 py-2.5 text-cyan-300 font-bold">{sess.name}</td>
-                      <td className="px-4 py-2.5 text-slate-400">{sess.type}</td>
-                      <td className="px-4 py-2.5 text-slate-400">{sess.comment || '—'}</td>
-                      <td className="px-4 py-2.5 text-slate-400">{sess.macAddress || '—'}</td>
-                      <td className="px-4 py-2.5 text-right text-emerald-400">{(sess.rxBytes / 1073741824).toFixed(2)} GB</td>
-                      <td className="px-4 py-2.5 text-right text-cyan-400">{(sess.txBytes / 1073741824).toFixed(2)} GB</td>
-                      <td className="px-4 py-2.5 text-right">
-                        <button
-                          onClick={() => {
-                            setTorchPreselect({ iface: sess.name });
-                            setActiveTab('torch');
-                          }}
-                          className="px-2.5 py-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 transition-all cursor-pointer"
-                          title="Torch This Subscriber Session"
-                        >
-                          <Flame className="w-3 h-3" />
-                          <span>Torch</span>
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <>
+              {/* PPPoE Session Search & Filter Bar */}
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-3 bg-slate-950/60 rounded-2xl border border-slate-800/80">
+                <div className="flex items-center gap-2 flex-1 max-w-md">
+                  <div className="relative flex-1">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      value={pppoeSearchTerm}
+                      onChange={(e) => setPppoeSearchTerm(e.target.value)}
+                      placeholder="Search session name, subscriber, comment, MAC..."
+                      className="w-full pl-8 pr-8 py-1.5 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-400 font-mono"
+                    />
+                    {pppoeSearchTerm && (
+                      <button
+                        onClick={() => setPppoeSearchTerm('')}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 cursor-pointer"
+                        title="Clear Search"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+
+                  <select
+                    value={pppoeStatusFilter}
+                    onChange={(e: any) => setPppoeStatusFilter(e.target.value)}
+                    className="px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-200 font-mono focus:outline-none focus:border-cyan-400 cursor-pointer"
+                  >
+                    <option value="all">All Status</option>
+                    <option value="active">Active UP</option>
+                    <option value="down">Link Down</option>
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-2 text-xs font-mono text-slate-400">
+                  <span>
+                    Showing <strong className="text-cyan-400">{filteredPppoeSessions.length}</strong> of{' '}
+                    <strong className="text-slate-200">{livePppoeSessions.length}</strong> sessions
+                  </span>
+                  {(pppoeSearchTerm || pppoeStatusFilter !== 'all') && (
+                    <button
+                      onClick={() => {
+                        setPppoeSearchTerm('');
+                        setPppoeStatusFilter('all');
+                      }}
+                      className="text-[11px] text-amber-400 hover:text-amber-300 underline cursor-pointer ml-1"
+                    >
+                      Reset
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {filteredPppoeSessions.length === 0 ? (
+                <div className="text-center py-10 bg-slate-950/40 rounded-2xl border border-slate-800/60 text-slate-400 text-xs font-mono">
+                  No PPPoE sessions match <span className="text-cyan-300 font-bold">"{pppoeSearchTerm || pppoeStatusFilter}"</span>.
+                  <button
+                    onClick={() => {
+                      setPppoeSearchTerm('');
+                      setPppoeStatusFilter('all');
+                    }}
+                    className="block mx-auto mt-2 text-cyan-400 hover:underline cursor-pointer font-bold"
+                  >
+                    Clear Filter
+                  </button>
+                </div>
+              ) : (
+                <div className="overflow-x-auto rounded-2xl border border-slate-800">
+                  <table className="w-full text-left text-xs font-mono">
+                    <thead className="bg-slate-950 text-slate-400 uppercase text-[10px] tracking-wider">
+                      <tr>
+                        <th className="px-4 py-3">Status</th>
+                        <th className="px-4 py-3">Session Interface</th>
+                        <th className="px-4 py-3">Type</th>
+                        <th className="px-4 py-3">Comment</th>
+                        <th className="px-4 py-3">MAC Address</th>
+                        <th className="px-4 py-3 text-right">RX Total</th>
+                        <th className="px-4 py-3 text-right">TX Total</th>
+                        <th className="px-4 py-3 text-right">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60">
+                      {filteredPppoeSessions.map((sess) => (
+                        <tr key={sess.name} className="hover:bg-slate-800/30 transition-colors">
+                          <td className="px-4 py-2.5">
+                            <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                              sess.running
+                                ? 'bg-emerald-950 text-emerald-400 border border-emerald-800/60'
+                                : 'bg-slate-900 text-slate-500 border border-slate-700'
+                            }`}>
+                              <span className={`w-1.5 h-1.5 rounded-full ${sess.running ? 'bg-emerald-400' : 'bg-slate-600'}`} />
+                              {sess.running ? 'ACTIVE' : 'DOWN'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-2.5 text-cyan-300 font-bold">{sess.name}</td>
+                          <td className="px-4 py-2.5 text-slate-400">{sess.type}</td>
+                          <td className="px-4 py-2.5 text-slate-400">{sess.comment || '—'}</td>
+                          <td className="px-4 py-2.5 text-slate-400">{sess.macAddress || '—'}</td>
+                          <td className="px-4 py-2.5 text-right text-emerald-400">{(sess.rxBytes / 1073741824).toFixed(2)} GB</td>
+                          <td className="px-4 py-2.5 text-right text-cyan-400">{(sess.txBytes / 1073741824).toFixed(2)} GB</td>
+                          <td className="px-4 py-2.5 text-right">
+                            <button
+                              onClick={() => {
+                                setTorchPreselect({ iface: sess.name });
+                                setActiveTab('torch');
+                              }}
+                              className="px-2.5 py-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-lg text-[10px] font-bold inline-flex items-center gap-1 transition-all cursor-pointer"
+                              title="Torch This Subscriber Session"
+                            >
+                              <Flame className="w-3 h-3" />
+                              <span>Torch</span>
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
