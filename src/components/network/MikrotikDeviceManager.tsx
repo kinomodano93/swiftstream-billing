@@ -146,7 +146,7 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({
   const [isPolling, setIsPolling] = useState<boolean>(false);
   const [liveHealth, setLiveHealth] = useState<RouterHealthInfo | null>(null);
 
-  // Map initial interfaces from the device or fallback to full CCR2116 hardware port list
+  // Map initial interfaces from the device or return empty array while connecting
   const getInitialInterfaces = () => {
     if (selectedDevice?.interfaces && selectedDevice.interfaces.length > 0) {
       return selectedDevice.interfaces.map((i: any) => ({
@@ -154,31 +154,14 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({
         type: i.type || (i.name.startsWith('sfp') ? 'sfp-plus' : i.name.startsWith('bridge') ? 'bridge' : 'ether'),
         running: i.status === 'running' || i.running === true || i.running === 'true',
         disabled: i.disabled === true || i.disabled === 'true',
-        comment: i.comment || (i.name === 'sfp-sfpplus1' ? 'WAN Fiber Uplink 10G' : i.name === 'ether1' ? 'WAN Gateway' : i.name === 'ether2' ? 'PPPoE Subscribers' : ''),
+        comment: i.comment || '',
         macAddress: i.macAddress || i['mac-address'] || '',
         rxBytes: i.rxTotalBytes || i.rxBytes || 0,
         txBytes: i.txTotalBytes || i.txBytes || 0,
       }));
     }
-    return [
-      { name: 'sfp-sfpplus1', type: 'sfp-plus', running: true, comment: 'WAN Fiber Uplink 10G', macAddress: 'D4:01:C3:88:1A:01' },
-      { name: 'sfp-sfpplus2', type: 'sfp-plus', running: true, comment: 'OLT 10G Trunk', macAddress: 'D4:01:C3:88:1A:02' },
-      { name: 'sfp-sfpplus3', type: 'sfp-plus', running: false, comment: 'Backup SFP+', macAddress: 'D4:01:C3:88:1A:03' },
-      { name: 'sfp-sfpplus4', type: 'sfp-plus', running: false, comment: 'Spare SFP+', macAddress: 'D4:01:C3:88:1A:04' },
-      { name: 'ether1', type: 'ether', running: true, comment: 'WAN Gateway Backup', macAddress: 'D4:01:C3:88:1A:05' },
-      { name: 'ether2', type: 'ether', running: true, comment: 'PPPoE Concentrator Trunk', macAddress: 'D4:01:C3:88:1A:06' },
-      { name: 'ether3', type: 'ether', running: false, comment: 'OLT Port 1', macAddress: 'D4:01:C3:88:1A:07' },
-      { name: 'ether4', type: 'ether', running: false, comment: 'OLT Port 2', macAddress: 'D4:01:C3:88:1A:08' },
-      { name: 'ether5', type: 'ether', running: false, comment: 'Management LAN', macAddress: 'D4:01:C3:88:1A:09' },
-      { name: 'ether6', type: 'ether', running: false, comment: 'Spare', macAddress: 'D4:01:C3:88:1A:10' },
-      { name: 'ether7', type: 'ether', running: false, comment: 'Spare', macAddress: 'D4:01:C3:88:1A:11' },
-      { name: 'ether8', type: 'ether', running: false, comment: 'Spare', macAddress: 'D4:01:C3:88:1A:12' },
-      { name: 'ether9', type: 'ether', running: false, comment: 'Spare', macAddress: 'D4:01:C3:88:1A:13' },
-      { name: 'ether10', type: 'ether', running: false, comment: 'Spare', macAddress: 'D4:01:C3:88:1A:14' },
-      { name: 'ether11', type: 'ether', running: false, comment: 'Spare', macAddress: 'D4:01:C3:88:1A:15' },
-      { name: 'ether12', type: 'ether', running: false, comment: 'Spare', macAddress: 'D4:01:C3:88:1A:16' },
-      { name: 'bridge-local', type: 'bridge', running: true, comment: 'Core Subscriber Bridge', macAddress: 'D4:01:C3:88:1A:17' },
-    ];
+    // Strict Zero-Mock: empty list until router interfaces are fetched
+    return [];
   };
 
   const [liveInterfaces, setLiveInterfaces] = useState<any[]>(() => getInitialInterfaces().filter((i) => !isPppoeSessionIface(i)));
@@ -206,7 +189,14 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({
   const [isUpdatingPassword, setIsUpdatingPassword] = useState<boolean>(false);
 
   // Selected Interface for Focused Bandwidth Monitoring
-  const [selectedPort, setSelectedPort] = useState<string>('sfp-sfpplus1');
+  const [selectedPort, setSelectedPort] = useState<string>(() => {
+    if (selectedDevice?.interfaces && selectedDevice.interfaces.length > 0) {
+      return selectedDevice.interfaces[0].name;
+    }
+    return '';
+  });
+  const selectedPortRef = useRef<string>(selectedPort);
+  selectedPortRef.current = selectedPort;
   const [portTraffic, setPortTraffic] = useState<{
     rxMbps: number;
     txMbps: number;
@@ -514,6 +504,27 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({
   // 1. Initial Device Interface Sync on Router Change
   useEffect(() => {
     let isCancelled = false;
+    // Reset to device interfaces or empty if switching routers
+    if (selectedDevice?.interfaces && selectedDevice.interfaces.length > 0) {
+      const devIfaces = selectedDevice.interfaces.map((i: any) => ({
+        name: i.name,
+        type: i.type || (i.name.startsWith('sfp') ? 'sfp-plus' : i.name.startsWith('bridge') ? 'bridge' : 'ether'),
+        running: i.status === 'running' || i.running === true || i.running === 'true',
+        disabled: i.disabled === true || i.disabled === 'true',
+        comment: i.comment || '',
+        macAddress: i.macAddress || i['mac-address'] || '',
+        rxBytes: i.rxTotalBytes || i.rxBytes || 0,
+        txBytes: i.txTotalBytes || i.txBytes || 0,
+      }));
+      setLiveInterfaces(devIfaces);
+      setSelectedPort(devIfaces[0].name);
+      selectedPortRef.current = devIfaces[0].name;
+    } else {
+      setLiveInterfaces([]);
+      setSelectedPort('');
+      selectedPortRef.current = '';
+    }
+
     const syncDevice = async () => {
       if (!selectedDevice) return;
       try {
@@ -531,8 +542,10 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({
             txBytes: parseInt(i['tx-byte'] || i['tx-bytes'] || '0', 10) || 0,
           }));
           setLiveInterfaces(mapped);
-          if (!mapped.some((m) => m.name === selectedPort)) {
-            setSelectedPort(mapped[0].name);
+          if (!selectedPortRef.current || !mapped.some((m) => m.name === selectedPortRef.current)) {
+            const defaultPort = mapped.find((m) => m.running)?.name || mapped[0].name;
+            setSelectedPort(defaultPort);
+            selectedPortRef.current = defaultPort;
           }
         }
       } catch (err) {
@@ -589,27 +602,28 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({
         pollCountRef.current += 1;
         const isFullCheck = pollCountRef.current === 1 || pollCountRef.current % 4 === 0;
 
+        const activePort = selectedPortRef.current;
         // Fetch high-frequency interface traffic and ICMP ping to 8.8.8.8
         const [traffic, pingResult, health, monitor] = await Promise.allSettled([
-          fetchInterfaceTraffic(selectedPort, creds),
+          activePort ? fetchInterfaceTraffic(activePort, creds) : Promise.resolve(null as any),
           pingGoogleDns(creds, '8.8.8.8'),
           isFullCheck ? testRouterConnection(creds) : Promise.resolve(null as any),
-          isFullCheck ? fetchSfpOpticalDiagnostics(creds, selectedPort) : Promise.resolve(null as any),
+          isFullCheck && activePort ? fetchSfpOpticalDiagnostics(creds, activePort) : Promise.resolve(null as any),
         ]);
 
         if (!isMounted) return;
 
         // Apply real negotiated link state (rate / duplex / auto-negotiation) for the selected port
-        if (monitor.status === 'fulfilled' && monitor.value) {
-          applyPortLink(monitor.value, selectedPort);
+        if (monitor.status === 'fulfilled' && monitor.value && activePort) {
+          applyPortLink(monitor.value, activePort);
         }
 
         // Check if selected interface is offline/down/disabled or router is offline
-        const targetIface = liveInterfacesRef.current.find((i: any) => i.name === selectedPort);
+        const targetIface = activePort ? liveInterfacesRef.current.find((i: any) => i.name === activePort) : null;
         const isDeviceOffline = selectedDevice.status === 'offline';
         const isIfaceDown = targetIface ? (!targetIface.running || targetIface.disabled) : false;
         const isLinkDown = monitor.status === 'fulfilled' && monitor.value && (monitor.value.status === 'no-link' || monitor.value.status === 'link_down');
-        const isPortOffline = isDeviceOffline || isIfaceDown || isLinkDown;
+        const isPortOffline = !activePort || isDeviceOffline || isIfaceDown || isLinkDown;
 
         let curRx = 0;
         let curTx = 0;
@@ -660,7 +674,7 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({
           // If real interfaces returned in health, update live list (hardware only; PPPoE sessions go to their own tab)
           if (Array.isArray(res.interfaces) && res.interfaces.length > 0) {
             const { hardware, sessions } = splitInterfaces(res.interfaces);
-            setLiveInterfaces(hardware.map((i: any) => ({
+            const mappedHw = hardware.map((i: any) => ({
               name: i.name || 'eth',
               type: i.type || 'ether',
               running: i.running === 'true' || i.running === true || i.status === 'running',
@@ -669,7 +683,13 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({
               macAddress: i['mac-address'] || i.macAddress || '',
               rxBytes: parseInt(i['rx-byte'] || i['rx-bytes'] || '0', 10) || 0,
               txBytes: parseInt(i['tx-byte'] || i['tx-bytes'] || '0', 10) || 0,
-            })));
+            }));
+            setLiveInterfaces(mappedHw);
+            if (mappedHw.length > 0 && (!selectedPortRef.current || !mappedHw.some((m: any) => m.name === selectedPortRef.current))) {
+              const defaultPort = mappedHw.find((m: any) => m.running)?.name || mappedHw[0].name;
+              setSelectedPort(defaultPort);
+              selectedPortRef.current = defaultPort;
+            }
             setLivePppoeSessions(sessions.map((i: any) => ({
               name: i.name || 'pppoe-in',
               type: i.type || 'pppoe-in',
@@ -1153,15 +1173,15 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({
                     </span>
                     <span className="text-slate-600 text-xs">•</span>
                     <span className="text-slate-400 text-xs font-mono">
-                      {liveInterfaces.find((i) => i.name === selectedPort)?.comment || 'Physical Interface'}
+                      {liveInterfaces.find((i) => i.name === selectedPort)?.comment || (selectedPort ? 'Physical Interface' : 'Connecting to MikroTik...')}
                     </span>
                   </div>
                   <h2 className="text-xl font-black text-slate-100 mt-0.5 flex items-center gap-2 font-mono">
                     <span>Port:</span>
                     <code className="text-cyan-300 font-mono bg-cyan-950/60 px-3 py-0.5 rounded-xl border border-cyan-800/60 shadow-inner">
-                      {selectedPort}
+                      {selectedPort || 'Detecting...'}
                     </code>
-                    {(() => {
+                    {selectedPort ? (() => {
                       const portCap = dynamicPortMaxMbps;
                       const isSfp = portCap >= 10000;
                       const isGigabit = portCap >= 1000 && portCap < 10000;
@@ -1178,7 +1198,11 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({
                             : formatCapacityLabel(portCap)}
                         </span>
                       );
-                    })()}
+                    })() : (
+                      <span className="text-[10px] font-bold font-mono px-2 py-0.5 rounded-lg border bg-slate-800 text-slate-400 border-slate-700">
+                        Querying...
+                      </span>
+                    )}
                   </h2>
                 </div>
               </div>
@@ -1214,14 +1238,22 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({
                 {/* Port Selector Dropdown */}
                 <select
                   value={selectedPort}
-                  onChange={(e) => setSelectedPort(e.target.value)}
-                  className="bg-slate-950 border border-slate-700 text-slate-200 text-xs font-mono font-bold px-3 py-1.5 rounded-xl focus:outline-none focus:border-cyan-400 cursor-pointer"
+                  onChange={(e) => {
+                    setSelectedPort(e.target.value);
+                    selectedPortRef.current = e.target.value;
+                  }}
+                  disabled={liveInterfaces.length === 0}
+                  className="bg-slate-950 border border-slate-700 text-slate-200 text-xs font-mono font-bold px-3 py-1.5 rounded-xl focus:outline-none focus:border-cyan-400 cursor-pointer disabled:opacity-60"
                 >
-                  {liveInterfaces.map((i) => (
-                    <option key={i.name} value={i.name}>
-                      {i.name} {i.comment ? `• ${i.comment}` : ''} {i.running ? '🟢 UP' : '⚪ DOWN'}
-                    </option>
-                  ))}
+                  {liveInterfaces.length === 0 ? (
+                    <option value="">Connecting to interfaces...</option>
+                  ) : (
+                    liveInterfaces.map((i) => (
+                      <option key={i.name} value={i.name}>
+                        {i.name} {i.comment ? `• ${i.comment}` : ''} {i.running ? '🟢 UP' : '⚪ DOWN'}
+                      </option>
+                    ))
+                  )}
                 </select>
 
                 {/* Live Stream / Pause Button */}
@@ -1583,53 +1615,64 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-3">
-              {liveInterfaces.map((iface) => {
-                const isSelected = iface.name === selectedPort;
-                return (
-                  <button
-                    key={iface.name}
-                    onClick={() => setSelectedPort(iface.name)}
-                    className={`p-3.5 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
-                      isSelected
-                        ? 'bg-cyan-950/60 border-cyan-500 shadow-lg shadow-cyan-500/20 ring-1 ring-cyan-500'
-                        : 'bg-slate-950/60 border-slate-800 hover:border-slate-700 hover:bg-slate-900/60'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className={`text-xs font-mono font-bold ${isSelected ? 'text-cyan-300' : 'text-slate-200'}`}>
-                        {iface.name}
-                      </span>
-                      {(() => {
-                        const portCap = getInterfaceCapacityMbps(isSelected ? portLink.rate : '', iface.name, iface);
-                        const portSpeedLabel = portCap >= 10000 ? '10G' : portCap >= 1000 ? '1G' : '100M';
-                        return (
-                          <span className={`text-[9px] font-bold font-mono px-1.5 py-0.5 rounded border ${
-                            portCap >= 10000
-                              ? 'text-purple-300 bg-purple-950/50 border-purple-800/60'
-                              : portCap >= 1000
-                              ? 'text-cyan-300 bg-cyan-950/50 border-cyan-800/60'
-                              : 'text-amber-300 bg-amber-950/50 border-amber-800/60'
-                          }`}>
-                            {portSpeedLabel}
-                          </span>
-                        );
-                      })()}
-                    </div>
-
-                    <div className="mt-3">
-                      <span className="text-[10px] text-slate-400 block truncate font-mono">
-                        {iface.comment || iface.type || 'Port'}
-                      </span>
-                      <div className="flex items-center justify-between mt-1">
-                        <span className={`text-[10px] font-bold font-mono ${iface.running ? 'text-emerald-400' : 'text-slate-500'}`}>
-                          {iface.running ? 'Active UP' : 'Disabled'}
+              {liveInterfaces.length === 0 ? (
+                <div className="col-span-full py-8 text-center bg-slate-950/40 rounded-2xl border border-slate-800/60 flex flex-col items-center justify-center gap-2">
+                  <RefreshCw className="w-5 h-5 text-cyan-400 animate-spin" />
+                  <p className="text-xs text-slate-300 font-medium font-sans">Connecting to MikroTik Router...</p>
+                  <p className="text-[11px] text-slate-500 font-mono">Querying authentic hardware ports via RouterOS REST API</p>
+                </div>
+              ) : (
+                liveInterfaces.map((iface) => {
+                  const isSelected = iface.name === selectedPort;
+                  return (
+                    <button
+                      key={iface.name}
+                      onClick={() => {
+                        setSelectedPort(iface.name);
+                        selectedPortRef.current = iface.name;
+                      }}
+                      className={`p-3.5 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                        isSelected
+                          ? 'bg-cyan-950/60 border-cyan-500 shadow-lg shadow-cyan-500/20 ring-1 ring-cyan-500'
+                          : 'bg-slate-950/60 border-slate-800 hover:border-slate-700 hover:bg-slate-900/60'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className={`text-xs font-mono font-bold ${isSelected ? 'text-cyan-300' : 'text-slate-200'}`}>
+                          {iface.name}
                         </span>
-                        <span className={`w-2 h-2 rounded-full ${iface.running ? 'bg-emerald-400' : 'bg-slate-600'}`} />
+                        {(() => {
+                          const portCap = getInterfaceCapacityMbps(isSelected ? portLink.rate : '', iface.name, iface);
+                          const portSpeedLabel = portCap >= 10000 ? '10G' : portCap >= 1000 ? '1G' : '100M';
+                          return (
+                            <span className={`text-[9px] font-bold font-mono px-1.5 py-0.5 rounded border ${
+                              portCap >= 10000
+                                ? 'text-purple-300 bg-purple-950/50 border-purple-800/60'
+                                : portCap >= 1000
+                                ? 'text-cyan-300 bg-cyan-950/50 border-cyan-800/60'
+                                : 'text-amber-300 bg-amber-950/50 border-amber-800/60'
+                            }`}>
+                              {portSpeedLabel}
+                            </span>
+                          );
+                        })()}
                       </div>
-                    </div>
-                  </button>
-                );
-              })}
+
+                      <div className="mt-3">
+                        <span className="text-[10px] text-slate-400 block truncate font-mono">
+                          {iface.comment || iface.type || 'Port'}
+                        </span>
+                        <div className="flex items-center justify-between mt-1">
+                          <span className={`text-[10px] font-bold font-mono ${iface.running ? 'text-emerald-400' : 'text-slate-500'}`}>
+                            {iface.running ? 'Active UP' : 'Disabled'}
+                          </span>
+                          <span className={`w-2 h-2 rounded-full ${iface.running ? 'bg-emerald-400' : 'bg-slate-600'}`} />
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })
+              )}
             </div>
           </div>
         </div>
@@ -1765,67 +1808,78 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800 bg-slate-900/50 font-mono">
-                {liveInterfaces.map((iface) => {
-                  const isSelected = iface.name === selectedPort;
-                  const portCap = getInterfaceCapacityMbps(isSelected ? portLink.rate : (iface.linkSpeed || ''), iface.name, iface);
-                  const isSfp = portCap >= 10000;
-                  const isGigabit = portCap >= 1000 && portCap < 10000;
-                  const rateDisplay = isSelected && portLink.status === 'running' && portLink.rate !== '---'
-                    ? portLink.rate
-                    : formatCapacityLabel(portCap);
+                {liveInterfaces.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="py-12 text-center text-slate-400">
+                      <RefreshCw className="w-6 h-6 text-cyan-400 animate-spin mx-auto mb-2" />
+                      <p className="text-sm font-sans font-medium text-slate-200">Connecting to MikroTik Router...</p>
+                      <p className="text-xs text-slate-500 font-mono mt-1">Waiting for RouterOS REST API interface response</p>
+                    </td>
+                  </tr>
+                ) : (
+                  liveInterfaces.map((iface) => {
+                    const isSelected = iface.name === selectedPort;
+                    const portCap = getInterfaceCapacityMbps(isSelected ? portLink.rate : (iface.linkSpeed || ''), iface.name, iface);
+                    const isSfp = portCap >= 10000;
+                    const isGigabit = portCap >= 1000 && portCap < 10000;
+                    const rateDisplay = isSelected && portLink.status === 'running' && portLink.rate !== '---'
+                      ? portLink.rate
+                      : formatCapacityLabel(portCap);
 
-                  return (
-                    <tr key={iface.name} className={`hover:bg-slate-800/50 transition-colors ${isSelected ? 'bg-cyan-950/30' : ''}`}>
-                      <td className="py-3 px-4 font-bold text-slate-200 flex items-center gap-2">
-                        <Cable className={`w-3.5 h-3.5 ${iface.running ? 'text-emerald-400' : 'text-slate-500'}`} />
-                        <span className="text-cyan-300">{iface.name}</span>
-                        {isSelected && (
-                          <span className="px-1.5 py-0.5 rounded text-[9px] font-sans font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">
-                            Active Monitor
+                    return (
+                      <tr key={iface.name} className={`hover:bg-slate-800/50 transition-colors ${isSelected ? 'bg-cyan-950/30' : ''}`}>
+                        <td className="py-3 px-4 font-bold text-slate-200 flex items-center gap-2">
+                          <Cable className={`w-3.5 h-3.5 ${iface.running ? 'text-emerald-400' : 'text-slate-500'}`} />
+                          <span className="text-cyan-300">{iface.name}</span>
+                          {isSelected && (
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-sans font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">
+                              Active Monitor
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3 px-4 text-slate-300 font-sans capitalize">{iface.type || 'Ethernet'}</td>
+                        <td className="py-3 px-4">
+                          <span className={`inline-block px-2 py-0.5 rounded text-[11px] font-bold border ${
+                            isSfp
+                              ? 'bg-purple-950/40 text-purple-300 border-purple-800/60'
+                              : isGigabit
+                              ? 'bg-cyan-950/40 text-cyan-300 border-cyan-800/60'
+                              : 'bg-amber-950/40 text-amber-300 border-amber-800/60'
+                          }`}>
+                            {rateDisplay}
                           </span>
-                        )}
-                      </td>
-                      <td className="py-3 px-4 text-slate-300 font-sans capitalize">{iface.type || 'Ethernet'}</td>
-                      <td className="py-3 px-4">
-                        <span className={`inline-block px-2 py-0.5 rounded text-[11px] font-bold border ${
-                          isSfp
-                            ? 'bg-purple-950/40 text-purple-300 border-purple-800/60'
-                            : isGigabit
-                            ? 'bg-cyan-950/40 text-cyan-300 border-cyan-800/60'
-                            : 'bg-amber-950/40 text-amber-300 border-amber-800/60'
-                        }`}>
-                          {rateDisplay}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4">
-                        <span
-                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-sans font-bold ${
-                            iface.running
-                              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
-                              : 'bg-slate-800 text-slate-400 border border-slate-700'
-                          }`}
-                        >
-                          <span className={`w-1.5 h-1.5 rounded-full ${iface.running ? 'bg-emerald-400' : 'bg-slate-500'}`} />
-                          {iface.running ? 'Running UP' : 'Link Down'}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 text-slate-400">{iface.macAddress || '---'}</td>
-                      <td className="py-3 px-4 text-slate-300 font-sans italic">{iface.comment || 'None'}</td>
-                      <td className="py-3 px-4 text-right">
-                        <button
-                          onClick={() => {
-                            setSelectedPort(iface.name);
-                            setActiveTab('overview');
-                            showToast('info', 'Monitoring Interface', `Switched live graph to ${iface.name}`);
-                          }}
-                          className="px-2.5 py-1 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 rounded-lg text-[11px] font-sans font-bold transition-all cursor-pointer"
-                        >
-                          Monitor Live
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
+                        </td>
+                        <td className="py-3 px-4">
+                          <span
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-sans font-bold ${
+                              iface.running
+                                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
+                                : 'bg-slate-800 text-slate-400 border border-slate-700'
+                            }`}
+                          >
+                            <span className={`w-1.5 h-1.5 rounded-full ${iface.running ? 'bg-emerald-400' : 'bg-slate-500'}`} />
+                            {iface.running ? 'Running UP' : 'Link Down'}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-slate-400">{iface.macAddress || '---'}</td>
+                        <td className="py-3 px-4 text-slate-300 font-sans italic">{iface.comment || 'None'}</td>
+                        <td className="py-3 px-4 text-right">
+                          <button
+                            onClick={() => {
+                              setSelectedPort(iface.name);
+                              selectedPortRef.current = iface.name;
+                              setActiveTab('overview');
+                              showToast('info', 'Monitoring Interface', `Switched live graph to ${iface.name}`);
+                            }}
+                            className="px-2.5 py-1 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 rounded-lg text-[11px] font-sans font-bold transition-all cursor-pointer"
+                          >
+                            Monitor Live
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>

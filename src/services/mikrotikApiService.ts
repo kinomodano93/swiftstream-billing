@@ -1806,26 +1806,8 @@ export const fetchInterfaces = async (
     }
   } catch (_) {}
 
-  // 4. Fallback accurate hardware ports for CCR2116-12G-4S+ so UI is always fully populated
-  return [
-    { name: 'sfp-sfpplus1', type: 'sfp-plus', running: 'true', disabled: 'false', comment: 'WAN Fiber Uplink 10G', 'mac-address': 'D4:01:C3:88:1A:01' },
-    { name: 'sfp-sfpplus2', type: 'sfp-plus', running: 'true', disabled: 'false', comment: 'OLT 10G Trunk', 'mac-address': 'D4:01:C3:88:1A:02' },
-    { name: 'sfp-sfpplus3', type: 'sfp-plus', running: 'false', disabled: 'false', comment: 'Backup SFP+', 'mac-address': 'D4:01:C3:88:1A:03' },
-    { name: 'sfp-sfpplus4', type: 'sfp-plus', running: 'false', disabled: 'false', comment: 'Spare SFP+', 'mac-address': 'D4:01:C3:88:1A:04' },
-    { name: 'ether1', type: 'ether', running: 'true', disabled: 'false', comment: 'WAN Gateway Backup', 'mac-address': 'D4:01:C3:88:1A:05' },
-    { name: 'ether2', type: 'ether', running: 'true', disabled: 'false', comment: 'PPPoE Concentrator Trunk', 'mac-address': 'D4:01:C3:88:1A:06' },
-    { name: 'ether3', type: 'ether', running: 'false', disabled: 'false', comment: 'OLT Port 1', 'mac-address': 'D4:01:C3:88:1A:07' },
-    { name: 'ether4', type: 'ether', running: 'false', disabled: 'false', comment: 'OLT Port 2', 'mac-address': 'D4:01:C3:88:1A:08' },
-    { name: 'ether5', type: 'ether', running: 'false', disabled: 'false', comment: 'Management LAN', 'mac-address': 'D4:01:C3:88:1A:09' },
-    { name: 'ether6', type: 'ether', running: 'false', disabled: 'false', comment: 'Spare', 'mac-address': 'D4:01:C3:88:1A:10' },
-    { name: 'ether7', type: 'ether', running: 'false', disabled: 'false', comment: 'Spare', 'mac-address': 'D4:01:C3:88:1A:11' },
-    { name: 'ether8', type: 'ether', running: 'false', disabled: 'false', comment: 'Spare', 'mac-address': 'D4:01:C3:88:1A:12' },
-    { name: 'ether9', type: 'ether', running: 'false', disabled: 'false', comment: 'Spare', 'mac-address': 'D4:01:C3:88:1A:13' },
-    { name: 'ether10', type: 'ether', running: 'false', disabled: 'false', comment: 'Spare', 'mac-address': 'D4:01:C3:88:1A:14' },
-    { name: 'ether11', type: 'ether', running: 'false', disabled: 'false', comment: 'Spare', 'mac-address': 'D4:01:C3:88:1A:15' },
-    { name: 'ether12', type: 'ether', running: 'false', disabled: 'false', comment: 'Spare', 'mac-address': 'D4:01:C3:88:1A:16' },
-    { name: 'bridge-local', type: 'bridge', running: 'true', disabled: 'false', comment: 'Core Subscriber Bridge', 'mac-address': 'D4:01:C3:88:1A:17' },
-  ];
+  // 4. Strict Zero-Mock: return empty array if unreachable or no interfaces found
+  return [];
 };
 
 /**

@@ -128,22 +128,15 @@ export const MikrotikTelemetryViewer: React.FC<MikrotikTelemetryViewerProps> = (
         txBytes: i.txTotalBytes || i.txBytes || 0,
       }));
     }
-    return [
-      { name: 'sfp-sfpplus1', type: 'sfp-plus', running: true, comment: 'WAN Fiber Uplink' },
-      { name: 'ether1', type: 'ether', running: true, comment: 'WAN Main Gateway' },
-      { name: 'ether2', type: 'ether', running: true, comment: 'PPPoE Subscribers' },
-      { name: 'ether3', type: 'ether', running: true, comment: 'OLT Uplink' },
-      { name: 'ether4', type: 'ether', running: true, comment: 'Management' },
-      { name: 'ether5', type: 'ether', running: false, comment: 'Backup' },
-      { name: 'bridge1', type: 'bridge', running: true, comment: 'Core Subscriber Bridge' },
-    ];
+    // Strict Zero-Mock: empty list until router interfaces are fetched
+    return [];
   });
 
   const [selectedPort, setSelectedPort] = useState<string>(() => {
     if (device?.interfaces && device.interfaces.length > 0) {
       return device.interfaces[0].name;
     }
-    return 'sfp-sfpplus1';
+    return '';
   });
   const selectedPortRef = useRef<string>(selectedPort);
   selectedPortRef.current = selectedPort;
@@ -154,7 +147,7 @@ export const MikrotikTelemetryViewer: React.FC<MikrotikTelemetryViewerProps> = (
       const sfp = device.interfaces.find((i: any) => i.name.toLowerCase().includes('sfp') || i.type?.toLowerCase().includes('sfp'));
       if (sfp) return sfp.name;
     }
-    return 'sfp-sfpplus1';
+    return '';
   });
   const sfpTargetPortRef = useRef<string>(sfpTargetPort);
   sfpTargetPortRef.current = sfpTargetPort;
@@ -201,6 +194,9 @@ export const MikrotikTelemetryViewer: React.FC<MikrotikTelemetryViewerProps> = (
               setSfpTargetPort(firstSfp.name);
               sfpTargetPortRef.current = firstSfp.name;
             }
+          }
+          if (mapped.length > 0) {
+            setComparedPorts((prev) => prev.length === 0 ? mapped.slice(0, 2).map((m) => m.name) : prev);
           }
         } else if (device?.interfaces && device.interfaces.length > 0 && availableInterfaces.length === 0) {
           const mapped = device.interfaces.map((i: any) => ({
@@ -397,7 +393,12 @@ export const MikrotikTelemetryViewer: React.FC<MikrotikTelemetryViewerProps> = (
 
   // Multi-Interface Comparison Mode
   const [isCompareMode, setIsCompareMode] = useState<boolean>(false);
-  const [comparedPorts, setComparedPorts] = useState<string[]>(['sfp-sfpplus1', 'bridge-local']);
+  const [comparedPorts, setComparedPorts] = useState<string[]>(() => {
+    if (device?.interfaces && device.interfaces.length > 0) {
+      return device.interfaces.slice(0, 2).map((i: any) => i.name);
+    }
+    return [];
+  });
 
   // Dynamic Simple Queues Inspector
   const [activeTelemetryTab, setActiveTelemetryTab] = useState<'traffic' | 'ddm' | 'queues'>(initialTab || 'traffic');
