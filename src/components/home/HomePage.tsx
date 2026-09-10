@@ -36,6 +36,7 @@ import { Plan, OnlineApplication } from '../../types';
 import { saveFirestoreDoc, COLLECTIONS } from '../../services/firestoreService';
 import { formatCurrency, formatPhoneNumber } from '../../utils/formatters';
 import { GeminiAiAssistant } from '../ai/GeminiAiAssistant';
+import { LAGONOY_BARANGAYS, PRESENTACION_BARANGAYS } from '../network/CoverageAreaManager';
 
 interface HomePageProps {
   onOpenClientPortal: (customerId?: string) => void;
@@ -95,23 +96,24 @@ export const HomePage: React.FC<HomePageProps> = ({
   const [signUpSuccessInfo, setSignUpSuccessInfo] = useState<SignUpSuccessData | null>(null);
   const [isCopied, setIsCopied] = useState<boolean>(false);
 
-  // List of coverage barangays for selection
-  const barangayList = useMemo(() => {
-    const list = coverageAreas.map((a) => a.barangay);
-    const defaults = [
-      'Binauahan',
-      'San Isidro',
-      'San Vicente',
-      'San Jose',
-      'Santa Maria',
-      'Poblacion',
-      'Cabtac',
-      'Gimagnoc',
-      'Santa Cruz',
-      'Loho',
-    ];
-    return Array.from(new Set([...list, ...defaults])).filter(Boolean).sort();
+  // List of coverage barangays for selection (grouped by Municipality)
+  const lagonoyList = useMemo(() => {
+    const fromCoverage = coverageAreas
+      .filter((a) => !PRESENTACION_BARANGAYS.includes(a.barangay))
+      .map((a) => a.barangay);
+    return Array.from(new Set([...fromCoverage, ...LAGONOY_BARANGAYS])).filter(Boolean).sort();
   }, [coverageAreas]);
+
+  const presentacionList = useMemo(() => {
+    const fromCoverage = coverageAreas
+      .filter((a) => PRESENTACION_BARANGAYS.includes(a.barangay))
+      .map((a) => a.barangay);
+    return Array.from(new Set([...fromCoverage, ...PRESENTACION_BARANGAYS])).filter(Boolean).sort();
+  }, [coverageAreas]);
+
+  const barangayList = useMemo(() => {
+    return [...lagonoyList, ...presentacionList];
+  }, [lagonoyList, presentacionList]);
 
   // Filter & sort plans: prioritize residential plans first, and sort by monthly fee ascending
   const filteredPlans = useMemo(() => {
@@ -185,6 +187,12 @@ export const HomePage: React.FC<HomePageProps> = ({
     const randomIp = `192.168.10.${Math.floor(Math.random() * 200 + 20)}`;
     const assignedNap = napBoxes[0];
 
+    const isPresentacion = PRESENTACION_BARANGAYS.some(
+      (b) => b.toLowerCase() === applicantBarangay.toLowerCase()
+    );
+    const targetCity = isPresentacion ? 'Presentacion' : (businessProfile.address.city || 'Lagonoy');
+    const targetProvince = businessProfile.address.province || 'Camarines Sur';
+
     // 1. Add customer to database
     addCustomer({
       accountNo: generatedAccountNo,
@@ -194,8 +202,8 @@ export const HomePage: React.FC<HomePageProps> = ({
       address: {
         street: applicantStreet.trim(),
         barangay: applicantBarangay.trim(),
-        city: businessProfile.address.city || 'Lagonoy',
-        province: businessProfile.address.province || 'Camarines Sur',
+        city: targetCity,
+        province: targetProvince,
         landmark: applicantLandmark.trim(),
       },
       planId: selectedPlan.id,
@@ -217,7 +225,7 @@ export const HomePage: React.FC<HomePageProps> = ({
         oltPonPort: 'PON-1/1',
         isMikrotikSynced: false,
       },
-      notes: `New online application submitted via SwiftStream Website. Landmark: ${applicantLandmark || 'N/A'}. Preferred Install: ${applicantInstallDate}`,
+      notes: `New online application submitted via SwiftStream Website (${targetCity}). Landmark: ${applicantLandmark || 'N/A'}. Preferred Install: ${applicantInstallDate}`,
     });
 
     // 2. Also log as an OnlineApplication in storage & Firestore
@@ -229,15 +237,15 @@ export const HomePage: React.FC<HomePageProps> = ({
       email: applicantEmail.trim(),
       address: applicantStreet.trim(),
       barangay: applicantBarangay.trim(),
-      city: businessProfile.address.city || 'Lagonoy',
-      province: businessProfile.address.province || 'Camarines Sur',
+      city: targetCity,
+      province: targetProvince,
       landmark: applicantLandmark.trim(),
       preferredPlanId: selectedPlan.id,
       preferredPlanName: selectedPlan.name,
       preferredSpeedMbps: selectedPlan.speedMbps,
       monthlyFee: selectedPlan.monthlyFee,
       status: 'pending',
-      notes: `Applied online via website. Preferred date: ${applicantInstallDate || 'Earliest available'}`,
+      notes: `Applied online via website (${targetCity}). Preferred date: ${applicantInstallDate || 'Earliest available'}`,
       surveyDate: applicantInstallDate,
       createdAt: new Date().toISOString(),
     };
@@ -266,7 +274,7 @@ export const HomePage: React.FC<HomePageProps> = ({
       speedMbps: selectedPlan.speedMbps,
       monthlyFee: selectedPlan.monthlyFee,
       mobile: applicantMobile.trim(),
-      address: `${applicantStreet.trim()}, Brgy. ${applicantBarangay.trim()}, ${businessProfile.address.city || 'Lagonoy'}`,
+      address: `${applicantStreet.trim()}, Brgy. ${applicantBarangay.trim()}, ${targetCity}`,
       installDate: applicantInstallDate || new Date().toISOString().slice(0, 10),
     });
 
@@ -893,7 +901,7 @@ export const HomePage: React.FC<HomePageProps> = ({
             Check Fiber Internet in Your Barangay
           </h2>
           <p className="text-xs sm:text-sm text-slate-400">
-            Select your barangay in Lagonoy from the dropdown below to check live fiber readiness and NAP box hookup availability:
+            Select your barangay in Lagonoy or Presentacion from the dropdown below to check live fiber readiness and NAP box hookup availability:
           </p>
         </div>
 
@@ -903,10 +911,10 @@ export const HomePage: React.FC<HomePageProps> = ({
             <label className="block text-slate-200 font-bold text-xs flex items-center justify-between">
               <span className="flex items-center gap-1.5">
                 <MapPin className="w-4 h-4 text-rose-400" />
-                <span>Select Your Barangay in Lagonoy, Camarines Sur:</span>
+                <span>Select Your Barangay (Lagonoy & Presentacion, Camarines Sur):</span>
               </span>
               <span className="text-[10px] text-cyan-400 font-mono">
-                {coverageAreas.filter((a) => a.isPubliclyVisible).length} Barangays Monitored
+                {lagonoyList.length + presentacionList.length} Barangays Monitored
               </span>
             </label>
 
@@ -919,13 +927,36 @@ export const HomePage: React.FC<HomePageProps> = ({
                 <option value="" className="bg-slate-900 text-slate-400">
                   -- Select / Choose Your Barangay to Check Coverage --
                 </option>
-                {coverageAreas
-                  .filter((a) => a.isPubliclyVisible)
-                  .map((area) => (
-                    <option key={area.id} value={area.barangay} className="bg-slate-900 py-2">
-                      {area.name} — {area.status === 'fiber_ready' ? '🟢 Fiber Ready (Instant Hookup)' : '🟡 Expansion in Progress'}
-                    </option>
-                  ))}
+                <optgroup label="Municipality of Lagonoy">
+                  {lagonoyList.map((bg) => {
+                    const area = coverageAreas.find(
+                      (a) => a.barangay.toLowerCase() === bg.toLowerCase()
+                    );
+                    const statusText = area?.status === 'fiber_ready'
+                      ? '🟢 Fiber Ready (Instant Hookup)'
+                      : (area?.status === 'expansion_ongoing' ? '🟡 Expansion in Progress' : '🟡 Expansion Ongoing');
+                    return (
+                      <option key={`lagonoy-${bg}`} value={bg} className="bg-slate-900 py-2">
+                        Brgy. {bg} (Lagonoy) — {statusText}
+                      </option>
+                    );
+                  })}
+                </optgroup>
+                <optgroup label="Municipality of Presentacion">
+                  {presentacionList.map((bg) => {
+                    const area = coverageAreas.find(
+                      (a) => a.barangay.toLowerCase() === bg.toLowerCase()
+                    );
+                    const statusText = area?.status === 'fiber_ready'
+                      ? '🟢 Fiber Ready (Instant Hookup)'
+                      : (area?.status === 'expansion_ongoing' ? '🟡 Expansion in Progress' : '🟡 Expansion Ongoing');
+                    return (
+                      <option key={`presentacion-${bg}`} value={bg} className="bg-slate-900 py-2">
+                        Brgy. {bg} (Presentacion) — {statusText}
+                      </option>
+                    );
+                  })}
+                </optgroup>
               </select>
             </div>
           </div>
@@ -950,9 +981,12 @@ export const HomePage: React.FC<HomePageProps> = ({
             const selectedArea = coverageAreas.find(
               (a) => a.barangay.toLowerCase() === selectedCheckBarangay.toLowerCase()
             );
-
-            if (!selectedArea) return null;
-            const isFiberReady = selectedArea.status === 'fiber_ready';
+            const isPresentacion = PRESENTACION_BARANGAYS.some(
+              (b) => b.toLowerCase() === selectedCheckBarangay.toLowerCase()
+            );
+            const targetCity = isPresentacion ? 'Presentacion' : 'Lagonoy';
+            const isFiberReady = selectedArea?.status === 'fiber_ready';
+            const displayName = selectedArea?.name || `Brgy. ${selectedCheckBarangay} (${targetCity})`;
 
             return (
               <div
@@ -965,7 +999,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="font-bold text-base text-slate-100">{selectedArea.name}</span>
+                      <span className="font-bold text-base text-slate-100">{displayName}</span>
                       <span
                         className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
                           isFiberReady
@@ -977,8 +1011,8 @@ export const HomePage: React.FC<HomePageProps> = ({
                       </span>
                     </div>
                     <p className="text-xs text-slate-300 mt-1">
-                      {selectedArea.description ||
-                        `Optical feeder line deployed in ${selectedArea.barangay}, ${selectedArea.city}, ${selectedArea.province}.`}
+                      {selectedArea?.description ||
+                        `Optical feeder line and distribution network deployed in ${selectedCheckBarangay}, ${targetCity}, Camarines Sur.`}
                     </p>
                   </div>
 
@@ -1005,12 +1039,12 @@ export const HomePage: React.FC<HomePageProps> = ({
                   <button
                     type="button"
                     onClick={() => {
-                      setApplicantBarangay(selectedArea.barangay);
+                      setApplicantBarangay(selectedCheckBarangay);
                       handleOpenSignUp();
                     }}
                     className="w-full sm:w-auto px-5 py-2.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-cyan-600/30 transition-all hover:scale-105 active:scale-95 cursor-pointer"
                   >
-                    ⚡ Apply for Fiber in {selectedArea.barangay}
+                    ⚡ Apply for Fiber in {selectedCheckBarangay} ({targetCity})
                   </button>
                 </div>
               </div>
@@ -1425,7 +1459,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                 <div className="space-y-3.5 pt-2 border-t border-slate-800/80">
                   <h5 className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
                     <MapPin className="w-3.5 h-3.5 text-rose-400" />
-                    <span>Installation Address & Schedule (Lagonoy)</span>
+                    <span>Installation Address & Schedule (Lagonoy & Presentacion)</span>
                   </h5>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1452,11 +1486,20 @@ export const HomePage: React.FC<HomePageProps> = ({
                         onChange={(e) => setApplicantBarangay(e.target.value)}
                         className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-xs font-medium focus:outline-none focus:border-cyan-400 cursor-pointer"
                       >
-                        {barangayList.map((bg) => (
-                          <option key={bg} value={bg}>
-                            {bg}
-                          </option>
-                        ))}
+                        <optgroup label="Municipality of Lagonoy">
+                          {lagonoyList.map((bg) => (
+                            <option key={`modal-lagonoy-${bg}`} value={bg}>
+                              {bg}
+                            </option>
+                          ))}
+                        </optgroup>
+                        <optgroup label="Municipality of Presentacion">
+                          {presentacionList.map((bg) => (
+                            <option key={`modal-presentacion-${bg}`} value={bg}>
+                              {bg}
+                            </option>
+                          ))}
+                        </optgroup>
                       </select>
                     </div>
                   </div>

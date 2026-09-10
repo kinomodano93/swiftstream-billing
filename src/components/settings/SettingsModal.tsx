@@ -56,7 +56,7 @@ import { XenditGatewaySettings } from './XenditGatewaySettings';
 import { FirebaseSettingsCard } from './FirebaseSettingsCard';
 import { SsoWhitelistSettingsCard } from './SsoWhitelistSettingsCard';
 import { StaffUserManager } from '../users/StaffUserManager';
-import { LAGONOY_BARANGAYS } from '../network/CoverageAreaManager';
+import { LAGONOY_BARANGAYS, PRESENTACION_BARANGAYS } from '../network/CoverageAreaManager';
 
 export const SettingsModal: React.FC = () => {
   const {
@@ -760,16 +760,27 @@ export const SettingsModal: React.FC = () => {
                   <label className="block text-slate-400 mb-1 font-medium">Barangay *</label>
                   <input
                     type="text"
-                    list="lagonoy-barangays-list"
+                    list="business-barangays-list"
                     value={barangay}
-                    onChange={(e) => setBarangay(e.target.value)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setBarangay(val);
+                      if (PRESENTACION_BARANGAYS.some((pb) => pb.toLowerCase() === val.toLowerCase())) {
+                        setCity('Presentacion');
+                      } else if (LAGONOY_BARANGAYS.some((lb) => lb.toLowerCase() === val.toLowerCase())) {
+                        setCity('Lagonoy');
+                      }
+                    }}
                     placeholder="Select or type Barangay..."
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:border-cyan-500 focus:outline-none"
                     required
                   />
-                  <datalist id="lagonoy-barangays-list">
+                  <datalist id="business-barangays-list">
                     {LAGONOY_BARANGAYS.map((bg) => (
-                      <option key={bg} value={bg} />
+                      <option key={`lagonoy-${bg}`} value={bg} label={`${bg}, Lagonoy`} />
+                    ))}
+                    {PRESENTACION_BARANGAYS.map((bg) => (
+                      <option key={`presentacion-${bg}`} value={bg} label={`${bg}, Presentacion`} />
                     ))}
                   </datalist>
                 </div>

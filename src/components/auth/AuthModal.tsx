@@ -35,9 +35,9 @@ import {
   signUpWithEmail,
   signInWithGoogle,
   resetUserPassword,
-  UserRole,
 } from '../../services/authService';
 import { formatCurrency } from '../../utils/formatters';
+import { LAGONOY_BARANGAYS, PRESENTACION_BARANGAYS } from '../network/CoverageAreaManager';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -197,6 +197,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       const selectedPlan = plans.find((p) => p.id === selectedPlanId) || plans[0];
       const generatedAccountNo = `SWIFT-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`;
 
+      const isPresentacion = PRESENTACION_BARANGAYS.some(
+        (b) => b.toLowerCase() === barangay.toLowerCase()
+      );
+      const targetCity = isPresentacion ? 'Presentacion' : 'Lagonoy';
+
       // 1. Immediately register customer in CRM, local state and Firestore
       addCustomer({
         accountNo: generatedAccountNo,
@@ -206,7 +211,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         address: {
           street: street.trim(),
           barangay: barangay.trim(),
-          city: 'Lagonoy',
+          city: targetCity,
           province: 'Camarines Sur',
           landmark: landmark.trim(),
         },
@@ -459,7 +464,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     </span>
                     <div>
                       <p className="font-semibold text-slate-200">Admin Line Survey & Approval</p>
-                      <p className="text-[11px] text-slate-400">Our Lagonoy NOC team verifies nearest NAP box port capacity in Brgy. {pendingApplicationNotice.barangay}.</p>
+                      <p className="text-[11px] text-slate-400">Our NOC engineering team verifies nearest NAP box port capacity in Brgy. {pendingApplicationNotice.barangay}.</p>
                     </div>
                   </div>
 
@@ -749,7 +754,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   <div className="space-y-3 p-4 rounded-3xl bg-slate-950 border border-slate-800">
                     <span className="font-bold text-slate-200 text-xs flex items-center gap-1.5">
                       <MapPin className="w-4 h-4 text-rose-400" />
-                      <span>3. Installation Location & Target Date (Lagonoy):</span>
+                      <span>3. Installation Location & Target Date (Lagonoy & Presentacion):</span>
                     </span>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -758,15 +763,28 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                         <select
                           value={barangay}
                           onChange={(e) => setBarangay(e.target.value)}
-                          className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 text-xs focus:outline-none focus:border-cyan-500"
+                          className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 text-xs focus:outline-none focus:border-cyan-500 cursor-pointer"
                         >
-                          {coverageAreas
-                            .filter((a) => a.isPubliclyVisible)
-                            .map((area) => (
-                              <option key={area.id} value={area.barangay}>
-                                {area.name} {area.status === 'fiber_ready' ? '(🟢 Fiber Ready)' : '(🟡 Expanding)'}
-                              </option>
-                            ))}
+                          <optgroup label="Municipality of Lagonoy">
+                            {LAGONOY_BARANGAYS.map((b) => {
+                              const area = coverageAreas.find((a) => a.barangay.toLowerCase() === b.toLowerCase());
+                              return (
+                                <option key={`auth-lag-${b}`} value={b}>
+                                  {b} {area?.status === 'fiber_ready' ? '(🟢 Fiber Ready)' : '(🟡 Expanding)'}
+                                </option>
+                              );
+                            })}
+                          </optgroup>
+                          <optgroup label="Municipality of Presentacion">
+                            {PRESENTACION_BARANGAYS.map((b) => {
+                              const area = coverageAreas.find((a) => a.barangay.toLowerCase() === b.toLowerCase());
+                              return (
+                                <option key={`auth-pres-${b}`} value={b}>
+                                  {b} {area?.status === 'fiber_ready' ? '(🟢 Fiber Ready)' : '(🟡 Expanding)'}
+                                </option>
+                              );
+                            })}
+                          </optgroup>
                         </select>
                       </div>
 

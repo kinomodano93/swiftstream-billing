@@ -25,7 +25,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { Customer, CustomerStatus } from '../../types';
-import { LAGONOY_BARANGAYS } from '../network/CoverageAreaManager';
+import { LAGONOY_BARANGAYS, PRESENTACION_BARANGAYS } from '../network/CoverageAreaManager';
 import {
   fetchPppoeSecrets,
   fetchPppoeProfilesDetailed,
@@ -708,19 +708,30 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-slate-400 mb-1 font-medium">Barangay (Lagonoy) *</label>
+                <label className="block text-slate-400 mb-1 font-medium">Barangay (Lagonoy / Presentacion) *</label>
                 <input
                   type="text"
                   required
                   list="customer-barangay-list"
                   value={barangay}
-                  onChange={(e) => setBarangay(e.target.value)}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setBarangay(val);
+                    if (PRESENTACION_BARANGAYS.some((pb) => pb.toLowerCase() === val.toLowerCase())) {
+                      setCity('Presentacion');
+                    } else if (LAGONOY_BARANGAYS.some((lb) => lb.toLowerCase() === val.toLowerCase())) {
+                      setCity('Lagonoy');
+                    }
+                  }}
                   placeholder="Select or type barangay..."
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500"
                 />
                 <datalist id="customer-barangay-list">
                   {LAGONOY_BARANGAYS.map((b) => (
-                    <option key={b} value={b} />
+                    <option key={b} value={b} label={`${b}, Lagonoy`} />
+                  ))}
+                  {PRESENTACION_BARANGAYS.map((b) => (
+                    <option key={b} value={b} label={`${b}, Presentacion`} />
                   ))}
                 </datalist>
               </div>

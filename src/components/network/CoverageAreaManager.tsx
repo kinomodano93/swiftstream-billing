@@ -65,6 +65,27 @@ export const LAGONOY_BARANGAYS = [
   'Tierra Nevada',
 ];
 
+export const PRESENTACION_BARANGAYS = [
+  'Ayugao',
+  'Bagong Sirang',
+  'Baliguian',
+  'Bantugan',
+  'Bicalen',
+  'Bitaogan',
+  'Buena Vista',
+  'Bulalacao',
+  'Cagnipa',
+  'Lagha',
+  'Lidong',
+  'Liwacsa',
+  'Maangas',
+  'Pagsangahan',
+  'Patrocinio',
+  'Pili',
+  'Sta. Maria (Poblacion)',
+  'Tanauan',
+];
+
 export const CoverageAreaManager: React.FC = () => {
   const {
     coverageAreas,
@@ -118,7 +139,7 @@ export const CoverageAreaManager: React.FC = () => {
     setEditingArea(area);
     setFormName(area.name);
     setFormBarangay(area.barangay);
-    setIsCustomBarangay(!LAGONOY_BARANGAYS.includes(area.barangay));
+    setIsCustomBarangay(!LAGONOY_BARANGAYS.includes(area.barangay) && !PRESENTACION_BARANGAYS.includes(area.barangay));
     setFormCity(area.city);
     setFormProvince(area.province);
     setFormDescription(area.description || '');
@@ -562,21 +583,36 @@ export const CoverageAreaManager: React.FC = () => {
                       const val = e.target.value;
                       if (val === 'custom') {
                         setIsCustomBarangay(true);
+                        setFormBarangay('');
                       } else {
                         setIsCustomBarangay(false);
                         setFormBarangay(val);
+                        if (PRESENTACION_BARANGAYS.includes(val)) {
+                          setFormCity('Presentacion');
+                        } else if (LAGONOY_BARANGAYS.includes(val)) {
+                          setFormCity('Lagonoy');
+                        }
                         if (!editingArea) {
                           setFormName(`Brgy. ${val}`);
                         }
                       }
                     }}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-xs focus:outline-none focus:border-cyan-500 font-medium"
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-xs focus:outline-none focus:border-cyan-500 font-medium cursor-pointer"
                   >
-                    {LAGONOY_BARANGAYS.map((b) => (
-                      <option key={b} value={b}>
-                        {b}
-                      </option>
-                    ))}
+                    <optgroup label="Municipality of Lagonoy">
+                      {LAGONOY_BARANGAYS.map((b) => (
+                        <option key={b} value={b}>
+                          {b}
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Municipality of Presentacion">
+                      {PRESENTACION_BARANGAYS.map((b) => (
+                        <option key={b} value={b}>
+                          {b}
+                        </option>
+                      ))}
+                    </optgroup>
                     <option value="custom">-- Custom / Other Barangay --</option>
                   </select>
                 </div>

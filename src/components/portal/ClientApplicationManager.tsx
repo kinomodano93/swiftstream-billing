@@ -18,6 +18,7 @@ import {
 import { useApp } from '../../context/AppContext';
 import { OnlineApplication, OnlineApplicationStatus } from '../../types';
 import { saveFirestoreDoc, subscribeToCollection, COLLECTIONS } from '../../services/firestoreService';
+import { LAGONOY_BARANGAYS, PRESENTACION_BARANGAYS } from '../network/CoverageAreaManager';
 
 export const ClientApplicationManager: React.FC = () => {
   const {
@@ -67,9 +68,9 @@ export const ClientApplicationManager: React.FC = () => {
   const [newEmail, setNewEmail] = useState('');
   const [newPhone, setNewPhone] = useState('');
   const [newAddress, setNewAddress] = useState('');
-  const [newBarangay, setNewBarangay] = useState(coverageAreas[0]?.barangay || 'San Vicente');
-  const [newCity, setNewCity] = useState('Santa Rosa');
-  const [newProvince, setNewProvince] = useState('Laguna');
+  const [newBarangay, setNewBarangay] = useState(coverageAreas[0]?.barangay || 'Binauahan');
+  const [newCity, setNewCity] = useState('Lagonoy');
+  const [newProvince, setNewProvince] = useState('Camarines Sur');
   const [newPlanId, setNewPlanId] = useState(plans[0]?.id || 'p2');
   const [newNotes, setNewNotes] = useState('');
 
@@ -647,17 +648,31 @@ export const ClientApplicationManager: React.FC = () => {
                   <label className="block text-slate-300 font-semibold mb-1">Barangay</label>
                   <select
                     value={newBarangay}
-                    onChange={(e) => setNewBarangay(e.target.value)}
-                    className="w-full px-2.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200"
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setNewBarangay(val);
+                      if (PRESENTACION_BARANGAYS.some((pb) => pb.toLowerCase() === val.toLowerCase())) {
+                        setNewCity('Presentacion');
+                      } else if (LAGONOY_BARANGAYS.some((lb) => lb.toLowerCase() === val.toLowerCase())) {
+                        setNewCity('Lagonoy');
+                      }
+                    }}
+                    className="w-full px-2.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 cursor-pointer"
                   >
-                    {coverageAreas.map((a) => (
-                      <option key={a.id} value={a.barangay}>
-                        {a.barangay}
-                      </option>
-                    ))}
-                    <option value="San Vicente">San Vicente</option>
-                    <option value="Poblacion 1">Poblacion 1</option>
-                    <option value="Pittland">Pittland</option>
+                    <optgroup label="Municipality of Lagonoy">
+                      {LAGONOY_BARANGAYS.map((b) => (
+                        <option key={`app-lag-${b}`} value={b}>
+                          {b}
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Municipality of Presentacion">
+                      {PRESENTACION_BARANGAYS.map((b) => (
+                        <option key={`app-pres-${b}`} value={b}>
+                          {b}
+                        </option>
+                      ))}
+                    </optgroup>
                   </select>
                 </div>
                 <div>
