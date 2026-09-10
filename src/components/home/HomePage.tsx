@@ -61,7 +61,7 @@ export const HomePage: React.FC<HomePageProps> = ({
 
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [isMobileNavOpen, setIsMobileNavOpen] = useState<boolean>(false);
-  const [coverageFilter, setCoverageFilter] = useState<'all' | 'fiber_ready' | 'expansion'>('all');
+  const [selectedCheckMunicipality, setSelectedCheckMunicipality] = useState<string>('Lagonoy');
   const [selectedCheckBarangay, setSelectedCheckBarangay] = useState<string>('');
 
   // Bandwidth Recommendation Calculator State
@@ -90,6 +90,7 @@ export const HomePage: React.FC<HomePageProps> = ({
   const [applicantInstallDate, setApplicantInstallDate] = useState<string>(
     new Date().toISOString().slice(0, 10)
   );
+  const [applicantMunicipality, setApplicantMunicipality] = useState<string>('Lagonoy');
   const [applicantStreet, setApplicantStreet] = useState<string>('');
   const [applicantBarangay, setApplicantBarangay] = useState<string>('Binauahan');
   const [applicantLandmark, setApplicantLandmark] = useState<string>('');
@@ -155,12 +156,23 @@ export const HomePage: React.FC<HomePageProps> = ({
   };
   const recommendedPlan = getRecommendedPlan();
 
-  const handleOpenSignUp = (planId?: string) => {
+  const handleOpenSignUp = (planId?: string, defaultBarangay?: string, defaultMunicipality?: string) => {
     if (planId) {
       setSignUpPlanId(planId);
     } else if (!signUpPlanId && plans.length > 0) {
       const popular = plans.find((p) => p.speedMbps === 50) || plans[0];
       setSignUpPlanId(popular.id);
+    }
+    if (defaultMunicipality) {
+      setApplicantMunicipality(defaultMunicipality);
+    } else if (defaultBarangay) {
+      const isPres = PRESENTACION_BARANGAYS.some(
+        (b) => b.toLowerCase() === defaultBarangay.toLowerCase()
+      );
+      setApplicantMunicipality(isPres ? 'Presentacion' : 'Lagonoy');
+    }
+    if (defaultBarangay) {
+      setApplicantBarangay(defaultBarangay);
     }
     setSignUpSuccessInfo(null);
     setIsCopied(false);
@@ -187,7 +199,7 @@ export const HomePage: React.FC<HomePageProps> = ({
     const randomIp = `192.168.10.${Math.floor(Math.random() * 200 + 20)}`;
     const assignedNap = napBoxes[0];
 
-    const isPresentacion = PRESENTACION_BARANGAYS.some(
+    const isPresentacion = applicantMunicipality === 'Presentacion' || PRESENTACION_BARANGAYS.some(
       (b) => b.toLowerCase() === applicantBarangay.toLowerCase()
     );
     const targetCity = isPresentacion ? 'Presentacion' : (businessProfile.address.city || 'Lagonoy');
@@ -289,6 +301,8 @@ export const HomePage: React.FC<HomePageProps> = ({
     setApplicantEmail('');
     setApplicantStreet('');
     setApplicantLandmark('');
+    setApplicantMunicipality('Lagonoy');
+    setApplicantBarangay(lagonoyList[0] || 'Binauahan');
   };
 
   const scrollToSection = (id: string) => {
@@ -907,28 +921,53 @@ export const HomePage: React.FC<HomePageProps> = ({
 
         {/* ================= BARANGAY DROPDOWN CHECKER CARD ================= */}
         <div className="max-w-3xl mx-auto p-6 sm:p-8 rounded-3xl bg-slate-900/90 border-2 border-cyan-500/40 shadow-2xl shadow-cyan-950/30 space-y-6">
-          <div className="space-y-2">
-            <label className="block text-slate-200 font-bold text-xs flex items-center justify-between">
-              <span className="flex items-center gap-1.5">
-                <MapPin className="w-4 h-4 text-rose-400" />
-                <span>Select Your Barangay (Lagonoy & Presentacion, Camarines Sur):</span>
-              </span>
-              <span className="text-[10px] text-cyan-400 font-mono">
-                {lagonoyList.length + presentacionList.length} Barangays Monitored
-              </span>
-            </label>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* 1. Municipality Selector */}
+            <div className="space-y-2">
+              <label className="block text-slate-200 font-bold text-xs flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <Globe className="w-4 h-4 text-cyan-400" />
+                  <span>1. Select Municipality:</span>
+                </span>
+                <span className="text-[10px] text-cyan-400 font-mono">Camarines Sur</span>
+              </label>
+              <div className="relative">
+                <select
+                  value={selectedCheckMunicipality}
+                  onChange={(e) => {
+                    const muni = e.target.value;
+                    setSelectedCheckMunicipality(muni);
+                    setSelectedCheckBarangay('');
+                  }}
+                  className="w-full px-4 py-3.5 bg-slate-950 border border-slate-700 hover:border-cyan-500 rounded-2xl text-slate-100 text-sm font-semibold focus:outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500/20 transition-all cursor-pointer"
+                >
+                  <option value="Lagonoy">Municipality of Lagonoy</option>
+                  <option value="Presentacion">Municipality of Presentacion</option>
+                </select>
+              </div>
+            </div>
 
-            <div className="relative">
-              <select
-                value={selectedCheckBarangay}
-                onChange={(e) => setSelectedCheckBarangay(e.target.value)}
-                className="w-full px-4 py-3.5 bg-slate-950 border border-slate-700 hover:border-cyan-500 rounded-2xl text-slate-100 text-sm font-semibold focus:outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500/20 transition-all cursor-pointer"
-              >
-                <option value="" className="bg-slate-900 text-slate-400">
-                  -- Select / Choose Your Barangay to Check Coverage --
-                </option>
-                <optgroup label="Municipality of Lagonoy">
-                  {lagonoyList.map((bg) => {
+            {/* 2. Barangay Selector (Auto-populated based on selected Municipality) */}
+            <div className="space-y-2">
+              <label className="block text-slate-200 font-bold text-xs flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <MapPin className="w-4 h-4 text-rose-400" />
+                  <span>2. Select Barangay:</span>
+                </span>
+                <span className="text-[10px] text-cyan-400 font-mono">
+                  {selectedCheckMunicipality === 'Presentacion' ? presentacionList.length : lagonoyList.length} Barangays
+                </span>
+              </label>
+              <div className="relative">
+                <select
+                  value={selectedCheckBarangay}
+                  onChange={(e) => setSelectedCheckBarangay(e.target.value)}
+                  className="w-full px-4 py-3.5 bg-slate-950 border border-slate-700 hover:border-cyan-500 rounded-2xl text-slate-100 text-sm font-semibold focus:outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-500/20 transition-all cursor-pointer"
+                >
+                  <option value="" className="bg-slate-900 text-slate-400">
+                    -- Choose Barangay in {selectedCheckMunicipality} --
+                  </option>
+                  {(selectedCheckMunicipality === 'Presentacion' ? presentacionList : lagonoyList).map((bg) => {
                     const area = coverageAreas.find(
                       (a) => a.barangay.toLowerCase() === bg.toLowerCase()
                     );
@@ -936,28 +975,13 @@ export const HomePage: React.FC<HomePageProps> = ({
                       ? '🟢 Fiber Ready (Instant Hookup)'
                       : (area?.status === 'expansion_ongoing' ? '🟡 Expansion in Progress' : '🟡 Expansion Ongoing');
                     return (
-                      <option key={`lagonoy-${bg}`} value={bg} className="bg-slate-900 py-2">
-                        Brgy. {bg} (Lagonoy) — {statusText}
+                      <option key={`check-${selectedCheckMunicipality}-${bg}`} value={bg} className="bg-slate-900 py-2">
+                        Brgy. {bg} — {statusText}
                       </option>
                     );
                   })}
-                </optgroup>
-                <optgroup label="Municipality of Presentacion">
-                  {presentacionList.map((bg) => {
-                    const area = coverageAreas.find(
-                      (a) => a.barangay.toLowerCase() === bg.toLowerCase()
-                    );
-                    const statusText = area?.status === 'fiber_ready'
-                      ? '🟢 Fiber Ready (Instant Hookup)'
-                      : (area?.status === 'expansion_ongoing' ? '🟡 Expansion in Progress' : '🟡 Expansion Ongoing');
-                    return (
-                      <option key={`presentacion-${bg}`} value={bg} className="bg-slate-900 py-2">
-                        Brgy. {bg} (Presentacion) — {statusText}
-                      </option>
-                    );
-                  })}
-                </optgroup>
-              </select>
+                </select>
+              </div>
             </div>
           </div>
 
@@ -1039,8 +1063,9 @@ export const HomePage: React.FC<HomePageProps> = ({
                   <button
                     type="button"
                     onClick={() => {
+                      setApplicantMunicipality(targetCity);
                       setApplicantBarangay(selectedCheckBarangay);
-                      handleOpenSignUp();
+                      handleOpenSignUp(undefined, selectedCheckBarangay, targetCity);
                     }}
                     className="w-full sm:w-auto px-5 py-2.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-cyan-600/30 transition-all hover:scale-105 active:scale-95 cursor-pointer"
                   >
@@ -1465,6 +1490,47 @@ export const HomePage: React.FC<HomePageProps> = ({
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                        Municipality <span className="text-rose-400">*</span>
+                      </label>
+                      <select
+                        value={applicantMunicipality}
+                        onChange={(e) => {
+                          const muni = e.target.value;
+                          setApplicantMunicipality(muni);
+                          if (muni === 'Presentacion') {
+                            setApplicantBarangay(presentacionList[0] || 'Ayugao');
+                          } else {
+                            setApplicantBarangay(lagonoyList[0] || 'Binauahan');
+                          }
+                        }}
+                        className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-xs font-medium focus:outline-none focus:border-cyan-400 cursor-pointer"
+                      >
+                        <option value="Lagonoy">Municipality of Lagonoy</option>
+                        <option value="Presentacion">Municipality of Presentacion</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                        Barangay <span className="text-rose-400">*</span>
+                      </label>
+                      <select
+                        value={applicantBarangay}
+                        onChange={(e) => setApplicantBarangay(e.target.value)}
+                        className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-xs font-medium focus:outline-none focus:border-cyan-400 cursor-pointer"
+                      >
+                        {(applicantMunicipality === 'Presentacion' ? presentacionList : lagonoyList).map((bg) => (
+                          <option key={`modal-${applicantMunicipality}-${bg}`} value={bg}>
+                            {bg}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-300 mb-1">
                         Street / Purok / House # <span className="text-rose-400">*</span>
                       </label>
                       <input
@@ -1479,34 +1545,6 @@ export const HomePage: React.FC<HomePageProps> = ({
 
                     <div>
                       <label className="block text-[11px] font-bold text-slate-300 mb-1">
-                        Barangay <span className="text-rose-400">*</span>
-                      </label>
-                      <select
-                        value={applicantBarangay}
-                        onChange={(e) => setApplicantBarangay(e.target.value)}
-                        className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-xs font-medium focus:outline-none focus:border-cyan-400 cursor-pointer"
-                      >
-                        <optgroup label="Municipality of Lagonoy">
-                          {lagonoyList.map((bg) => (
-                            <option key={`modal-lagonoy-${bg}`} value={bg}>
-                              {bg}
-                            </option>
-                          ))}
-                        </optgroup>
-                        <optgroup label="Municipality of Presentacion">
-                          {presentacionList.map((bg) => (
-                            <option key={`modal-presentacion-${bg}`} value={bg}>
-                              {bg}
-                            </option>
-                          ))}
-                        </optgroup>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-300 mb-1">
                         Nearby Landmark
                       </label>
                       <input
@@ -1517,19 +1555,19 @@ export const HomePage: React.FC<HomePageProps> = ({
                         className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-xs font-medium focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50"
                       />
                     </div>
+                  </div>
 
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-300 mb-1">
-                        Preferred Installation Date
-                      </label>
-                      <input
-                        type="date"
-                        min={new Date().toISOString().slice(0, 10)}
-                        value={applicantInstallDate}
-                        onChange={(e) => setApplicantInstallDate(e.target.value)}
-                        className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-xs font-medium focus:outline-none focus:border-cyan-400 cursor-pointer"
-                      />
-                    </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                      Preferred Installation Date
+                    </label>
+                    <input
+                      type="date"
+                      min={new Date().toISOString().slice(0, 10)}
+                      value={applicantInstallDate}
+                      onChange={(e) => setApplicantInstallDate(e.target.value)}
+                      className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-xs font-medium focus:outline-none focus:border-cyan-400 cursor-pointer"
+                    />
                   </div>
                 </div>
 

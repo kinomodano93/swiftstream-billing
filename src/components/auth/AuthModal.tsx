@@ -72,6 +72,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [installationDate, setInstallationDate] = useState<string>(
     new Date().toISOString().slice(0, 10)
   );
+  const [municipality, setMunicipality] = useState<'Lagonoy' | 'Presentacion'>('Lagonoy');
   const [street, setStreet] = useState('');
   const [barangay, setBarangay] = useState('Binauahan');
   const [landmark, setLandmark] = useState('');
@@ -197,7 +198,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       const selectedPlan = plans.find((p) => p.id === selectedPlanId) || plans[0];
       const generatedAccountNo = `SWIFT-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`;
 
-      const isPresentacion = PRESENTACION_BARANGAYS.some(
+      const isPresentacion = municipality === 'Presentacion' || PRESENTACION_BARANGAYS.some(
         (b) => b.toLowerCase() === barangay.toLowerCase()
       );
       const targetCity = isPresentacion ? 'Presentacion' : 'Lagonoy';
@@ -754,10 +755,26 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   <div className="space-y-3 p-4 rounded-3xl bg-slate-950 border border-slate-800">
                     <span className="font-bold text-slate-200 text-xs flex items-center gap-1.5">
                       <MapPin className="w-4 h-4 text-rose-400" />
-                      <span>3. Installation Location & Target Date (Lagonoy & Presentacion):</span>
+                      <span>3. Installation Location & Target Date:</span>
                     </span>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-slate-400 mb-1 font-medium">Municipality *</label>
+                        <select
+                          value={municipality}
+                          onChange={(e) => {
+                            const m = e.target.value as 'Lagonoy' | 'Presentacion';
+                            setMunicipality(m);
+                            setBarangay(m === 'Presentacion' ? (PRESENTACION_BARANGAYS[0] || 'Ayugao') : (LAGONOY_BARANGAYS[0] || 'Binauahan'));
+                          }}
+                          className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 text-xs focus:outline-none focus:border-cyan-500 cursor-pointer"
+                        >
+                          <option value="Lagonoy">Municipality of Lagonoy</option>
+                          <option value="Presentacion">Municipality of Presentacion</option>
+                        </select>
+                      </div>
+
                       <div>
                         <label className="block text-slate-400 mb-1 font-medium">Barangay (Coverage Area) *</label>
                         <select
@@ -765,41 +782,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                           onChange={(e) => setBarangay(e.target.value)}
                           className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 text-xs focus:outline-none focus:border-cyan-500 cursor-pointer"
                         >
-                          <optgroup label="Municipality of Lagonoy">
-                            {LAGONOY_BARANGAYS.map((b) => {
-                              const area = coverageAreas.find((a) => a.barangay.toLowerCase() === b.toLowerCase());
-                              return (
-                                <option key={`auth-lag-${b}`} value={b}>
-                                  {b} {area?.status === 'fiber_ready' ? '(🟢 Fiber Ready)' : '(🟡 Expanding)'}
-                                </option>
-                              );
-                            })}
-                          </optgroup>
-                          <optgroup label="Municipality of Presentacion">
-                            {PRESENTACION_BARANGAYS.map((b) => {
-                              const area = coverageAreas.find((a) => a.barangay.toLowerCase() === b.toLowerCase());
-                              return (
-                                <option key={`auth-pres-${b}`} value={b}>
-                                  {b} {area?.status === 'fiber_ready' ? '(🟢 Fiber Ready)' : '(🟡 Expanding)'}
-                                </option>
-                              );
-                            })}
-                          </optgroup>
+                          {(municipality === 'Presentacion' ? PRESENTACION_BARANGAYS : LAGONOY_BARANGAYS).map((b) => {
+                            const area = coverageAreas.find((a) => a.barangay.toLowerCase() === b.toLowerCase());
+                            return (
+                              <option key={`auth-${municipality}-${b}`} value={b}>
+                                {b} {area?.status === 'fiber_ready' ? '(🟢 Fiber Ready)' : '(🟡 Expanding)'}
+                              </option>
+                            );
+                          })}
                         </select>
-                      </div>
-
-                      <div>
-                        <label className="block text-slate-400 mb-1 font-medium">Preferred Installation Date *</label>
-                        <div className="relative">
-                          <Calendar className="w-4 h-4 text-cyan-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                          <input
-                            type="date"
-                            required
-                            value={installationDate}
-                            onChange={(e) => setInstallationDate(e.target.value)}
-                            className="w-full pl-9 pr-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 text-xs focus:outline-none focus:border-cyan-500 [color-scheme:dark] cursor-pointer"
-                          />
-                        </div>
                       </div>
                     </div>
 
@@ -817,15 +808,29 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       </div>
 
                       <div>
-                        <label className="block text-slate-400 mb-1 font-medium">Nearest Landmark</label>
-                        <input
-                          type="text"
-                          value={landmark}
-                          onChange={(e) => setLandmark(e.target.value)}
-                          placeholder="e.g. Near Brgy Chapel / Elementary School"
-                          className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 text-xs focus:outline-none focus:border-cyan-500"
-                        />
+                        <label className="block text-slate-400 mb-1 font-medium">Preferred Installation Date *</label>
+                        <div className="relative">
+                          <Calendar className="w-4 h-4 text-cyan-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                          <input
+                            type="date"
+                            required
+                            value={installationDate}
+                            onChange={(e) => setInstallationDate(e.target.value)}
+                            className="w-full pl-9 pr-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 text-xs focus:outline-none focus:border-cyan-500 [color-scheme:dark] cursor-pointer"
+                          />
+                        </div>
                       </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-slate-400 mb-1 font-medium">Nearest Landmark</label>
+                      <input
+                        type="text"
+                        value={landmark}
+                        onChange={(e) => setLandmark(e.target.value)}
+                        placeholder="e.g. Near Brgy Chapel / Elementary School"
+                        className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 text-xs focus:outline-none focus:border-cyan-500"
+                      />
                     </div>
                   </div>
 

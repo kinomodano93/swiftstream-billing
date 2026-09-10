@@ -645,42 +645,44 @@ export const ClientApplicationManager: React.FC = () => {
 
               <div className="grid grid-cols-3 gap-2">
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Barangay</label>
+                  <label className="block text-slate-300 font-semibold mb-1">Municipality</label>
                   <select
-                    value={newBarangay}
+                    value={newCity}
                     onChange={(e) => {
-                      const val = e.target.value;
-                      setNewBarangay(val);
-                      if (PRESENTACION_BARANGAYS.some((pb) => pb.toLowerCase() === val.toLowerCase())) {
-                        setNewCity('Presentacion');
-                      } else if (LAGONOY_BARANGAYS.some((lb) => lb.toLowerCase() === val.toLowerCase())) {
-                        setNewCity('Lagonoy');
+                      const c = e.target.value;
+                      setNewCity(c);
+                      if (c === 'Presentacion') {
+                        setNewBarangay(PRESENTACION_BARANGAYS[0] || 'Ayugao');
+                      } else {
+                        setNewBarangay(LAGONOY_BARANGAYS[0] || 'Binauahan');
                       }
                     }}
                     className="w-full px-2.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 cursor-pointer"
                   >
-                    <optgroup label="Municipality of Lagonoy">
-                      {LAGONOY_BARANGAYS.map((b) => (
-                        <option key={`app-lag-${b}`} value={b}>
-                          {b}
-                        </option>
-                      ))}
-                    </optgroup>
-                    <optgroup label="Municipality of Presentacion">
-                      {PRESENTACION_BARANGAYS.map((b) => (
-                        <option key={`app-pres-${b}`} value={b}>
-                          {b}
-                        </option>
-                      ))}
-                    </optgroup>
+                    <option value="Lagonoy">Lagonoy</option>
+                    <option value="Presentacion">Presentacion</option>
                   </select>
                 </div>
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">City</label>
+                  <label className="block text-slate-300 font-semibold mb-1">Barangay</label>
+                  <select
+                    value={newBarangay}
+                    onChange={(e) => setNewBarangay(e.target.value)}
+                    className="w-full px-2.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 cursor-pointer"
+                  >
+                    {(newCity === 'Presentacion' ? PRESENTACION_BARANGAYS : LAGONOY_BARANGAYS).map((b) => (
+                      <option key={`app-${newCity}-${b}`} value={b}>
+                        {b}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Province</label>
                   <input
                     type="text"
-                    value={newCity}
-                    onChange={(e) => setNewCity(e.target.value)}
+                    value={newProvince}
+                    onChange={(e) => setNewProvince(e.target.value)}
                     className="w-full px-2.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200"
                   />
                 </div>

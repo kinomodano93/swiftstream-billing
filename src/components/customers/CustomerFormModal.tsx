@@ -708,7 +708,30 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-slate-400 mb-1 font-medium">Barangay (Lagonoy / Presentacion) *</label>
+                <label className="block text-slate-400 mb-1 font-medium">City / Municipality *</label>
+                <select
+                  value={city}
+                  onChange={(e) => {
+                    const selectedCity = e.target.value;
+                    setCity(selectedCity);
+                    if (selectedCity === 'Presentacion') {
+                      setBarangay(PRESENTACION_BARANGAYS[0] || 'Ayugao');
+                    } else if (selectedCity === 'Lagonoy') {
+                      setBarangay(LAGONOY_BARANGAYS[0] || 'Binauahan');
+                    }
+                  }}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500 cursor-pointer"
+                >
+                  <option value="Lagonoy">Municipality of Lagonoy</option>
+                  <option value="Presentacion">Municipality of Presentacion</option>
+                  {!['Lagonoy', 'Presentacion'].includes(city) && city && (
+                    <option value={city}>{city}</option>
+                  )}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-slate-400 mb-1 font-medium">Barangay *</label>
                 <input
                   type="text"
                   required
@@ -723,27 +746,14 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
                       setCity('Lagonoy');
                     }
                   }}
-                  placeholder="Select or type barangay..."
+                  placeholder={`Select or type barangay in ${city || 'Lagonoy'}...`}
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500"
                 />
                 <datalist id="customer-barangay-list">
-                  {LAGONOY_BARANGAYS.map((b) => (
-                    <option key={b} value={b} label={`${b}, Lagonoy`} />
-                  ))}
-                  {PRESENTACION_BARANGAYS.map((b) => (
-                    <option key={b} value={b} label={`${b}, Presentacion`} />
+                  {(city === 'Presentacion' ? PRESENTACION_BARANGAYS : LAGONOY_BARANGAYS).map((b) => (
+                    <option key={b} value={b} label={`${b}, ${city || 'Lagonoy'}`} />
                   ))}
                 </datalist>
-              </div>
-
-              <div>
-                <label className="block text-slate-400 mb-1 font-medium">City / Municipality</label>
-                <input
-                  type="text"
-                  value={city}
-                  onChange={(e) => setCity(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500"
-                />
               </div>
 
               <div>
