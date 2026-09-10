@@ -496,8 +496,8 @@ export const HomePage: React.FC<HomePageProps> = ({
   // ISP FAQs
   const faqs = [
     {
-      q: 'What are the basic requirements to apply for a fiber connection?',
-      a: 'Applying is simple and 100% digital! You only need 1 valid government-issued ID (e.g., Driver’s License, UMID, Postal, or Barangay ID) and your complete installation address in Lagonoy. No complicated paperwork required.',
+      q: 'What are the requirements to sign up for a fiber connection?',
+      a: 'Zero requirements! You do NOT need to present or upload any government ID, barangay clearance, or paperwork. Simply sign up online with your name, contact details, and installation address, and you are good to go! Standard installation is ₱1,500.',
     },
     {
       q: 'How fast can my fiber line be installed?',
@@ -854,7 +854,7 @@ export const HomePage: React.FC<HomePageProps> = ({
               High-Speed Fiber Plans for Every Budget
             </h2>
             <p className="text-xs sm:text-sm text-slate-400">
-              All plans include free optical line installation, a high-performance Dual-Band Gigabit ONU WiFi modem, and zero data caps.
+              All plans include standard ₱1,500 optical line installation, a high-performance Dual-Band Gigabit ONU WiFi modem, and zero data caps.
             </p>
 
             {/* Category Filter Pills */}
@@ -931,7 +931,12 @@ export const HomePage: React.FC<HomePageProps> = ({
                         </span>
                         <span className="text-xs text-slate-400 font-medium">/ month</span>
                       </div>
-                      <span className="text-[10px] text-slate-500">VAT inclusive • 24-mo contract</span>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="text-[11px] font-semibold text-cyan-400">
+                          Installation: {formatCurrency(plan.installationFee || 1500)}
+                        </span>
+                        <span className="text-[10px] text-slate-500">• VAT inclusive</span>
+                      </div>
                     </div>
 
                     {/* Feature List */}
@@ -1238,8 +1243,8 @@ export const HomePage: React.FC<HomePageProps> = ({
                   <ArrowRight className="w-4 h-4" />
                 </button>
                 <div className="flex items-center justify-between text-[11px] text-slate-400 px-1">
-                  <span className="flex items-center gap-1 text-emerald-400">
-                    <Check className="w-3 h-3" /> Free Installation Promo
+                  <span className="flex items-center gap-1 text-cyan-400 font-medium">
+                    <Check className="w-3 h-3" /> Standard Installation: ₱1,500
                   </span>
                   <button
                     type="button"
@@ -1322,9 +1327,9 @@ export const HomePage: React.FC<HomePageProps> = ({
               <div className="w-10 h-10 rounded-2xl bg-cyan-600 text-white font-black text-sm flex items-center justify-center shadow-lg shadow-cyan-600/30">
                 1
               </div>
-              <h3 className="font-bold text-base text-slate-100">1. Apply Online in 1 Minute</h3>
+              <h3 className="font-bold text-base text-slate-100">1. Sign Up Online in 1 Minute</h3>
               <p className="text-xs text-slate-400 leading-relaxed">
-                Choose your desired speed tier, enter your installation address in Lagonoy, and submit your application.
+                Zero requirements or paperwork! Choose your plan, enter your contact details & address in Lagonoy, and you're good to go.
               </p>
             </div>
 
@@ -1673,13 +1678,13 @@ export const HomePage: React.FC<HomePageProps> = ({
                 </div>
                 <div>
                   <h3 className="text-base sm:text-lg font-bold text-slate-100 flex items-center gap-2">
-                    <span>Apply for SwiftStream Fiber</span>
+                    <span>Sign Up for SwiftStream Fiber</span>
                     <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-800/50">
-                      Digital Signup
+                      No Requirements Needed
                     </span>
                   </h3>
                   <p className="text-xs text-slate-400">
-                    Fast 1-minute application • Free optical line installation promo
+                    Fast 1-minute sign up • No documents needed • Standard Installation: ₱1,500
                   </p>
                 </div>
               </div>
@@ -1756,10 +1761,16 @@ export const HomePage: React.FC<HomePageProps> = ({
                       </strong>
                     </div>
                     <div>
+                      <span className="text-slate-400 block">Standard Installation Fee:</span>
+                      <strong className="text-cyan-300 font-mono font-bold">
+                        ₱1,500 (Payable after hookup)
+                      </strong>
+                    </div>
+                    <div>
                       <span className="text-slate-400 block">Portal Login Username:</span>
                       <span className="text-cyan-300 font-medium font-mono">{signUpSuccessInfo.email}</span>
                     </div>
-                    <div>
+                    <div className="sm:col-span-2">
                       <span className="text-slate-400 block">Installation Address:</span>
                       <span className="text-slate-200">{signUpSuccessInfo.address}</span>
                     </div>
@@ -1884,8 +1895,8 @@ export const HomePage: React.FC<HomePageProps> = ({
                         {formatCurrency(currentSelectedPlan?.monthlyFee || 1299)}
                         <span className="text-xs text-slate-400 font-normal"> / month</span>
                       </div>
-                      <span className="text-[10px] text-emerald-400 font-semibold block">
-                        FREE Installation Promo Included
+                      <span className="text-[10px] text-cyan-400 font-semibold block">
+                        Standard Installation: ₱1,500
                       </span>
                     </div>
                   </div>
@@ -1904,7 +1915,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                         .filter((p) => p.isActive !== false)
                         .map((p) => (
                           <option key={p.id} value={p.id}>
-                            {p.name} ({p.speedMbps} Mbps) — {formatCurrency(p.monthlyFee)}/mo
+                            {p.name} ({p.speedMbps} Mbps) — {formatCurrency(p.monthlyFee)}/mo (Install: ₱1,500)
                           </option>
                         ))}
                     </select>
@@ -2120,7 +2131,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                 <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 text-[11px] text-slate-400 flex items-center gap-2">
                   <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
                   <span>
-                    No upfront payment required today. You only pay after your fiber line is spliced, tested, and active.
+                    No upfront payment required today. Standard installation is ₱1,500 payable after your fiber line is spliced, tested, and active. Zero requirements or paperwork needed!
                   </span>
                 </div>
 
@@ -2148,8 +2159,13 @@ export const HomePage: React.FC<HomePageProps> = ({
         </div>
       )}
 
-      {/* 24/7 Gemini AI Assistant for Sales Inquiries */}
-      <GeminiAiAssistant mode="client" />
+      {/* 24/7 Gemini AI Assistant for Sales & Coverage Inquiries */}
+      <GeminiAiAssistant
+        mode="homepage"
+        onOpenSignUp={(planId, defaultBarangay, defaultMunicipality) =>
+          handleOpenSignUp(planId, defaultBarangay, defaultMunicipality)
+        }
+      />
     </div>
   );
 };

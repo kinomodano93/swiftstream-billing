@@ -29,6 +29,7 @@ import { ConfirmDeleteModal } from '../common/ConfirmDeleteModal';
 
 interface InvoiceListProps {
   onOpenBatchBillingModal: () => void;
+  onOpenManualInvoiceModal: () => void;
   onOpenPaymentModal: (customerId: string, invoiceId: string) => void;
   onSelectInvoice: (invoiceId: string) => void;
   onSelectCustomer: (customerId: string) => void;
@@ -36,6 +37,7 @@ interface InvoiceListProps {
 
 export const InvoiceList: React.FC<InvoiceListProps> = ({
   onOpenBatchBillingModal,
+  onOpenManualInvoiceModal,
   onOpenPaymentModal,
   onSelectInvoice,
   onSelectCustomer,
@@ -45,6 +47,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
     payments,
     paymentSubmissions,
     customers,
+    plans,
     businessProfile,
     deleteInvoice,
     sendReminder,
@@ -156,11 +159,21 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
           </button>
 
           <button
-            onClick={onOpenBatchBillingModal}
-            className="flex items-center gap-1.5 px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-cyan-600/20 transition-all hover:scale-105"
+            onClick={onOpenManualInvoiceModal}
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold shadow-md shadow-blue-600/20 transition-all hover:scale-105 cursor-pointer"
+            title="Create an individual invoice by selecting a subscriber"
           >
-            <Zap className="w-4 h-4" />
-            <span>1-Click Monthly Billing Run</span>
+            <Plus className="w-4 h-4" />
+            <span>Create Manual Invoice</span>
+          </button>
+
+          <button
+            onClick={onOpenBatchBillingModal}
+            className="flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white rounded-xl text-xs font-semibold shadow-md shadow-amber-600/20 transition-all hover:scale-105 cursor-pointer"
+            title="Generate invoices in bulk across subscriber categories"
+          >
+            <Zap className="w-4 h-4 text-amber-100" />
+            <span>Bulk Generate Invoices</span>
           </button>
         </div>
       </div>
@@ -333,7 +346,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
               {filteredInvoices.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="py-12 text-center text-slate-500">
-                    No invoices found. Click "1-Click Monthly Billing Run" to generate invoices.
+                    No invoices found. Use "Bulk Generate Invoices" or "Create Manual Invoice" above to generate billing records.
                   </td>
                 </tr>
               ) : (
@@ -449,7 +462,8 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
 
                           <button
                             onClick={() => {
-                              const pdf = generateInvoicePDF(inv, businessProfile);
+                              const cust = customers.find(c => c.id === inv.customerId || c.accountNo === inv.accountNo);
+                              const pdf = generateInvoicePDF(inv, businessProfile, cust, plans);
                               pdf.save(`${inv.invoiceNumber}.pdf`);
                             }}
                             className="p-1.5 bg-cyan-600/20 text-cyan-400 hover:bg-cyan-600 hover:text-white rounded-lg transition-colors"

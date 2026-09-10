@@ -211,7 +211,7 @@ export const executePaymentWebhookPipeline = async (
       name: 'Fiber Plan 35 Mbps',
       speedMbps: 35,
       monthlyFee: 1299,
-      installationFee: 0,
+      installationFee: 1500,
       category: 'residential',
       description: 'Standard plan',
       features: [],

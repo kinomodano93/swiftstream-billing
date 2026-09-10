@@ -18,6 +18,7 @@ import {
   PaymentSubmission,
   CoverageArea,
   StaffUser,
+  OperationalBill,
 } from '../types';
 import {
   initialAuditLogs,
@@ -39,7 +40,9 @@ import {
   initialPaymentSubmissions,
   initialCoverageAreas,
   initialStaffUsers,
+  initialOperationalBills,
 } from './initialData';
+import { resolveInvoicePlanDetails } from '../utils/formatters';
 
 const STORAGE_KEYS = {
   BUSINESS_PROFILE: 'swiftstream_business_profile_v4',
@@ -62,6 +65,7 @@ const STORAGE_KEYS = {
   COVERAGE_AREAS: 'swiftstream_coverage_areas_v4',
   SYSTEM_ROLE: 'swiftstream_system_role_v4',
   STAFF_USERS: 'swiftstream_staff_users_v4',
+  OPERATIONAL_BILLS: 'swiftstream_operational_bills_v4',
 };
 
 // Automatic one-time cleanup of all legacy mock data keys (v1, v2, v3, and portal queues)
@@ -139,25 +143,82 @@ export const loadStoredData = () => {
   cleanupLegacyMockData();
 
   try {
-    const businessProfile = JSON.parse(
+    const rawBusinessProfile = JSON.parse(
       localStorage.getItem(STORAGE_KEYS.BUSINESS_PROFILE) || JSON.stringify(initialBusinessProfile)
     ) as BusinessProfile;
+    const businessProfile: BusinessProfile = {
+      ...rawBusinessProfile,
+      name: rawBusinessProfile.name?.replace(/\s*&\s*REPAIR\s*SHOP/gi, '').trim() || 'SWIFTSTREAM TELECOMMUNICATIONS',
+    };
 
-    const customers = JSON.parse(
+    const rawPlans = JSON.parse(
+      localStorage.getItem(STORAGE_KEYS.PLANS) || JSON.stringify(initialPlans)
+    ) as Plan[];
+    const plans: Plan[] = rawPlans.map((p) => ({
+      ...p,
+      installationFee: 1500,
+      features: (p.features || []).map((f) =>
+        f.toLowerCase().includes('free installation') ? 'Standard Installation: ₱1,500' : f
+      ),
+    }));
+
+    const rawCustomers = JSON.parse(
       localStorage.getItem(STORAGE_KEYS.CUSTOMERS) || JSON.stringify(initialCustomers)
     ) as Customer[];
+    const customers: Customer[] = rawCustomers.map((cust) => {
+      const plan =
+        plans.find((p) => p.id === cust.planId) ||
+        plans.find((p) => p.name?.trim().toLowerCase() === cust.planName?.trim().toLowerCase()) ||
+        plans.find((p) => p.monthlyFee === cust.monthlyFee) ||
+        plans[0];
+      return {
+        ...cust,
+        planId: plan ? plan.id : cust.planId,
+        planName: plan ? plan.name : cust.planName,
+        monthlyFee: plan ? plan.monthlyFee : cust.monthlyFee,
+      };
+    });
 
-    const invoices = JSON.parse(
+    const rawInvoices = JSON.parse(
       localStorage.getItem(STORAGE_KEYS.INVOICES) || JSON.stringify(initialInvoices)
     ) as Invoice[];
+    const invoices: Invoice[] = rawInvoices.map((inv) => {
+      const cust = customers.find(
+        (c) =>
+          (inv.customerId && c.id?.toLowerCase() === inv.customerId?.toLowerCase()) ||
+          (inv.accountNo && c.accountNo?.toLowerCase() === inv.accountNo?.toLowerCase())
+      );
+      const planDetails = resolveInvoicePlanDetails(inv, cust, plans);
+
+      const items = (inv.items || []).map((it, idx) => {
+        if (it.type === 'plan' || (!it.type && idx === 0)) {
+          const unitPrice = it.unitPrice > 0 ? it.unitPrice : planDetails.monthlyFee;
+          const amount = it.amount > 0 ? it.amount : (inv.isProrated ? unitPrice : planDetails.monthlyFee);
+          return {
+            ...it,
+            type: 'plan' as const,
+            description: planDetails.serviceDescription,
+            unitPrice,
+            amount,
+          };
+        }
+        return it;
+      });
+
+      return {
+        ...inv,
+        planId: planDetails.planId,
+        planName: planDetails.planName,
+        planSpeedMbps: planDetails.speedMbps,
+        monthlyFee: planDetails.monthlyFee,
+        billingDay: planDetails.billingDay,
+        items,
+      };
+    });
 
     const payments = JSON.parse(
       localStorage.getItem(STORAGE_KEYS.PAYMENTS) || JSON.stringify(initialPayments)
     ) as Payment[];
-
-    const plans = JSON.parse(
-      localStorage.getItem(STORAGE_KEYS.PLANS) || JSON.stringify(initialPlans)
-    ) as Plan[];
 
     const napBoxes = JSON.parse(
       localStorage.getItem(STORAGE_KEYS.NAP_BOXES) || JSON.stringify(initialNapBoxes)
@@ -211,9 +272,34 @@ export const loadStoredData = () => {
       localStorage.getItem(STORAGE_KEYS.COVERAGE_AREAS) || JSON.stringify(initialCoverageAreas)
     ) as CoverageArea[];
 
-    const staffUsers = JSON.parse(
+    const rawStaffUsers = JSON.parse(
       localStorage.getItem(STORAGE_KEYS.STAFF_USERS) || JSON.stringify(initialStaffUsers)
-    ) as StaffUser[];
+    ) as any[];
+
+    const customerEmails = new Set(customers.map((c) => c.email?.toLowerCase().trim()).filter(Boolean));
+    const customerAccountNos = new Set(customers.map((c) => c.accountNo?.toLowerCase().trim()).filter(Boolean));
+
+    const cleanedStaffUsers: StaffUser[] = rawStaffUsers.filter((u: any) => {
+      if (!u || !u.role) return false;
+      const role = String(u.role).toLowerCase().trim();
+      const isValidRole = role === 'admin' || role === 'cashier' || role === 'technician';
+      if (!isValidRole) return false;
+      if (u.accountNo || u.planId || u.planName) return false;
+      const email = (u.email || '').toLowerCase().trim();
+      if (customerAccountNos.has((u.accountNo || '').toLowerCase().trim())) return false;
+      if (email === 'swiftstream.telecom@gmail.com') return true;
+      if (customerEmails.has(email)) return false;
+      return true;
+    });
+
+    const staffUsers = cleanedStaffUsers.length > 0 ? cleanedStaffUsers : initialStaffUsers;
+    try {
+      localStorage.setItem(STORAGE_KEYS.STAFF_USERS, JSON.stringify(staffUsers));
+    } catch {}
+
+    const operationalBills = JSON.parse(
+      localStorage.getItem(STORAGE_KEYS.OPERATIONAL_BILLS) || JSON.stringify(initialOperationalBills)
+    ) as OperationalBill[];
 
     return {
       businessProfile,
@@ -235,6 +321,7 @@ export const loadStoredData = () => {
       paymentSubmissions,
       coverageAreas,
       staffUsers,
+      operationalBills,
     };
   } catch (error) {
     console.error('Failed to load data from localStorage, falling back to defaults:', error);
@@ -258,6 +345,7 @@ export const loadStoredData = () => {
       paymentSubmissions: initialPaymentSubmissions,
       coverageAreas: initialCoverageAreas,
       staffUsers: initialStaffUsers,
+      operationalBills: initialOperationalBills,
     };
   }
 };
@@ -265,14 +353,25 @@ export const loadStoredData = () => {
 export const getStoredStaffUsers = (): StaffUser[] => {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.STAFF_USERS);
-    return raw ? JSON.parse(raw) : initialStaffUsers;
+    const users = raw ? (JSON.parse(raw) as any[]) : initialStaffUsers;
+    const clean = users.filter((s: any) => {
+      if (!s || !s.role) return false;
+      const r = String(s.role).toLowerCase().trim();
+      return (r === 'admin' || r === 'cashier' || r === 'technician') && !s.accountNo && !s.planId;
+    });
+    return clean.length > 0 ? clean : initialStaffUsers;
   } catch {
     return initialStaffUsers;
   }
 };
 
 export const setStoredStaffUsers = (users: StaffUser[]) => {
-  saveToStorage(STORAGE_KEYS.STAFF_USERS, users);
+  const clean = users.filter((s: any) => {
+    if (!s || !s.role) return false;
+    const r = String(s.role).toLowerCase().trim();
+    return (r === 'admin' || r === 'cashier' || r === 'technician') && !s.accountNo && !s.planId;
+  });
+  saveToStorage(STORAGE_KEYS.STAFF_USERS, clean.length > 0 ? clean : initialStaffUsers);
 };
 
 export const saveToStorage = (key: string, data: unknown) => {

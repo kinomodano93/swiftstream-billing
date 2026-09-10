@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Settings,
   Building2,
@@ -37,6 +37,7 @@ import {
   Moon,
   Image as ImageIcon,
   QrCode,
+  ExternalLink,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import {
@@ -52,6 +53,7 @@ import {
 import { testSmtpConnection, SMTP_PRESETS } from '../../utils/smtpService';
 import { testSmsGatewayConnection } from '../../utils/smsSender';
 import { sendTelegramStaffAlert, sendDiscordStaffAlert, testWebhookIntegration } from '../../utils/webhookService';
+import { testGeminiApiKey } from '../../utils/geminiService';
 import { XenditGatewaySettings } from './XenditGatewaySettings';
 import { FirebaseSettingsCard } from './FirebaseSettingsCard';
 import { SsoWhitelistSettingsCard } from './SsoWhitelistSettingsCard';
@@ -70,7 +72,25 @@ export const SettingsModal: React.FC = () => {
     theme,
     setTheme,
     staffUsers,
+    customers,
   } = useApp();
+
+  const validStaffCount = useMemo(() => {
+    const customerEmails = new Set(customers.map((c) => c.email?.toLowerCase().trim()).filter(Boolean));
+    const customerAccountNos = new Set(customers.map((c) => c.accountNo?.toLowerCase().trim()).filter(Boolean));
+    return staffUsers.filter((u: any) => {
+      if (!u || !u.role) return false;
+      const r = String(u.role).toLowerCase().trim();
+      const isStaffRole = r === 'admin' || r === 'cashier' || r === 'technician';
+      if (!isStaffRole) return false;
+      if (u.accountNo || u.planId || u.planName) return false;
+      const email = (u.email || '').toLowerCase().trim();
+      if (customerAccountNos.has((u.accountNo || '').toLowerCase().trim())) return false;
+      if (email === 'swiftstream.telecom@gmail.com') return true;
+      if (customerEmails.has(email)) return false;
+      return true;
+    }).length;
+  }, [staffUsers, customers]);
 
   const [activeTab, setActiveTab] = useState<'profile' | 'payments' | 'staff' | 'firebase' | 'sso' | 'api' | 'audit' | 'backup'>('profile');
 
@@ -79,6 +99,7 @@ export const SettingsModal: React.FC = () => {
   const [tradeName, setTradeName] = useState(businessProfile.tradeName);
   const [logoUrl, setLogoUrl] = useState<string>(businessProfile.logoUrl || '');
   const [tin, setTin] = useState(businessProfile.tin);
+  const [portalDomain, setPortalDomain] = useState<string>(businessProfile.portalDomain || businessProfile.websiteUrl || 'https://swiftstream-portal.web.app');
   const [firstName, setFirstName] = useState(businessProfile.representative.firstName);
   const [middleName, setMiddleName] = useState(businessProfile.representative.middleName);
   const [lastName, setLastName] = useState(businessProfile.representative.lastName);
@@ -90,6 +111,7 @@ export const SettingsModal: React.FC = () => {
     setTradeName(businessProfile.tradeName);
     setLogoUrl(businessProfile.logoUrl || '');
     setTin(businessProfile.tin);
+    setPortalDomain(businessProfile.portalDomain || businessProfile.websiteUrl || 'https://swiftstream-portal.web.app');
     setFirstName(businessProfile.representative.firstName);
     setMiddleName(businessProfile.representative.middleName);
     setLastName(businessProfile.representative.lastName);
@@ -147,6 +169,26 @@ export const SettingsModal: React.FC = () => {
   const [mikrotikPassword, setMikrotikPassword] = useState(businessProfile.apiKeys.mikrotikPassword || '');
   const [geminiApiKey, setGeminiApiKey] = useState(businessProfile.apiKeys.geminiApiKey || '');
   const [geminiModel, setGeminiModel] = useState(businessProfile.apiKeys.geminiModel || 'gemini-2.5-flash');
+  const [showGeminiKey, setShowGeminiKey] = useState<boolean>(false);
+  const [isTestingGemini, setIsTestingGemini] = useState<boolean>(false);
+  const [geminiTestResult, setGeminiTestResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  const handleTestGemini = async () => {
+    if (!geminiApiKey.trim()) {
+      setGeminiTestResult({ success: false, message: 'Please enter a valid Google Gemini API Key first.' });
+      return;
+    }
+    setIsTestingGemini(true);
+    setGeminiTestResult(null);
+    try {
+      const res = await testGeminiApiKey(geminiApiKey.trim(), geminiModel);
+      setGeminiTestResult(res);
+    } catch (err: any) {
+      setGeminiTestResult({ success: false, message: err?.message || 'Connection test failed.' });
+    } finally {
+      setIsTestingGemini(false);
+    }
+  };
 
   // SMS Gateway Configuration
   const [smsProvider, setSmsProvider] = useState<SmsProviderType>(businessProfile.smsGateway?.provider || 'semaphore');
@@ -315,6 +357,8 @@ export const SettingsModal: React.FC = () => {
       tradeName,
       logoUrl,
       tin,
+      portalDomain,
+      websiteUrl: portalDomain,
       representative: {
         ...businessProfile.representative,
         firstName,
@@ -516,7 +560,7 @@ export const SettingsModal: React.FC = () => {
         {[
           { id: 'profile', label: 'Company & Representative', icon: Building2 },
           { id: 'payments', label: 'Payment Gateways & QR', icon: CreditCard },
-          { id: 'staff', label: `Staff & System Roles (${staffUsers.length})`, icon: Users },
+          { id: 'staff', label: `Staff & System Roles (${validStaffCount})`, icon: Users },
           { id: 'firebase', label: 'Cloud Firestore Sync', icon: Cloud },
           { id: 'sso', label: 'SSO & Admin Whitelist', icon: ShieldCheck },
           { id: 'api', label: 'API, AI & SMTP Server', icon: Key },
@@ -671,6 +715,23 @@ export const SettingsModal: React.FC = () => {
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-mono focus:border-cyan-500 focus:outline-none"
                     required
                   />
+                </div>
+
+                <div>
+                  <label className="block text-slate-400 mb-1 font-medium flex items-center justify-between">
+                    <span>Portal Public Domain / Dynamic DNS (DDNS)</span>
+                    <span className="text-[10px] text-cyan-400 font-mono">Dynamic DNS</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={portalDomain}
+                    onChange={(e) => setPortalDomain(e.target.value)}
+                    placeholder="https://swiftstream-portal.web.app"
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-mono focus:border-cyan-500 focus:outline-none"
+                  />
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    Public domain, Cloudflare hostname, or MikroTik Cloud DDNS used for subscriber credentials and portal links.
+                  </p>
                 </div>
               </div>
             </div>
@@ -1490,21 +1551,21 @@ export const SettingsModal: React.FC = () => {
             </div>
           </div>
 
-          {/* Google Gemini AI Agent Settings */}
+          {/* Google Gemini AI Agent & Model Configuration */}
           <div className="space-y-4 pt-4 border-t border-slate-800">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
                 <h4 className="font-bold text-slate-200 uppercase tracking-wider text-[11px] text-cyan-400 flex items-center gap-2">
                   <Sparkles className="w-4 h-4 text-purple-400" />
-                  <span>Google Gemini AI Agent Integration</span>
+                  <span>Google Gemini AI Engine & Model Configuration</span>
                 </h4>
                 <p className="text-[11px] text-slate-400">
-                  Powers the 24/7 AI Assistant across Homepage (Sales), Client Portal (Billing Support), and Admin Console (ISP Copilot).
+                  Centrally configures the AI Copilot across the Home Page (Fiber Sales & Coverage), Client Portal (Billing Support), and Admin Workspace (ISP Operations Copilot).
                 </p>
               </div>
 
-              <div className="flex items-center gap-2 bg-purple-950/40 border border-purple-800/50 px-3 py-1 rounded-xl text-purple-300 font-mono text-[10px] font-bold">
-                <span className="w-2 h-2 rounded-full bg-purple-400 animate-pulse"></span>
+              <div className="flex items-center gap-2 bg-purple-950/40 border border-purple-800/50 px-3 py-1 rounded-xl text-purple-300 font-mono text-[10px] font-bold self-start sm:self-auto">
+                <span className={`w-2 h-2 rounded-full ${geminiApiKey ? 'bg-purple-400 animate-pulse' : 'bg-emerald-400'}`}></span>
                 <span>{geminiApiKey ? 'LIVE GEMINI CLOUD' : 'SMART LOCAL ENGINE ACTIVE'}</span>
               </div>
             </div>
@@ -1512,34 +1573,95 @@ export const SettingsModal: React.FC = () => {
             <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-slate-400 mb-1 font-medium">Google Gemini API Key</label>
-                  <input
-                    type="password"
-                    value={geminiApiKey}
-                    onChange={(e) => setGeminiApiKey(e.target.value)}
-                    placeholder="AIzaSy..."
-                    className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 font-mono"
-                  />
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-slate-400 font-medium text-xs">Google Gemini API Key</label>
+                    <a
+                      href="https://aistudio.google.com/app/apikey"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-[10px] text-cyan-400 hover:underline inline-flex items-center gap-1"
+                    >
+                      <span>Get Free API Key</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  </div>
+                  <div className="relative">
+                    <input
+                      type={showGeminiKey ? 'text' : 'password'}
+                      value={geminiApiKey}
+                      onChange={(e) => setGeminiApiKey(e.target.value)}
+                      placeholder="AIzaSy..."
+                      className="w-full pl-3 pr-10 py-2 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 font-mono text-xs focus:outline-none focus:border-cyan-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowGeminiKey(!showGeminiKey)}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200"
+                      title={showGeminiKey ? 'Hide key' : 'Show key'}
+                    >
+                      {showGeminiKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
                   <p className="text-[10px] text-slate-500 mt-1">
-                    Get a free API key from Google AI Studio. If left blank, the built-in intelligent domain engine is used automatically.
+                    Get an API key from Google AI Studio. If left blank, SwiftStream operates automatically using its built-in Smart Local Domain Engine.
                   </p>
                 </div>
 
                 <div>
-                  <label className="block text-slate-400 mb-1 font-medium">AI Model Version</label>
+                  <label className="block text-slate-400 mb-1 font-medium text-xs">AI Model Version</label>
                   <select
                     value={geminiModel}
                     onChange={(e) => setGeminiModel(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 font-mono"
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 font-mono text-xs focus:outline-none focus:border-cyan-500"
                   >
-                    <option value="gemini-2.5-flash">gemini-2.5-flash (Fast & Recommended)</option>
-                    <option value="gemini-3.7-flash">gemini-3.7-flash (Latest Model)</option>
+                    <option value="gemini-2.5-flash">gemini-2.5-flash (Fast & Recommended - Multimodal Reasoning)</option>
+                    <option value="gemini-2.0-flash">gemini-2.0-flash (High Performance)</option>
+                    <option value="gemini-1.5-flash">gemini-1.5-flash (Legacy Lightweight)</option>
                     <option value="gemini-2.5-pro">gemini-2.5-pro (Advanced Reasoning)</option>
                   </select>
                   <p className="text-[10px] text-slate-500 mt-1">
-                    Select the Gemini model for real-time customer and admin queries.
+                    This model is centrally applied to all visitor inquiries, subscriber care, and admin operations.
                   </p>
                 </div>
+              </div>
+
+              {/* Test Connection Button & Status Banner */}
+              <div className="pt-2 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-t border-slate-900">
+                <button
+                  type="button"
+                  onClick={handleTestGemini}
+                  disabled={isTestingGemini || !geminiApiKey.trim()}
+                  className="px-4 py-2 rounded-xl border border-slate-700 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-slate-200 font-semibold text-xs flex items-center gap-2 transition-colors"
+                >
+                  {isTestingGemini ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin text-cyan-400" />
+                      <span>Testing Gemini Connection...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Zap className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>Test Gemini Connection</span>
+                    </>
+                  )}
+                </button>
+
+                {geminiTestResult && (
+                  <div
+                    className={`px-3 py-1.5 rounded-xl text-[11px] flex items-center gap-2 border ${
+                      geminiTestResult.success
+                        ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300'
+                        : 'bg-rose-950/40 border-rose-500/40 text-rose-300'
+                    }`}
+                  >
+                    {geminiTestResult.success ? (
+                      <CheckCircle2 className="w-4 h-4 flex-shrink-0 text-emerald-400" />
+                    ) : (
+                      <AlertCircle className="w-4 h-4 flex-shrink-0 text-rose-400" />
+                    )}
+                    <span>{geminiTestResult.message}</span>
+                  </div>
+                )}
               </div>
             </div>
           </div>

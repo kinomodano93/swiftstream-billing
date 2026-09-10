@@ -32,6 +32,9 @@ import {
   ROLE_PERMISSIONS,
   RolePermissions,
   StaffUser,
+  OperationalBill,
+  OperationalBillCategory,
+  ExpenseCategory,
 } from '../types';
 import {
   exportAllDataAsJson,
@@ -41,7 +44,7 @@ import {
   setStoredStaffUsers,
   STORAGE_KEYS,
 } from '../data/storage';
-import { initialPlans, initialBusinessProfile, initialCoverageAreas, initialStaffUsers } from '../data/initialData';
+import { initialPlans, initialBusinessProfile, initialCoverageAreas, initialStaffUsers, initialOperationalBills } from '../data/initialData';
 import { generateId } from '../utils/formatters';
 import { generateReminderMessage, sendMockNotification } from '../utils/smsSender';
 import {
@@ -61,6 +64,8 @@ import {
   deleteFirestoreDoc,
   purgeFirestoreCollections,
 } from '../services/firestoreService';
+import { doc, setDoc, getDoc, query, where, getDocs, collection } from 'firebase/firestore';
+import { db } from '../config/firebase';
 import {
   AppUserProfile,
   isStaffUser,
@@ -155,6 +160,11 @@ interface AppContextType {
       createInitialInvoice?: boolean;
     }
   ) => void;
+  resetCustomerPassword: (
+    customerId: string,
+    newPassword: string,
+    syncPppoe?: boolean
+  ) => Promise<{ success: boolean; message: string }>;
 
   // Billing Actions
   createInvoice: (invoice: Omit<Invoice, 'id' | 'createdAt'>) => Invoice;
@@ -250,6 +260,21 @@ interface AppContextType {
   updateExpense: (id: string, updates: Partial<Expense>) => void;
   deleteExpense: (id: string) => void;
 
+  // Operational Bills & Due Date Calendar
+  operationalBills: OperationalBill[];
+  addOperationalBill: (bill: Omit<OperationalBill, 'id' | 'createdAt' | 'updatedAt' | 'status'> & Partial<Pick<OperationalBill, 'status'>>) => Promise<OperationalBill>;
+  updateOperationalBill: (id: string, updates: Partial<OperationalBill>) => Promise<void>;
+  deleteOperationalBill: (id: string) => Promise<void>;
+  markOperationalBillPaid: (id: string, options?: {
+    paymentDate?: string;
+    paymentReference?: string;
+    paymentMethod?: 'cash' | 'gcash' | 'maya' | 'bank_transfer' | 'check';
+    createExpenseVoucher?: boolean;
+    scheduleNextCycle?: boolean;
+  }) => Promise<void>;
+  overdueOperationalBillsCount: number;
+  dueSoonOperationalBillsCount: number;
+
   // Security Audit Actions
   logAuditEvent: (event: Omit<AuditLog, 'id' | 'timestamp'>) => void;
   clearAuditLogs: () => void;
@@ -274,7 +299,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const initial = loadStoredData();
 
   const [businessProfile, setBusinessProfile] = useState<BusinessProfile>(initial.businessProfile);
-  const [staffUsers, setStaffUsers] = useState<StaffUser[]>(initial.staffUsers || []);
+  const [staffUsers, setStaffUsers] = useState<StaffUser[]>(() => {
+    const raw = initial.staffUsers || initialStaffUsers;
+    const clean = raw.filter((s: any) => {
+      if (!s || !s.role) return false;
+      const r = String(s.role).toLowerCase().trim();
+      return (r === 'admin' || r === 'cashier' || r === 'technician') && !s.accountNo && !s.planId;
+    });
+    return clean.length > 0 ? clean : initialStaffUsers;
+  });
   const [customers, setCustomers] = useState<Customer[]>(initial.customers);
   const [invoices, setInvoices] = useState<Invoice[]>(initial.invoices);
   const [payments, setPayments] = useState<Payment[]>(initial.payments);
@@ -294,6 +327,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [coverageAreas, setCoverageAreas] = useState<CoverageArea[]>(
     initial.coverageAreas && initial.coverageAreas.length > 0 ? initial.coverageAreas : initialCoverageAreas
   );
+  const [operationalBills, setOperationalBills] = useState<OperationalBill[]>(
+    initial.operationalBills && initial.operationalBills.length > 0 ? initial.operationalBills : initialOperationalBills
+  );
 
   const VALID_TABS = new Set([
     'home',
@@ -304,6 +340,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     'field_ops',
     'repairs',
     'billing',
+    'bill_calendar',
     'payments',
     'verification_queue',
     'plans',
@@ -630,6 +667,44 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     saveToStorage(STORAGE_KEYS.COVERAGE_AREAS, coverageAreas);
   }, [coverageAreas]);
 
+  useEffect(() => {
+    saveToStorage(STORAGE_KEYS.OPERATIONAL_BILLS, operationalBills);
+  }, [operationalBills]);
+
+  // --- Customer & Staff Separation Sentinel ---
+  // Automatically detects and purges any customer/subscriber accounts that might have leaked into staffUsers
+  useEffect(() => {
+    if (staffUsers.length > 0) {
+      const customerEmails = new Set(
+        customers.map((c) => c.email?.toLowerCase().trim()).filter(Boolean)
+      );
+      const customerAccountNos = new Set(
+        customers.map((c) => c.accountNo?.toLowerCase().trim()).filter(Boolean)
+      );
+
+      const invalidStaff = staffUsers.filter((s: any) => {
+        if (!s || !s.role) return true;
+        const roleStr = String((s as any).role || '').toLowerCase().trim();
+        const isNotStaffRole = roleStr !== 'admin' && roleStr !== 'cashier' && roleStr !== 'technician';
+        const hasCustomerAttrs = !!(s as any).accountNo || !!(s as any).planId;
+        const email = (s.email || '').toLowerCase().trim();
+        const matchesCustomerEmail = email !== 'swiftstream.telecom@gmail.com' && customerEmails.has(email);
+        const matchesCustomerAccount = (s as any).accountNo && customerAccountNos.has(String((s as any).accountNo).toLowerCase().trim());
+        return isNotStaffRole || hasCustomerAttrs || matchesCustomerEmail || matchesCustomerAccount;
+      });
+
+      if (invalidStaff.length > 0) {
+        console.warn(`[Staff Security Audit] Purged ${invalidStaff.length} subscriber/customer account(s) from Staff & System Roles:`, invalidStaff.map((s) => s.fullName || s.email));
+        setStaffUsers((prev) => {
+          const purged = prev.filter((s) => !invalidStaff.some((inv) => inv.id === s.id || (inv.email && s.email && inv.email.toLowerCase().trim() === s.email.toLowerCase().trim())));
+          const clean = purged.length > 0 ? purged : initialStaffUsers;
+          setStoredStaffUsers(clean);
+          return clean;
+        });
+      }
+    }
+  }, [customers, staffUsers.length]);
+
   // --- Real-time Cloud Firestore Subscriptions ---
   useEffect(() => {
     const unsubCustomers = subscribeToCollection<Customer>(COLLECTIONS.CUSTOMERS, (data) => {
@@ -689,6 +764,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const unsubExpenses = subscribeToCollection<Expense>(COLLECTIONS.EXPENSES, (data) => {
       setExpenses(data || []);
     });
+    const unsubOperationalBills = subscribeToCollection<OperationalBill>(COLLECTIONS.OPERATIONAL_BILLS, (data) => {
+      if (data && data.length > 0) setOperationalBills(data);
+    });
     const unsubRemittances = subscribeToCollection<DailyRemittanceRecord>(COLLECTIONS.DAILY_REMITTANCES, (data) => {
       setDailyRemittances(data || []);
     });
@@ -710,33 +788,52 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const unsubSystemUsers = subscribeToCollection<any>(COLLECTIONS.SYSTEM_USERS, (data) => {
       if (data && data.length > 0) {
         const remoteStaff: StaffUser[] = data
-          .filter((u: any) => u.role && u.role !== 'customer')
+          .filter((u: any) => {
+            if (!u || !u.role) return false;
+            const r = String(u.role).toLowerCase().trim();
+            // STRICT: Must be a legitimate administrative/staff system role
+            const isStaffRole = r === 'admin' || r === 'cashier' || r === 'technician' || r === 'tech';
+            // Must NOT have any customer/subscriber attributes
+            const isCustomer = r === 'subscriber' || r === 'customer' || r === 'client' || !!u.accountNo || !!u.planId;
+            return isStaffRole && !isCustomer;
+          })
           .map((u: any) => ({
             id: u.id || u.uid,
             fullName: u.displayName || u.fullName || 'Staff User',
             email: u.email,
             mobile: u.mobile,
-            role: u.role,
+            role: (u.role === 'tech' ? 'technician' : u.role) as SystemRole,
             status: u.status || (u.isApproved ? 'active' : 'suspended'),
             createdAt: u.createdAt || new Date().toISOString(),
             updatedAt: u.updatedAt,
             lastLoginAt: u.lastLoginAt,
             notes: u.notes,
           }));
-        if (remoteStaff.length > 0) {
-          setStaffUsers((prev) => {
-            const map = new Map<string, StaffUser>();
-            prev.forEach((p) => {
-              const k = p.email ? p.email.toLowerCase().trim() : p.id;
-              map.set(k, p);
-            });
-            remoteStaff.forEach((r) => {
-              const k = r.email ? r.email.toLowerCase().trim() : r.id;
-              map.set(k, { ...map.get(k), ...r });
-            });
-            return Array.from(map.values());
+
+        setStaffUsers((prev) => {
+          const map = new Map<string, StaffUser>();
+          const isRealStaff = (s: StaffUser) => {
+            if (!s || !s.role) return false;
+            const r = String(s.role).toLowerCase().trim();
+            if (r !== 'admin' && r !== 'cashier' && r !== 'technician') return false;
+            if ((s as any).accountNo || (s as any).planId) return false;
+            return true;
+          };
+
+          prev.filter(isRealStaff).forEach((p) => {
+            const k = p.email ? p.email.toLowerCase().trim() : p.id;
+            map.set(k, p);
           });
-        }
+          remoteStaff.filter(isRealStaff).forEach((r) => {
+            const k = r.email ? r.email.toLowerCase().trim() : r.id;
+            map.set(k, { ...map.get(k), ...r });
+          });
+
+          const result = Array.from(map.values());
+          const finalStaff = result.length > 0 ? result : initialStaffUsers;
+          setStoredStaffUsers(finalStaff);
+          return finalStaff;
+        });
       }
     });
     const unsubProfile = subscribeToDocument<BusinessProfile>(
@@ -762,6 +859,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       unsubFiberClosures();
       unsubMikrotik();
       unsubExpenses();
+      unsubOperationalBills();
       unsubRemittances();
       unsubAuditLogs();
       unsubReminders();
@@ -1192,6 +1290,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const dueDate = new Date();
       dueDate.setDate(dueDate.getDate() + (businessProfile.invoiceGracePeriodDays || 7));
       const invoiceNumber = `INV-${todayStr.slice(2, 4)}${todayStr.slice(5, 7)}-${String(invoices.length + 1).padStart(4, '0')}`;
+      const plan =
+        plans.find((p) => p.id === customer.planId) ||
+        plans.find((p) => p.name?.trim().toLowerCase() === customer.planName?.trim().toLowerCase()) ||
+        plans[0];
+      const planId = plan.id;
+      const planName = plan.name;
+      const speedMbps = plan.speedMbps;
+      const monthlyFee = plan.monthlyFee;
+      const installFee = 1500;
+      const subtotal = monthlyFee + installFee;
+
       createInvoice({
         invoiceNumber,
         customerId: customer.id,
@@ -1200,6 +1309,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         customerAddress: `${customer.address.street}, ${customer.address.barangay}, ${customer.address.city}, ${customer.address.province}`,
         customerMobile: customer.mobile,
         customerEmail: customer.email,
+        planId,
+        planName,
+        planSpeedMbps: speedMbps,
+        monthlyFee,
+        billingDay: customer.billingDay || 1,
         billingPeriodStart: todayStr,
         billingPeriodEnd: new Date(new Date().setMonth(new Date().getMonth() + 1)).toISOString().slice(0, 10),
         issueDate: todayStr,
@@ -1207,19 +1321,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         items: [
           {
             id: generateId('ITEM'),
-            description: `${customer.planName} (Initial Month Subscription)`,
+            description: `Internet Plan: ${planName} (${speedMbps} Mbps Pure Fiber) — 1st Month Subscription`,
             quantity: 1,
-            unitPrice: customer.monthlyFee,
-            amount: customer.monthlyFee,
+            unitPrice: monthlyFee,
+            amount: monthlyFee,
             type: 'plan',
           },
+          {
+            id: generateId('ITEM'),
+            description: `Standard Optical Line Drop & Gigabit ONU WiFi Modem Installation Setup`,
+            quantity: 1,
+            unitPrice: installFee,
+            amount: installFee,
+            type: 'installation',
+          },
         ],
-        subtotal: customer.monthlyFee,
+        subtotal,
         discount: 0,
         previousBalance: 0,
-        totalAmount: customer.monthlyFee,
+        totalAmount: subtotal,
         amountPaid: 0,
-        balanceDue: customer.monthlyFee,
+        balanceDue: subtotal,
         status: 'unpaid',
         sentViaSms: false,
         sentViaEmail: false,
@@ -1254,7 +1376,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         (inv.billingPeriodStart?.startsWith(billingMonth) || inv.issueDate?.startsWith(billingMonth))
     );
 
-    if (existingInvoice) {
+    if (existingInvoice && !invoiceData.allowDuplicate) {
       showToast(
         'warning',
         'Duplicate Invoice Blocked',
@@ -1387,16 +1509,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const invoiceNumStr = `INV-${year.slice(2)}${month}-${String(invoices.length + index + 1).padStart(4, '0')}`;
       const previousBal = customer.balance > 0 ? customer.balance : 0;
 
-      // Mid-Month Proration Calculation
-      let planFee = customer.monthlyFee;
+      // Authoritative Plan Resolution from Plans & Packages
+      const plan =
+        plans.find((p) => p.id === customer.planId) ||
+        plans.find((p) => p.name?.trim().toLowerCase() === customer.planName?.trim().toLowerCase()) ||
+        plans.find((p) => p.monthlyFee === customer.monthlyFee) ||
+        plans[0];
+      const planId = plan.id;
+      const planName = plan.name;
+      const speedMbps = plan.speedMbps;
+      const standardMonthlyFee = plan.monthlyFee;
+
+      let planFee = standardMonthlyFee;
       let isProrated = false;
       let proratedDays = lastDayOfMonth;
 
-      if (options.enableProration !== false && customer.installationDate.startsWith(options.billingMonth)) {
+      if (options.enableProration !== false && customer.installationDate && customer.installationDate.startsWith(options.billingMonth)) {
         const installDay = parseInt(customer.installationDate.split('-')[2]) || 1;
         if (installDay > 1) {
           proratedDays = lastDayOfMonth - installDay + 1;
-          planFee = Math.round((proratedDays / lastDayOfMonth) * customer.monthlyFee);
+          planFee = Math.round((proratedDays / lastDayOfMonth) * standardMonthlyFee);
           isProrated = true;
         }
       }
@@ -1420,10 +1552,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         {
           id: generateId('ITEM'),
           description: isProrated
-            ? `Monthly Fiber (${customer.planName}) - Prorated (${proratedDays}/${lastDayOfMonth} Days)`
-            : `Monthly Fiber Service - ${customer.planName}`,
+            ? `Internet Plan: ${planName} (${speedMbps} Mbps Pure Fiber) — Prorated (${proratedDays}/${lastDayOfMonth} Days)`
+            : `Internet Plan: ${planName} (${speedMbps} Mbps Pure Fiber) — Monthly Subscription`,
           quantity: 1,
-          unitPrice: planFee,
+          unitPrice: isProrated ? planFee : standardMonthlyFee,
           amount: planFee,
           type: 'plan',
         },
@@ -1460,6 +1592,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         customerAddress: `${customer.address.street}, ${customer.address.barangay}, ${customer.address.city}, ${customer.address.province}`,
         customerMobile: customer.mobile,
         customerEmail: customer.email,
+        planId,
+        planName,
+        planSpeedMbps: speedMbps,
+        monthlyFee: standardMonthlyFee,
+        billingDay: customer.billingDay || 15,
         billingPeriodStart: startDate,
         billingPeriodEnd: endDate,
         issueDate: new Date().toISOString().slice(0, 10),
@@ -2120,7 +2257,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return p;
       })
     );
-    showToast('info', 'Plan Updated', 'Package details modified.');
+
+    // Keep subscribers subscribed to this plan in sync with updated package details
+    setCustomers((prev) =>
+      prev.map((c) => {
+        if (c.planId === id) {
+          const updated = {
+            ...c,
+            planName: updates.name || c.planName,
+            monthlyFee: updates.monthlyFee !== undefined ? updates.monthlyFee : c.monthlyFee,
+            updatedAt: new Date().toISOString(),
+          };
+          saveFirestoreDoc(COLLECTIONS.CUSTOMERS, updated);
+          return updated;
+        }
+        return c;
+      })
+    );
+
+    showToast('info', 'Plan Updated', 'Package details modified and subscribers synchronized.');
   };
 
   const deletePlan = (id: string) => {
@@ -2574,6 +2729,126 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
   };
 
+  const resetCustomerPassword = async (
+    customerId: string,
+    newPassword: string,
+    syncPppoe: boolean = false
+  ): Promise<{ success: boolean; message: string }> => {
+    const targetCustomer = customers.find((c) => c.id === customerId);
+    if (!targetCustomer) {
+      return { success: false, message: 'Subscriber account not found.' };
+    }
+
+    if (!newPassword || newPassword.trim().length < 6) {
+      return { success: false, message: 'Password must be at least 6 characters.' };
+    }
+
+    const trimmedPassword = newPassword.trim();
+    const updatedNetwork = {
+      ...targetCustomer.network,
+      ...(syncPppoe && targetCustomer.network?.pppoeUsername ? { pppoePassword: trimmedPassword } : {}),
+    };
+
+    const updatedCust: Customer = {
+      ...targetCustomer,
+      portalPassword: trimmedPassword,
+      network: updatedNetwork,
+      updatedAt: new Date().toISOString(),
+    };
+
+    // 1. Update React state
+    setCustomers((prev) => prev.map((c) => (c.id === customerId ? updatedCust : c)));
+
+    // 2. Persist to Firestore & localStorage
+    saveFirestoreDoc(COLLECTIONS.CUSTOMERS, updatedCust);
+
+    // 3. Update Firestore system_users collection if a user profile exists
+    try {
+      const userDocRef = doc(db, 'system_users', customerId);
+      const userSnap = await getDoc(userDocRef);
+      if (userSnap.exists()) {
+        await setDoc(
+          userDocRef,
+          {
+            portalPassword: trimmedPassword,
+            initialPassword: trimmedPassword,
+            updatedAt: new Date().toISOString(),
+          },
+          { merge: true }
+        );
+      }
+
+      if (targetCustomer.email && targetCustomer.email.includes('@')) {
+        const q = query(collection(db, 'system_users'), where('email', '==', targetCustomer.email.toLowerCase().trim()));
+        const qSnap = await getDocs(q);
+        for (const d of qSnap.docs) {
+          await setDoc(
+            doc(db, 'system_users', d.id),
+            {
+              portalPassword: trimmedPassword,
+              initialPassword: trimmedPassword,
+              updatedAt: new Date().toISOString(),
+            },
+            { merge: true }
+          );
+        }
+      }
+    } catch (userSyncErr) {
+      console.warn('Could not sync password to system_users:', userSyncErr);
+    }
+
+    // 4. Synchronize with MikroTik router hardware if requested
+    let mikrotikMessage = '';
+    if (syncPppoe && targetCustomer.network?.pppoeUsername) {
+      const routerCreds = getRouterCredsForCustomer(targetCustomer);
+      if (routerCreds) {
+        const plan = plans.find((p) => p.id === targetCustomer.planId) || plans[0];
+        try {
+          const res = await saveOrUpdatePppoeSecret(routerCreds, {
+            name: targetCustomer.network.pppoeUsername,
+            password: trimmedPassword,
+            service: 'pppoe',
+            profile: targetCustomer.network.pppoeProfile || `Plan-${plan?.speedMbps || 25}M`,
+            remoteAddress: targetCustomer.network.ipAddress,
+            comment: `${targetCustomer.fullName} - ${targetCustomer.accountNo}`,
+            disabled: targetCustomer.status === 'suspended' || targetCustomer.status === 'disconnected',
+            speedMbps: plan?.speedMbps || 25,
+            accountNo: targetCustomer.accountNo,
+          });
+
+          if (res.success) {
+            mikrotikMessage = ' PPPoE router secret was also updated on MikroTik.';
+          } else {
+            mikrotikMessage = ` (MikroTik notice: ${res.message || 'Router unreachable'})`;
+          }
+        } catch (mErr: any) {
+          mikrotikMessage = ` (MikroTik notice: ${mErr?.message || 'Router unreachable'})`;
+        }
+      }
+    }
+
+    // 5. Audit Log
+    logAuditEvent({
+      userName: currentAuthUser?.displayName || 'Administrator',
+      action: 'CUSTOMER_PASSWORD_RESET',
+      category: 'auth',
+      severity: 'warning',
+      details: `Manually reset portal password for subscriber ${targetCustomer.fullName} (${targetCustomer.accountNo}).${mikrotikMessage}`,
+      status: 'success',
+    });
+
+    showToast(
+      'success',
+      'Password Reset Complete',
+      `Portal password for ${targetCustomer.fullName} (${targetCustomer.accountNo}) has been updated.${mikrotikMessage}`
+    );
+
+    return {
+      success: true,
+      message: `Password updated successfully for ${targetCustomer.fullName}.${mikrotikMessage}`,
+    };
+  };
+
   // --- Fleet Router Operations (On-Demand) ---
   const [lastGlobalRouterPolledAt, setLastGlobalRouterPolledAt] = useState<Date | null>(null);
   const isGlobalPollingInProgressRef = React.useRef<boolean>(false);
@@ -2682,6 +2957,191 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       status: 'success',
     });
     showToast('warning', 'Expense Deleted', 'Expense entry was removed.');
+  };
+
+  // --- Operational Bills & Calendar Due Date Operations ---
+  const todayDateStr = new Date().toISOString().slice(0, 10);
+
+  const overdueOperationalBillsCount = operationalBills.filter((b) => {
+    if (b.status === 'paid') return false;
+    return b.dueDate < todayDateStr;
+  }).length;
+
+  const dueSoonOperationalBillsCount = operationalBills.filter((b) => {
+    if (b.status === 'paid') return false;
+    if (b.dueDate < todayDateStr) return false;
+    const diffTime = new Date(b.dueDate).getTime() - new Date(todayDateStr).getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return diffDays <= (b.reminderDaysBefore ?? 5);
+  }).length;
+
+  const addOperationalBill = async (
+    billData: Omit<OperationalBill, 'id' | 'createdAt' | 'updatedAt' | 'status'> & Partial<Pick<OperationalBill, 'status'>>
+  ): Promise<OperationalBill> => {
+    const now = new Date().toISOString();
+    const newBill: OperationalBill = {
+      ...billData,
+      id: generateId('OPBILL'),
+      status: billData.status || 'pending',
+      reminderDaysBefore: billData.reminderDaysBefore ?? 5,
+      createdAt: now,
+      updatedAt: now,
+    };
+    setOperationalBills((prev) => [newBill, ...prev]);
+    saveFirestoreDoc(COLLECTIONS.OPERATIONAL_BILLS, newBill);
+    logAuditEvent({
+      userName: 'Admin Leonardo Flojo',
+      action: 'BILL_SCHEDULED',
+      category: 'billing',
+      severity: 'info',
+      details: `Scheduled operational bill "${newBill.title}" (${newBill.vendorName}) due on ${newBill.dueDate} for ₱${newBill.amount.toLocaleString()}.`,
+      status: 'success',
+    });
+    showToast('success', 'Bill Scheduled', `Added ${newBill.title} due on ${newBill.dueDate}.`);
+    return newBill;
+  };
+
+  const updateOperationalBill = async (id: string, updates: Partial<OperationalBill>): Promise<void> => {
+    const now = new Date().toISOString();
+    setOperationalBills((prev) =>
+      prev.map((b) => {
+        if (b.id === id) {
+          const updated = { ...b, ...updates, updatedAt: now };
+          saveFirestoreDoc(COLLECTIONS.OPERATIONAL_BILLS, updated);
+          return updated;
+        }
+        return b;
+      })
+    );
+    showToast('info', 'Bill Updated', 'Operational bill details updated successfully.');
+  };
+
+  const deleteOperationalBill = async (id: string): Promise<void> => {
+    deleteFirestoreDoc(COLLECTIONS.OPERATIONAL_BILLS, id);
+    setOperationalBills((prev) => prev.filter((b) => b.id !== id));
+    logAuditEvent({
+      userName: 'Admin Leonardo Flojo',
+      action: 'BILL_DELETED',
+      category: 'billing',
+      severity: 'warning',
+      details: `Removed operational bill schedule ${id}.`,
+      status: 'success',
+    });
+    showToast('warning', 'Bill Removed', 'Operational payable schedule deleted.');
+  };
+
+  const markOperationalBillPaid = async (
+    id: string,
+    options?: {
+      paymentDate?: string;
+      paymentReference?: string;
+      paymentMethod?: 'cash' | 'gcash' | 'maya' | 'bank_transfer' | 'check';
+      createExpenseVoucher?: boolean;
+      scheduleNextCycle?: boolean;
+    }
+  ): Promise<void> => {
+    const targetBill = operationalBills.find((b) => b.id === id);
+    if (!targetBill) return;
+
+    const paidAt = options?.paymentDate || new Date().toISOString();
+    const paymentRef = options?.paymentReference || `PAY-${Date.now().toString(36).toUpperCase()}`;
+    const payMethod: 'cash' | 'gcash' | 'maya' | 'bank_transfer' | 'check' = options?.paymentMethod || 'bank_transfer';
+    const now = new Date().toISOString();
+
+    // 1. Update bill status to paid
+    const updatedBill: OperationalBill = {
+      ...targetBill,
+      status: 'paid',
+      paidAt,
+      paymentReference: paymentRef,
+      paymentMethod: payMethod,
+      updatedAt: now,
+    };
+
+    setOperationalBills((prev) => prev.map((b) => (b.id === id ? updatedBill : b)));
+    saveFirestoreDoc(COLLECTIONS.OPERATIONAL_BILLS, updatedBill);
+
+    // 2. Optionally create OPEX expense voucher
+    if (options?.createExpenseVoucher !== false) {
+      const expenseCategoryMap: Record<OperationalBillCategory, ExpenseCategory> = {
+        dia_transit: 'upstream_bandwidth',
+        electricity: 'power_electricity',
+        rent_lease: 'rent_pole_attachments',
+        payroll: 'payroll_salaries',
+        maintenance: 'repairs_spareparts',
+        taxes_permits: 'taxes_permits',
+        software_licenses: 'other',
+        fiber_supplies: 'fiber_supplies',
+        other: 'other',
+      };
+
+      addExpense({
+        date: paidAt.slice(0, 10),
+        category: expenseCategoryMap[targetBill.category] || 'other',
+        description: `[Operational Bill] ${targetBill.vendorName} - ${targetBill.title} (${targetBill.accountOrRefNumber ? 'Ref: ' + targetBill.accountOrRefNumber : ''})`,
+        amount: targetBill.amount,
+        paymentMethod: payMethod,
+        receiptNumber: paymentRef,
+        vendorName: targetBill.vendorName,
+        recordedBy: 'Admin Leonardo Flojo',
+        notes: `Settled operational payable ID: ${targetBill.id}. Recurrence: ${targetBill.recurrence}.`,
+      });
+    }
+
+    // 3. If recurring, schedule the next billing cycle automatically
+    if (options?.scheduleNextCycle !== false && targetBill.recurrence !== 'one_time') {
+      const currentDueDate = new Date(targetBill.dueDate);
+      const nextDueDate = new Date(currentDueDate);
+
+      switch (targetBill.recurrence) {
+        case 'monthly':
+          nextDueDate.setMonth(nextDueDate.getMonth() + 1);
+          break;
+        case 'quarterly':
+          nextDueDate.setMonth(nextDueDate.getMonth() + 3);
+          break;
+        case 'semi_annual':
+          nextDueDate.setMonth(nextDueDate.getMonth() + 6);
+          break;
+        case 'annual':
+          nextDueDate.setFullYear(nextDueDate.getFullYear() + 1);
+          break;
+      }
+
+      const nextDueDateStr = nextDueDate.toISOString().slice(0, 10);
+      const nextBill: OperationalBill = {
+        vendorName: targetBill.vendorName,
+        title: targetBill.title,
+        category: targetBill.category,
+        amount: targetBill.amount,
+        dueDate: nextDueDateStr,
+        recurrence: targetBill.recurrence,
+        accountOrRefNumber: targetBill.accountOrRefNumber,
+        notes: targetBill.notes,
+        reminderDaysBefore: targetBill.reminderDaysBefore ?? 5,
+        status: 'pending',
+        id: generateId('OPBILL'),
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      setOperationalBills((prev) => [nextBill, ...prev]);
+      saveFirestoreDoc(COLLECTIONS.OPERATIONAL_BILLS, nextBill);
+    }
+
+    logAuditEvent({
+      userName: 'Admin Leonardo Flojo',
+      action: 'BILL_PAID',
+      category: 'billing',
+      severity: 'info',
+      details: `Settled operational bill "${targetBill.title}" (₱${targetBill.amount.toLocaleString()}) via ${payMethod}. Ref: ${paymentRef}.`,
+      status: 'success',
+    });
+
+    try {
+      confetti({ particleCount: 40, spread: 60, origin: { y: 0.8 } });
+    } catch {}
+    showToast('success', 'Bill Settled', `Marked ${targetBill.title} as paid.`);
   };
 
   // --- Staff & System Roles Management ---
@@ -2904,6 +3364,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (jsonData.reminders) setReminders(jsonData.reminders);
       if (jsonData.mikrotikDevices) setMikrotikDevices(jsonData.mikrotikDevices);
       if (jsonData.expenses) setExpenses(jsonData.expenses);
+      if (jsonData.operationalBills) setOperationalBills(jsonData.operationalBills);
       if (jsonData.auditLogs) setAuditLogs(jsonData.auditLogs);
       if (jsonData.businessProfile) setBusinessProfile(jsonData.businessProfile);
       if (jsonData.staffUsers) setStaffUsers(jsonData.staffUsers);
@@ -2936,6 +3397,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setReminders([]);
     setMikrotikDevices([]);
     setExpenses([]);
+    setOperationalBills(initialOperationalBills);
     setAuditLogs([]);
     setDailyRemittances([]);
     setPaymentSubmissions([]);
@@ -3004,6 +3466,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         syncCustomerMikrotik,
         syncAllSubscribersToMikrotik,
         provisionSubscriber,
+        resetCustomerPassword,
         createInvoice,
         updateInvoice,
         deleteInvoice,
@@ -3052,6 +3515,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addExpense,
         updateExpense,
         deleteExpense,
+        operationalBills,
+        addOperationalBill,
+        updateOperationalBill,
+        deleteOperationalBill,
+        markOperationalBillPaid,
+        overdueOperationalBillsCount,
+        dueSoonOperationalBillsCount,
         logAuditEvent,
         clearAuditLogs,
         theme,

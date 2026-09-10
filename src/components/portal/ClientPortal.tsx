@@ -54,6 +54,7 @@ import {
   getInvoiceStatusBadge,
   getPaymentMethodLabel,
   getRepairStatusBadge,
+  resolveInvoicePlanDetails,
 } from '../../utils/formatters';
 import { TicketChatModal } from '../support/TicketChatModal';
 import { generateInvoicePDF, generateOfficialReceiptPDF } from '../../utils/pdfGenerator';
@@ -190,7 +191,9 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
     ? repairOrders.filter((r) => r.customerId === customer.id)
     : [];
   const customerPlan = customer
-    ? plans.find((p) => p.id === customer.planId)
+    ? plans.find((p) => p.id === customer.planId) ||
+      plans.find((p) => p.name?.trim().toLowerCase() === customer.planName?.trim().toLowerCase()) ||
+      plans[0]
     : null;
 
   // Payment submissions / proofs for this subscriber
@@ -1229,7 +1232,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
 
                             <button
                               onClick={() => {
-                                const pdf = generateInvoicePDF(inv, businessProfile);
+                                const pdf = generateInvoicePDF(inv, businessProfile, customer, plans);
                                 pdf.save(`${inv.invoiceNumber}.pdf`);
                               }}
                               className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-cyan-300 rounded-xl text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
@@ -1345,7 +1348,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                         <div className="flex items-center gap-2">
                           <button
                             onClick={() => {
-                              const pdf = generateInvoicePDF(inv, businessProfile);
+                              const pdf = generateInvoicePDF(inv, businessProfile, customer, plans);
                               pdf.save(`${inv.invoiceNumber}_${customer.accountNo}.pdf`);
                             }}
                             className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-cyan-500/30 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
@@ -1379,21 +1382,34 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                         <table className="w-full text-left">
                           <thead>
                             <tr className="bg-slate-950 text-slate-400 border-b border-slate-800 font-semibold">
-                              <th className="py-2.5 px-4">Item Description</th>
+                              <th className="py-2.5 px-4">Description of Services & Charges</th>
                               <th className="py-2.5 px-4 text-center">Qty</th>
                               <th className="py-2.5 px-4 text-right">Unit Rate</th>
                               <th className="py-2.5 px-4 text-right">Amount</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-800/60">
-                            {inv.items.map((item, idx) => (
-                              <tr key={item.id || idx}>
-                                <td className="py-2.5 px-4 text-slate-200">{item.description}</td>
-                                <td className="py-2.5 px-4 text-center text-slate-400">{item.quantity}</td>
-                                <td className="py-2.5 px-4 text-right font-mono text-slate-300">{formatCurrency(item.unitPrice)}</td>
-                                <td className="py-2.5 px-4 text-right font-mono font-semibold text-slate-100">{formatCurrency(item.amount)}</td>
-                              </tr>
-                            ))}
+                            {inv.items.map((item, idx) => {
+                              const isPlanItem = item.type === 'plan' || (!item.type && idx === 0);
+                              const planDetails = resolveInvoicePlanDetails(inv, customer, plans);
+                              const displayDesc = isPlanItem
+                                ? (inv.isProrated && inv.proratedDays
+                                    ? `Internet Plan: ${planDetails.planName} (${planDetails.speedMbps} Mbps Pure Fiber) — Prorated (${inv.proratedDays} Days)`
+                                    : `Internet Plan: ${planDetails.planName} (${planDetails.speedMbps} Mbps Pure Fiber) — Monthly Subscription`)
+                                : item.description;
+
+                              const unitPrice = isPlanItem && (item.unitPrice <= 0 || !inv.isProrated) ? planDetails.monthlyFee : item.unitPrice;
+                              const itemAmount = isPlanItem && (item.amount <= 0 || !inv.isProrated) ? planDetails.monthlyFee : item.amount;
+
+                              return (
+                                <tr key={item.id || idx}>
+                                  <td className="py-2.5 px-4 text-slate-200 font-medium">{displayDesc}</td>
+                                  <td className="py-2.5 px-4 text-center text-slate-400">{item.quantity}</td>
+                                  <td className="py-2.5 px-4 text-right font-mono text-slate-300">{formatCurrency(unitPrice)}</td>
+                                  <td className="py-2.5 px-4 text-right font-mono font-semibold text-slate-100">{formatCurrency(itemAmount)}</td>
+                                </tr>
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>

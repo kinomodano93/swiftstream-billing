@@ -10,6 +10,7 @@ import { CustomerFormModal } from './components/customers/CustomerFormModal';
 import { InvoiceList } from './components/billing/InvoiceList';
 import { InvoiceDetailModal } from './components/billing/InvoiceDetailModal';
 import { BatchBillingModal } from './components/billing/BatchBillingModal';
+import { CreateManualInvoiceModal } from './components/billing/CreateManualInvoiceModal';
 import { PaymentList } from './components/payments/PaymentList';
 import { PaymentTerminalModal } from './components/payments/PaymentTerminalModal';
 import { PaymentVerificationQueue } from './components/payments/PaymentVerificationQueue';
@@ -23,6 +24,7 @@ import { RepairOrderList } from './components/repairs/RepairOrderList';
 import { RepairOrderModal } from './components/repairs/RepairOrderModal';
 import { ReminderCenter } from './components/reminders/ReminderCenter';
 import { FinancialReports } from './components/reports/FinancialReports';
+import { OperationalBillCalendar } from './components/calendar/OperationalBillCalendar';
 import { SettingsModal } from './components/settings/SettingsModal';
 import { ClientPortal } from './components/portal/ClientPortal';
 import { HomePage } from './components/home/HomePage';
@@ -82,6 +84,8 @@ const MainLayout: React.FC = () => {
   const [selectedReceiptId, setSelectedReceiptId] = useState<string | null>(null);
 
   const [showBatchBillingModal, setShowBatchBillingModal] = useState<boolean>(false);
+  const [showManualInvoiceModal, setShowManualInvoiceModal] = useState<boolean>(false);
+  const [manualInvoiceCustomerId, setManualInvoiceCustomerId] = useState<string | undefined>(undefined);
 
   const [showRepairModal, setShowRepairModal] = useState<boolean>(false);
   const [repairToEdit, setRepairToEdit] = useState<RepairOrder | null>(null);
@@ -313,10 +317,20 @@ const MainLayout: React.FC = () => {
               {activeTab === 'billing' && (
                 <InvoiceList
                   onOpenBatchBillingModal={() => setShowBatchBillingModal(true)}
+                  onOpenManualInvoiceModal={(cid?: string) => {
+                    setManualInvoiceCustomerId(cid);
+                    setShowManualInvoiceModal(true);
+                  }}
                   onOpenPaymentModal={(cid, iid) => handleOpenPayment(cid, iid)}
                   onSelectInvoice={(id) => setSelectedInvoiceId(id)}
                   onSelectCustomer={(id) => setSelectedCustomerId(id)}
                 />
+              )}
+
+              {activeTab === 'bill_calendar' && (
+                <div className="w-full px-3 sm:px-6 lg:px-8 py-4 sm:py-6 animate-in fade-in">
+                  <OperationalBillCalendar />
+                </div>
               )}
 
               {activeTab === 'payments' && (
@@ -418,6 +432,16 @@ const MainLayout: React.FC = () => {
 
       {showBatchBillingModal && (
         <BatchBillingModal onClose={() => setShowBatchBillingModal(false)} />
+      )}
+
+      {showManualInvoiceModal && (
+        <CreateManualInvoiceModal
+          preselectedCustomerId={manualInvoiceCustomerId}
+          onClose={() => {
+            setShowManualInvoiceModal(false);
+            setManualInvoiceCustomerId(undefined);
+          }}
+        />
       )}
 
       {showRepairModal && (

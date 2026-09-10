@@ -185,6 +185,86 @@ export const signInWithEmail = async (email: string, password: string): Promise<
     }
   }
 
+  // 2.5 Check if user is a subscriber with an admin-configured manual portal password
+  try {
+    const localCustRaw = localStorage.getItem('swiftstream_customers');
+    if (localCustRaw) {
+      const localCustomers: any[] = JSON.parse(localCustRaw);
+      const matchedCustomer = localCustomers.find(
+        (c) => c.email && c.email.toLowerCase().trim() === cleanEmail
+      );
+
+      if (matchedCustomer && matchedCustomer.portalPassword && matchedCustomer.portalPassword === password) {
+        if (matchedCustomer.status === 'suspended') {
+          throw new Error('Your subscriber account is currently suspended. Please contact the Billing Office.');
+        }
+        if (matchedCustomer.status === 'pending_approval') {
+          throw new Error('Your subscriber registration is currently under review by our Admin team. You will receive an SMS when your connection is approved.');
+        }
+
+        const subscriberProfile: AppUserProfile = {
+          uid: matchedCustomer.id,
+          email: matchedCustomer.email,
+          displayName: matchedCustomer.fullName,
+          role: 'subscriber',
+          accountNo: matchedCustomer.accountNo,
+          isApproved: true,
+          status: 'active',
+          planId: matchedCustomer.planId,
+          planName: matchedCustomer.planName,
+          monthlyFee: matchedCustomer.monthlyFee,
+          mobile: matchedCustomer.mobile,
+          createdAt: matchedCustomer.createdAt || new Date().toISOString(),
+          lastLoginAt: new Date().toISOString(),
+        };
+
+        localStorage.setItem('swiftstream_current_auth_user', JSON.stringify(subscriberProfile));
+        return subscriberProfile;
+      }
+    }
+
+    // Also check Firestore system_users for subscriber portal password
+    const userQ = query(collection(db, 'system_users'), where('email', '==', cleanEmail));
+    const userQSnap = await getDocs(userQ);
+    if (!userQSnap.empty) {
+      const uData = userQSnap.docs[0].data();
+      if (
+        uData.role === 'subscriber' &&
+        (uData.portalPassword === password || uData.initialPassword === password)
+      ) {
+        if (uData.status === 'suspended') {
+          throw new Error('Your subscriber account is currently suspended. Please contact the Billing Office.');
+        }
+        if (uData.status === 'pending_approval' || uData.isApproved === false) {
+          throw new Error('Your subscriber registration is currently under review by our Admin team.');
+        }
+
+        const subscriberProfile: AppUserProfile = {
+          uid: uData.uid || userQSnap.docs[0].id,
+          email: uData.email,
+          displayName: uData.displayName || uData.fullName || 'Subscriber',
+          role: 'subscriber',
+          accountNo: uData.accountNo,
+          isApproved: true,
+          status: 'active',
+          planId: uData.planId,
+          planName: uData.planName,
+          monthlyFee: uData.monthlyFee,
+          mobile: uData.mobile,
+          createdAt: uData.createdAt || new Date().toISOString(),
+          lastLoginAt: new Date().toISOString(),
+        };
+
+        localStorage.setItem('swiftstream_current_auth_user', JSON.stringify(subscriberProfile));
+        return subscriberProfile;
+      }
+    }
+  } catch (err: any) {
+    if (err.message?.includes('suspended') || err.message?.includes('under review')) {
+      throw err;
+    }
+  }
+
   // 3. Fallback to Firebase Auth for subscribers / cloud users
   const cred = await signInWithEmailAndPassword(auth, email, password);
   const profile = await fetchOrCreateUserProfile(cred.user);
@@ -581,11 +661,35 @@ export const subscribeToAuth = (
         onUserChanged(null);
       }
     } else {
-      // Check if a local authenticated staff session exists
+      // Check if a local authenticated staff or subscriber session exists
       try {
         const localRaw = localStorage.getItem('swiftstream_current_auth_user');
         if (localRaw) {
           const localProfile = JSON.parse(localRaw) as AppUserProfile;
+
+          // If subscriber signed in via portal password
+          if (localProfile.role === 'subscriber') {
+            try {
+              const localCustomers: any[] = JSON.parse(localStorage.getItem('swiftstream_customers') || '[]');
+              const matchedCust = localCustomers.find(
+                (c) =>
+                  c.id === localProfile.uid ||
+                  (c.email && c.email.toLowerCase().trim() === (localProfile.email || '').toLowerCase().trim()) ||
+                  (localProfile.accountNo && c.accountNo === localProfile.accountNo)
+              );
+
+              if (matchedCust && matchedCust.status !== 'pending_approval') {
+                onUserChanged({
+                  ...localProfile,
+                  displayName: matchedCust.fullName || localProfile.displayName,
+                  accountNo: matchedCust.accountNo || localProfile.accountNo,
+                  status: matchedCust.status === 'suspended' ? 'suspended' : 'active',
+                });
+                return;
+              }
+            } catch {}
+          }
+
           const staffList = getStoredStaffUsers();
           const matchedStaff = staffList.find(
             (s) =>
@@ -601,7 +705,7 @@ export const subscribeToAuth = (
               status: matchedStaff.status,
             });
             return;
-          } else {
+          } else if (localProfile.role !== 'subscriber') {
             localStorage.removeItem('swiftstream_current_auth_user');
           }
         }

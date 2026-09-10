@@ -28,6 +28,7 @@ import {
   CheckCircle2,
   Receipt,
   ScrollText,
+  CalendarDays,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { SYSTEM_ROLES_CONFIG } from '../../types';
@@ -48,6 +49,8 @@ export const Sidebar: React.FC = () => {
     systemRole,
     canAccessTab,
     staffUsers,
+    overdueOperationalBillsCount,
+    dueSoonOperationalBillsCount,
   } = useApp();
 
   const [isCollapsed, setIsCollapsed] = useState<boolean>(() => {
@@ -141,6 +144,19 @@ export const Sidebar: React.FC = () => {
           icon: FileText,
           badge: unpaidInvoicesCount > 0 ? `${unpaidInvoicesCount}` : null,
           badgeColor: 'bg-rose-500/20 text-rose-300',
+        },
+        {
+          id: 'bill_calendar',
+          label: 'Bill Due Calendar',
+          icon: CalendarDays,
+          badge: overdueOperationalBillsCount > 0
+            ? `${overdueOperationalBillsCount} overdue`
+            : dueSoonOperationalBillsCount > 0
+            ? `${dueSoonOperationalBillsCount} due`
+            : null,
+          badgeColor: overdueOperationalBillsCount > 0
+            ? 'bg-rose-500/20 text-rose-300 font-bold font-mono animate-pulse'
+            : 'bg-amber-500/20 text-amber-300 font-bold font-mono',
         },
         {
           id: 'payments',

@@ -31,6 +31,7 @@ import { StaffUser, SystemRole, SYSTEM_ROLES_CONFIG } from '../../types';
 export const StaffUserManager: React.FC = () => {
   const {
     staffUsers,
+    customers,
     addStaffUser,
     updateStaffUser,
     deleteStaffUser,
@@ -125,6 +126,15 @@ export const StaffUserManager: React.FC = () => {
       return;
     }
 
+    // Guard: Prevent assigning a subscriber/customer email as a staff user
+    const customerWithEmail = customers.find(
+      (c) => c.email && c.email.toLowerCase().trim() === formEmail.toLowerCase().trim()
+    );
+    if (customerWithEmail) {
+      setFormError(`This email address belongs to subscriber "${customerWithEmail.fullName}" (${customerWithEmail.accountNo}). Staff accounts must use a dedicated company email.`);
+      return;
+    }
+
     if (editingStaff) {
       // Update
       await updateStaffUser(editingStaff.id, {
@@ -160,8 +170,27 @@ export const StaffUserManager: React.FC = () => {
     }
   };
 
+  // Pure genuine staff users (strictly excluding any subscribers or customers)
+  const genuineStaffUsers = React.useMemo(() => {
+    const customerEmails = new Set(customers.map((c) => c.email?.toLowerCase().trim()).filter(Boolean));
+    const customerAccountNos = new Set(customers.map((c) => c.accountNo?.toLowerCase().trim()).filter(Boolean));
+
+    return staffUsers.filter((u: any) => {
+      if (!u || !u.role) return false;
+      const r = String(u.role).toLowerCase().trim();
+      const isStaffRole = r === 'admin' || r === 'cashier' || r === 'technician';
+      if (!isStaffRole) return false;
+      if (u.accountNo || u.planId || u.planName) return false;
+      const email = (u.email || '').toLowerCase().trim();
+      if (customerAccountNos.has((u.accountNo || '').toLowerCase().trim())) return false;
+      if (email === 'swiftstream.telecom@gmail.com') return true;
+      if (customerEmails.has(email)) return false;
+      return true;
+    });
+  }, [staffUsers, customers]);
+
   // Filtered staff users
-  const filteredStaffUsers = staffUsers.filter((u) => {
+  const filteredStaffUsers = genuineStaffUsers.filter((u) => {
     const matchesSearch =
       u.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       u.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -174,11 +203,11 @@ export const StaffUserManager: React.FC = () => {
     return matchesSearch && matchesRole && matchesStatus;
   });
 
-  // Metrics
-  const totalStaff = staffUsers.length;
-  const adminCount = staffUsers.filter((u) => u.role === 'admin').length;
-  const cashierCount = staffUsers.filter((u) => u.role === 'cashier').length;
-  const techCount = staffUsers.filter((u) => u.role === 'technician').length;
+  // Metrics (computed strictly from genuine staff users)
+  const totalStaff = genuineStaffUsers.length;
+  const adminCount = genuineStaffUsers.filter((u) => u.role === 'admin').length;
+  const cashierCount = genuineStaffUsers.filter((u) => u.role === 'cashier').length;
+  const techCount = genuineStaffUsers.filter((u) => u.role === 'technician').length;
 
   return (
     <div className="w-full px-3 sm:px-6 lg:px-8 py-6 space-y-6 animate-in fade-in">

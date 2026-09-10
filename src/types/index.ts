@@ -75,6 +75,7 @@ export interface RolePermissions {
   canExecuteRouterCli: boolean;
   canAccessVerificationQueue: boolean;
   canManageStaff: boolean;
+  canResetCustomerPassword: boolean;
 }
 
 export const ROLE_PERMISSIONS: Record<SystemRole, RolePermissions> = {
@@ -90,6 +91,7 @@ export const ROLE_PERMISSIONS: Record<SystemRole, RolePermissions> = {
       'verification_queue',
       'plans',
       'reports',
+      'bill_calendar',
       'mikrotik',
       'ipoe_dhcp',
       'network',
@@ -110,6 +112,7 @@ export const ROLE_PERMISSIONS: Record<SystemRole, RolePermissions> = {
     canExecuteRouterCli: true,
     canAccessVerificationQueue: true,
     canManageStaff: true,
+    canResetCustomerPassword: true,
   },
   cashier: {
     allowedTabs: [
@@ -121,6 +124,7 @@ export const ROLE_PERMISSIONS: Record<SystemRole, RolePermissions> = {
       'transaction_logs',
       'verification_queue',
       'plans',
+      'bill_calendar',
       'reminders',
     ],
     canDeleteCustomer: false,
@@ -133,6 +137,7 @@ export const ROLE_PERMISSIONS: Record<SystemRole, RolePermissions> = {
     canExecuteRouterCli: false,
     canAccessVerificationQueue: true,
     canManageStaff: false,
+    canResetCustomerPassword: true,
   },
   technician: {
     allowedTabs: [
@@ -156,6 +161,7 @@ export const ROLE_PERMISSIONS: Record<SystemRole, RolePermissions> = {
     canExecuteRouterCli: false,
     canAccessVerificationQueue: false,
     canManageStaff: false,
+    canResetCustomerPassword: false,
   },
 };
 
@@ -199,6 +205,8 @@ export interface BusinessProfile {
   name: string;
   tradeName: string;
   logoUrl?: string;
+  websiteUrl?: string;
+  portalDomain?: string;
   industry: string;
   tin: string;
   representative: {
@@ -325,6 +333,7 @@ export interface Customer {
     surveyNotes?: string;
   };
   notes?: string;
+  portalPassword?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -347,6 +356,11 @@ export interface Invoice {
   customerAddress: string;
   customerMobile: string;
   customerEmail: string;
+  planId?: string;
+  planName?: string;
+  planSpeedMbps?: number;
+  monthlyFee?: number;
+  billingDay?: number;
   billingPeriodStart: string;
   billingPeriodEnd: string;
   issueDate: string;
@@ -369,6 +383,7 @@ export interface Invoice {
   paymentMethodUsed?: PaymentMethod;
   xenditInvoiceUrl?: string;
   xenditInvoiceId?: string;
+  allowDuplicate?: boolean;
   createdAt: string;
 }
 
@@ -782,6 +797,40 @@ export interface Expense {
   vendorName?: string;
   recordedBy?: string;
   notes?: string;
+}
+
+export type OperationalBillCategory =
+  | 'dia_transit'        // Internet DIA / Upstream Transit / Backhaul (e.g., PLDT, Globe, Converge)
+  | 'electricity'        // Electric Bill (e.g., CASURECO II, Tower Node Power)
+  | 'rent_lease'         // Pole attachment / Tower rent / Office & Hub Rent
+  | 'fiber_supplies'     // Fiber cables, splitters, drop wires, ONUs
+  | 'software_licenses'  // MikroTik license, billing software, domain/cloud
+  | 'maintenance'        // Generator fuel, vehicle maintenance, tools
+  | 'payroll'            // Linemen & staff salary
+  | 'taxes_permits'      // LGU, NTC, BIR, barangay clearance
+  | 'other';             // Miscellaneous payables
+
+export type BillFrequency = 'monthly' | 'quarterly' | 'semi_annual' | 'annual' | 'one_time';
+
+export type OperationalBillStatus = 'pending' | 'due_soon' | 'overdue' | 'paid';
+
+export interface OperationalBill {
+  id: string;
+  title: string;                 // e.g. "PLDT 1 Gbps Direct Internet Access (DIA)", "CASURECO II Main Hub Power"
+  category: OperationalBillCategory;
+  vendorName: string;            // e.g. "PLDT Enterprise", "CASURECO II", "Lagonoy Tower Lessor"
+  accountOrRefNumber?: string;   // e.g. "PLDT-00294821", "CASURECO-44920"
+  amount: number;                // e.g. 55000
+  dueDate: string;               // YYYY-MM-DD (e.g. "2026-09-15")
+  recurrence: BillFrequency;     // 'monthly' | 'one_time' | etc.
+  reminderDaysBefore: number;    // e.g. 3, 5, 7 days before due date
+  status: OperationalBillStatus; // 'pending' | 'due_soon' | 'overdue' | 'paid'
+  paidAt?: string;               // ISO date when marked as paid
+  paymentReference?: string;     // Receipt / Reference # e.g. "OR-99482"
+  paymentMethod?: 'cash' | 'gcash' | 'maya' | 'bank_transfer' | 'check';
+  notes?: string;
+  createdAt: string;
+  updatedAt?: string;
 }
 
 export type SmtpProviderPreset =

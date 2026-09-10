@@ -15,6 +15,7 @@ import {
   ExternalLink,
   ShieldCheck,
   Zap,
+  KeyRound,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import {
@@ -28,6 +29,7 @@ import {
   getRepairStatusBadge,
 } from '../../utils/formatters';
 import { generateInvoicePDF, generateOfficialReceiptPDF } from '../../utils/pdfGenerator';
+import { ResetCustomerPasswordModal } from './ResetCustomerPasswordModal';
 
 interface CustomerDetailModalProps {
   customerId: string;
@@ -48,6 +50,7 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
     customers,
     invoices,
     payments,
+    plans,
     repairOrders,
     napBoxes,
     businessProfile,
@@ -55,6 +58,7 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
     syncCustomerMikrotik,
     sendReminder,
     addCustomerWalletCredit,
+    hasPermission,
     setActiveTab: setGlobalActiveTab,
     setSearchTerm,
   } = useApp();
@@ -62,6 +66,7 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
   const [activeTab, setActiveTab] = useState<'profile' | 'invoices' | 'payments' | 'repairs'>('profile');
   const [showCreditInput, setShowCreditInput] = useState<boolean>(false);
   const [creditAmountInput, setCreditAmountInput] = useState<string>('');
+  const [showPasswordResetModal, setShowPasswordResetModal] = useState<boolean>(false);
 
   const customer = customers.find((c) => c.id === customerId);
   if (!customer) return null;
@@ -81,15 +86,21 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
   const customerRepairs = repairOrders.filter((r) => r.customerId === customer.id);
   const assignedNap = napBoxes.find((n) => n.id === customer.network.napBoxId);
 
+  const matchedPlan = plans.find((p) => p.id === customer.planId) ||
+                      plans.find((p) => p.name?.trim().toLowerCase() === customer.planName?.trim().toLowerCase()) ||
+                      plans[0];
+  const activePlanName = matchedPlan?.name || customer.planName;
+  const activeMonthlyFee = matchedPlan?.monthlyFee || customer.monthlyFee;
+
   const statusBadge = getCustomerStatusBadge(customer.status);
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95">
         {/* Modal Top Header */}
-        <div className="p-6 border-b border-slate-800 bg-slate-950/60 flex items-start justify-between">
+        <div className="p-6 border-b border-slate-800 bg-slate-950/60 flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-cyan-600 to-blue-600 flex items-center justify-center text-white text-xl font-bold shadow-lg shadow-cyan-500/20">
+            <div className="w-12 h-12 rounded-2xl bg-cyan-600/20 text-cyan-400 border border-cyan-500/30 flex items-center justify-center font-bold text-lg">
               {customer.fullName.charAt(0)}
             </div>
             <div>
@@ -107,7 +118,7 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
                   {customer.accountNo}
                 </span>
                 <span>•</span>
-                <span>{customer.planName} (₱{customer.monthlyFee.toLocaleString()}/mo)</span>
+                <span>{activePlanName} ({formatCurrency(activeMonthlyFee)}/mo)</span>
                 <span>•</span>
                 <span>Day {customer.billingDay} Cycle</span>
               </div>
@@ -183,6 +194,17 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
               <Radio className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
               <span>Client Portal</span>
             </button>
+
+            {hasPermission('canResetCustomerPassword') && (
+              <button
+                onClick={() => setShowPasswordResetModal(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/20 text-amber-300 hover:bg-amber-500 hover:text-slate-950 rounded-lg font-semibold transition-colors cursor-pointer"
+                title="Reset Subscriber Portal Password"
+              >
+                <KeyRound className="w-3.5 h-3.5" />
+                <span>Reset Password</span>
+              </button>
+            )}
           </div>
 
           <div className="flex items-center gap-4">
@@ -436,7 +458,7 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
                               </button>
                               <button
                                 onClick={() => {
-                                  const pdf = generateInvoicePDF(inv, businessProfile);
+                                  const pdf = generateInvoicePDF(inv, businessProfile, customer, plans);
                                   pdf.save(`${inv.invoiceNumber}_${customer.accountNo}.pdf`);
                                 }}
                                 className="px-2 py-1 bg-cyan-600/20 text-cyan-400 hover:bg-cyan-600 hover:text-white rounded-lg text-[11px] transition-colors"
@@ -563,6 +585,13 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
           )}
         </div>
       </div>
+
+      {/* Reset Customer Password Modal */}
+      <ResetCustomerPasswordModal
+        customer={customer}
+        isOpen={showPasswordResetModal}
+        onClose={() => setShowPasswordResetModal(false)}
+      />
     </div>
   );
 };

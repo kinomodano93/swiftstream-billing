@@ -57,6 +57,7 @@ export const COLLECTIONS = {
   SYSTEM_USERS: 'system_users',
   APPLICATIONS: 'online_applications',
   OUTAGE_BROADCASTS: 'outage_broadcasts',
+  OPERATIONAL_BILLS: 'operational_bills',
 } as const;
 
 /**

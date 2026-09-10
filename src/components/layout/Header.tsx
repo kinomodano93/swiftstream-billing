@@ -56,6 +56,8 @@ export const Header: React.FC<HeaderProps> = ({
     theme,
     toggleTheme,
     systemRole,
+    overdueOperationalBillsCount,
+    dueSoonOperationalBillsCount,
   } = useApp();
 
   const currentRoleMeta = SYSTEM_ROLES_CONFIG[systemRole] || SYSTEM_ROLES_CONFIG.admin;
@@ -137,6 +139,32 @@ export const Header: React.FC<HeaderProps> = ({
         >
           <Globe className="w-3.5 h-3.5 text-cyan-400" />
           <span className="hidden md:inline">Website</span>
+        </button>
+
+        {/* Bill Due Date Calendar quick access */}
+        <button
+          type="button"
+          onClick={() => setActiveTab('bill_calendar')}
+          className={`relative flex items-center gap-1.5 px-2.5 sm:px-3 py-2 rounded-xl text-xs font-semibold shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer ${
+            overdueOperationalBillsCount > 0
+              ? 'bg-rose-950/60 hover:bg-rose-900/70 text-rose-300 border border-rose-500/50 animate-pulse'
+              : dueSoonOperationalBillsCount > 0
+              ? 'bg-amber-950/60 hover:bg-amber-900/70 text-amber-300 border border-amber-500/50'
+              : 'bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800'
+          }`}
+          title="Operational Payables & Due Date Calendar (DIA, Power, Rent)"
+        >
+          <Calendar className="w-3.5 h-3.5 text-indigo-400" />
+          <span className="hidden lg:inline">Bill Calendar</span>
+          {(overdueOperationalBillsCount > 0 || dueSoonOperationalBillsCount > 0) && (
+            <span
+              className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold font-mono ${
+                overdueOperationalBillsCount > 0 ? 'bg-rose-500 text-white' : 'bg-amber-500 text-slate-950'
+              }`}
+            >
+              {overdueOperationalBillsCount > 0 ? overdueOperationalBillsCount : dueSoonOperationalBillsCount}
+            </span>
+          )}
         </button>
 
         {/* Collect Payment (POS) - Hidden for technician */}

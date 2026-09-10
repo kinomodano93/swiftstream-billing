@@ -13,6 +13,8 @@ import {
   ArrowRight,
   ShieldAlert,
   FileText,
+  CalendarDays,
+  Bell,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { StatCard } from './StatCard';
@@ -45,7 +47,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
     setSearchTerm,
     sendReminder,
     toggleCustomerStatus,
+    operationalBills,
+    overdueOperationalBillsCount,
+    dueSoonOperationalBillsCount,
   } = useApp();
+
+  const upcomingOperationalBills = operationalBills
+    .filter((b) => b.status !== 'paid')
+    .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
+    .slice(0, 4);
 
   // Metrics Calculations
   const activeSubscribers = customers.filter((c) => c.status === 'active');
@@ -170,6 +180,58 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <PlanDistributionChart />
         </div>
       </div>
+
+      {/* Operational Payables Due Reminder Widget (DIA, Power, Pole Leases) */}
+      {(overdueOperationalBillsCount > 0 || dueSoonOperationalBillsCount > 0 || upcomingOperationalBills.length > 0) && (
+        <div className="p-4 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-900/90 to-indigo-950/40 border border-slate-800 shadow-card flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div
+              className={`p-2.5 rounded-xl border ${
+                overdueOperationalBillsCount > 0
+                  ? 'bg-rose-500/20 text-rose-400 border-rose-500/30 animate-pulse'
+                  : dueSoonOperationalBillsCount > 0
+                  ? 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+                  : 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30'
+              }`}
+            >
+              <CalendarDays className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-bold text-white uppercase tracking-wider">
+                  Upcoming Operational Payables
+                </span>
+                {overdueOperationalBillsCount > 0 && (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                    {overdueOperationalBillsCount} Overdue
+                  </span>
+                )}
+                {dueSoonOperationalBillsCount > 0 && (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                    {dueSoonOperationalBillsCount} Due Soon
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">
+                {upcomingOperationalBills.length > 0
+                  ? upcomingOperationalBills
+                      .slice(0, 2)
+                      .map((b) => `${b.vendorName} (${formatCurrency(b.amount)} • Due ${formatDate(b.dueDate)})`)
+                      .join(' • ')
+                  : 'All operational lines, power and tower leases are settled.'}
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={() => setActiveTab('bill_calendar')}
+            className="self-end md:self-center shrink-0 px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow-md shadow-indigo-600/20 flex items-center gap-1.5 transition-all cursor-pointer"
+          >
+            <span>Open Bill Due Calendar</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Two Column Section: Overdue Attention List & Urgent Repairs */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

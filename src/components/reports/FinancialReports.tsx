@@ -284,7 +284,7 @@ export const FinancialReports: React.FC = () => {
   // Comprehensive Financial & Expense CSV Export
   const exportFinancialReport = () => {
     const report = [
-      ['SWIFTSTREAM TELECOMMUNICATION & REPAIR SHOP - EXECUTIVE FINANCIAL STATEMENT'],
+      ['SWIFTSTREAM TELECOMMUNICATIONS - EXECUTIVE FINANCIAL STATEMENT'],
       ['Generated On', new Date().toISOString()],
       [''],
       ['========================================================================'],

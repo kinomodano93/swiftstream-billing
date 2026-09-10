@@ -15,12 +15,14 @@ import {
   Radio,
   ExternalLink,
   Zap,
+  KeyRound,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { Customer, CustomerStatus } from '../../types';
 import { formatCurrency, formatPhoneNumber, getCustomerStatusBadge } from '../../utils/formatters';
 import { ProvisionModal } from './ProvisionModal';
 import { ConfirmDeleteModal } from '../common/ConfirmDeleteModal';
+import { ResetCustomerPasswordModal } from './ResetCustomerPasswordModal';
 
 interface CustomerListProps {
   onOpenCustomerModal: (customer?: Customer) => void;
@@ -49,6 +51,7 @@ export const CustomerList: React.FC<CustomerListProps> = ({
   const [planFilter, setPlanFilter] = useState<string>('all');
   const [selectedCustomerForProvision, setSelectedCustomerForProvision] = useState<Customer | null>(null);
   const [customerToDelete, setCustomerToDelete] = useState<Customer | null>(null);
+  const [customerForPasswordReset, setCustomerForPasswordReset] = useState<Customer | null>(null);
 
   // Extract unique barangays
   const barangays = Array.from(new Set(customers.map((c) => c.address.barangay)));
@@ -392,6 +395,16 @@ export const CustomerList: React.FC<CustomerListProps> = ({
                             <Wifi className="w-3.5 h-3.5" />
                           </button>
 
+                          {hasPermission('canResetCustomerPassword') && (
+                            <button
+                              onClick={() => setCustomerForPasswordReset(customer)}
+                              className="p-1.5 bg-amber-500/10 text-amber-400 hover:bg-amber-500 hover:text-slate-950 rounded-lg transition-all cursor-pointer"
+                              title="Reset Subscriber Portal Password"
+                            >
+                              <KeyRound className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+
                           {hasPermission('canDeleteCustomer') && (
                             <button
                               onClick={() => setCustomerToDelete(customer)}
@@ -419,6 +432,13 @@ export const CustomerList: React.FC<CustomerListProps> = ({
           onClose={() => setSelectedCustomerForProvision(null)}
         />
       )}
+
+      {/* Reset Customer Password Modal */}
+      <ResetCustomerPasswordModal
+        customer={customerForPasswordReset}
+        isOpen={!!customerForPasswordReset}
+        onClose={() => setCustomerForPasswordReset(null)}
+      />
 
       {/* Confirmation Dialog for Customer Deletion */}
       <ConfirmDeleteModal

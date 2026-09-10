@@ -18,11 +18,14 @@ import {
   PaymentSubmission,
   CoverageArea,
   StaffUser,
+  OperationalBill,
 } from '../types';
 
 export const initialBusinessProfile: BusinessProfile = {
-  name: 'SWIFTSTREAM TELECOMMUNICATION & REPAIR SHOP',
+  name: 'SWIFTSTREAM TELECOMMUNICATIONS',
   tradeName: 'SwiftStream IT Services & Fiber Internet',
+  websiteUrl: 'https://swiftstream-portal.web.app',
+  portalDomain: 'https://swiftstream-portal.web.app',
   industry: 'Information Technology & Telecommunications',
   tin: '468975349000',
   representative: {
@@ -154,10 +157,10 @@ export const initialPlans: Plan[] = [
     name: 'Flexibix Peak 6000',
     speedMbps: 500,
     monthlyFee: 6000,
-    installationFee: 0,
+    installationFee: 1500,
     category: 'enterprise',
     description: 'Ultra High-Speed Dedicated Fiber with Symmetric 1:1 CIR for Heavy Business Operations & Cyber Cafes.',
-    features: ['500 Mbps Symmetric Dedicated', 'Static Public IPv4', '24/7 Priority VIP Support', '99.9% SLA Guarantee', 'Dual WAN Failover Ready'],
+    features: ['500 Mbps Symmetric Dedicated', 'Static Public IPv4', '24/7 Priority VIP Support', '99.9% SLA Guarantee', 'Dual WAN Failover Ready', 'Standard Installation: ₱1,500'],
     isActive: true,
   },
   {
@@ -168,7 +171,7 @@ export const initialPlans: Plan[] = [
     installationFee: 1500,
     category: 'residential',
     description: 'Optimal for remote work, 4K streaming, multi-device homes, and content creators.',
-    features: ['100 Mbps Unlimited Fiber', 'Dual-Band WiFi 6 ONU', 'Free Installation Promo', 'Low-Latency Gaming Route'],
+    features: ['100 Mbps Unlimited Fiber', 'Dual-Band WiFi 6 ONU', 'Standard Installation: ₱1,500', 'Low-Latency Gaming Route'],
     isActive: true,
   },
   {
@@ -179,7 +182,7 @@ export const initialPlans: Plan[] = [
     installationFee: 1500,
     category: 'residential',
     description: 'High-speed household favorite for smooth streaming, Zoom, and social media.',
-    features: ['50 Mbps Unlimited Fiber', 'Dual-Band Gigabit ONU', 'Unlimited Data No Cap', '24/7 Customer Hotline'],
+    features: ['50 Mbps Unlimited Fiber', 'Dual-Band Gigabit ONU', 'Unlimited Data No Cap', '24/7 Customer Hotline', 'Standard Installation: ₱1,500'],
     isActive: true,
   },
   {
@@ -187,10 +190,10 @@ export const initialPlans: Plan[] = [
     name: 'SwiftStream Starter Fiber 25M',
     speedMbps: 25,
     monthlyFee: 899,
-    installationFee: 1200,
+    installationFee: 1500,
     category: 'residential',
     description: 'Budget-friendly fiber package for students, small households, and light surfing.',
-    features: ['25 Mbps Unlimited Fiber', 'Standard Fiber Router', 'Zero Data Cap'],
+    features: ['25 Mbps Unlimited Fiber', 'Standard Fiber Router', 'Zero Data Cap', 'Standard Installation: ₱1,500'],
     isActive: true,
   },
   {
@@ -198,10 +201,10 @@ export const initialPlans: Plan[] = [
     name: 'SwiftStream Commercial Gig 200M',
     speedMbps: 200,
     monthlyFee: 2999,
-    installationFee: 2000,
+    installationFee: 1500,
     category: 'business',
     description: 'Enterprise grade connection designed for offices, resorts, hotels, and retail stores.',
-    features: ['200 Mbps Fiber', '2 Static IP addresses', 'Priority Field Support', 'Dual-Band Mesh System'],
+    features: ['200 Mbps Fiber', '2 Static IP addresses', 'Priority Field Support', 'Dual-Band Mesh System', 'Standard Installation: ₱1,500'],
     isActive: true,
   },
   {
@@ -209,10 +212,10 @@ export const initialPlans: Plan[] = [
     name: 'Community Vendo Piso-WiFi Feed',
     speedMbps: 80,
     monthlyFee: 1500,
-    installationFee: 2500,
+    installationFee: 1500,
     category: 'piso_wifi',
     description: 'Dedicated high-burst bandwidth feeder line for coin-operated outdoor WiFi vending machines.',
-    features: ['80 Mbps High-Burst Queue', 'Outdoor AP Compatible', 'Isolated VLAN', 'Bandwidth Limiter Support'],
+    features: ['80 Mbps High-Burst Queue', 'Outdoor AP Compatible', 'Isolated VLAN', 'Bandwidth Limiter Support', 'Standard Installation: ₱1,500'],
     isActive: true,
   },
 ];
@@ -270,6 +273,86 @@ export const initialStaffUsers: StaffUser[] = [
     role: 'admin',
     status: 'active',
     notes: 'Primary System Administrator & NOC Operations Head',
+    createdAt: new Date().toISOString(),
+  },
+];
+
+const now = new Date();
+const currentYear = now.getFullYear();
+const currentMonth = String(now.getMonth() + 1).padStart(2, '0');
+const nextMonthNum = (now.getMonth() + 2) > 12 ? 1 : now.getMonth() + 2;
+const nextMonthYear = (now.getMonth() + 2) > 12 ? currentYear + 1 : currentYear;
+const nextMonthStr = String(nextMonthNum).padStart(2, '0');
+
+export const initialOperationalBills: OperationalBill[] = [
+  {
+    id: 'bill-dia-01',
+    title: 'PLDT Enterprise 1 Gbps DIA Circuit & Backhaul',
+    category: 'dia_transit',
+    vendorName: 'PLDT Enterprise',
+    accountOrRefNumber: 'PLDT-DIA-092841',
+    amount: 55000,
+    dueDate: `${currentYear}-${currentMonth}-15`,
+    recurrence: 'monthly',
+    reminderDaysBefore: 5,
+    status: 'pending',
+    notes: 'Primary upstream dedicated internet bandwidth circuit for SwiftStream core network in Lagonoy.',
+    createdAt: new Date().toISOString(),
+  },
+  {
+    id: 'bill-elec-01',
+    title: 'CASURECO II Power - Central Server Room & OLT Nodes',
+    category: 'electricity',
+    vendorName: 'CASURECO II Electric Cooperative',
+    accountOrRefNumber: 'CAS-084-29184',
+    amount: 14850,
+    dueDate: `${currentYear}-${currentMonth}-20`,
+    recurrence: 'monthly',
+    reminderDaysBefore: 4,
+    status: 'pending',
+    notes: 'Commercial 24/7 power meter for core servers, Huawei OLT chassis, and battery rectifier bank.',
+    createdAt: new Date().toISOString(),
+  },
+  {
+    id: 'bill-rent-01',
+    title: 'Lagonoy Relay Tower Site Ground Lease & Office Rent',
+    category: 'rent_lease',
+    vendorName: 'Lagonoy Commercial Property Lease',
+    accountOrRefNumber: 'LEASE-TOWER-01',
+    amount: 18000,
+    dueDate: `${nextMonthYear}-${nextMonthStr}-05`,
+    recurrence: 'monthly',
+    reminderDaysBefore: 5,
+    status: 'pending',
+    notes: 'Main NOC operations center, repair shop, and 45-meter antenna lattice tower ground rental.',
+    createdAt: new Date().toISOString(),
+  },
+  {
+    id: 'bill-poles-01',
+    title: 'CASURECO II Joint-Pole Attachment Rentals (Lagonoy Barangays)',
+    category: 'rent_lease',
+    vendorName: 'CASURECO II Distribution Poles',
+    accountOrRefNumber: 'POLE-ATTACH-2026',
+    amount: 8500,
+    dueDate: `${currentYear}-${currentMonth}-28`,
+    recurrence: 'monthly',
+    reminderDaysBefore: 7,
+    status: 'pending',
+    notes: 'Distribution pole attachment fees for aerial fiber optic lines across 20+ barangays.',
+    createdAt: new Date().toISOString(),
+  },
+  {
+    id: 'bill-ntc-01',
+    title: 'NTC Spectrum & Value Added Services (VAS) Permit',
+    category: 'taxes_permits',
+    vendorName: 'National Telecommunications Commission (NTC R5)',
+    accountOrRefNumber: 'NTC-VAS-R5-2026',
+    amount: 12500,
+    dueDate: `${currentYear}-${currentMonth}-30`,
+    recurrence: 'quarterly',
+    reminderDaysBefore: 7,
+    status: 'pending',
+    notes: 'Regulatory compliance certification and spectrum allocation permit.',
     createdAt: new Date().toISOString(),
   },
 ];
