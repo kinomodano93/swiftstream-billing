@@ -36,6 +36,8 @@ export interface AppUserProfile {
   address?: {
     street: string;
     barangay: string;
+    city?: string;
+    province?: string;
     landmark?: string;
   };
   createdAt: string;
@@ -217,6 +219,8 @@ export const signUpWithEmail = async (
     address?: {
       street: string;
       barangay: string;
+      city?: string;
+      province?: string;
       landmark?: string;
     };
   }

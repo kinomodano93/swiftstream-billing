@@ -18,6 +18,7 @@ import {
 import { useApp } from '../../context/AppContext';
 import { OnlineApplication, OnlineApplicationStatus } from '../../types';
 import { saveFirestoreDoc, subscribeToCollection, COLLECTIONS } from '../../services/firestoreService';
+import { syncCustomerApprovalToUser } from '../../services/authService';
 import { LAGONOY_BARANGAYS, PRESENTACION_BARANGAYS } from '../network/CoverageAreaManager';
 
 export const ClientApplicationManager: React.FC = () => {
@@ -25,7 +26,9 @@ export const ClientApplicationManager: React.FC = () => {
     plans,
     coverageAreas,
     napBoxes,
+    customers,
     addCustomer,
+    updateCustomer,
   } = useApp();
 
   // Clean online applications state with persistent local storage
@@ -146,39 +149,69 @@ export const ClientApplicationManager: React.FC = () => {
 
   const handleApproveAndConvert = (app: OnlineApplication) => {
     const plan = plans.find((p) => p.id === app.preferredPlanId) || plans[0];
-    const generatedAccountNo = `SWIFT-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
     const assignedNap = napBoxes[0];
 
-    // Create new customer
-    addCustomer({
-      accountNo: generatedAccountNo,
-      fullName: app.applicantName,
-      email: app.email,
-      mobile: app.phone,
-      address: {
-        street: app.address,
-        barangay: app.barangay,
-        city: app.city,
-        province: app.province,
-        landmark: app.landmark,
-      },
-      planId: app.preferredPlanId || plan?.id || 'p2',
-      planName: plan?.name || 'Swift Fiber 50 Mbps',
-      monthlyFee: plan?.monthlyFee || 1299,
-      billingDay: 1,
-      status: 'pending_install',
-      installationDate: app.surveyDate || new Date().toISOString().slice(0, 10),
-      balance: 0,
-      advanceDeposit: 0,
-      network: {
-        pppoeUsername: `swift_${app.applicantName.toLowerCase().replace(/[^a-z0-9]/g, '')}`,
-        ipAddress: `10.200.14.${Math.floor(10 + Math.random() * 200)}`,
-        napBoxId: assignedNap?.id || 'nap-01',
-        napPortNumber: 1,
-        isMikrotikSynced: false,
-      },
-      notes: `Converted from Online Application ${app.applicationNumber}. Notes: ${app.notes || 'None'}`,
-    });
+    const existingCust = customers.find(
+      (c) =>
+        c.accountNo === app.applicationNumber ||
+        (app.email && c.email?.toLowerCase().trim() === app.email.toLowerCase().trim())
+    );
+
+    const targetAccountNo =
+      existingCust?.accountNo ||
+      app.applicationNumber ||
+      `SWIFT-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+    if (existingCust) {
+      updateCustomer(existingCust.id, {
+        status: 'pending_install',
+        notes: `${existingCust.notes || ''} | Approved from Online Application ${app.applicationNumber}`,
+      });
+      if (app.email || existingCust.email) {
+        syncCustomerApprovalToUser(app.email || existingCust.email || existingCust.id, existingCust);
+      }
+    } else {
+      // Create new customer
+      addCustomer({
+        accountNo: targetAccountNo,
+        fullName: app.applicantName,
+        email: app.email,
+        mobile: app.phone,
+        address: {
+          street: app.address,
+          barangay: app.barangay,
+          city: app.city,
+          province: app.province,
+          landmark: app.landmark,
+        },
+        planId: app.preferredPlanId || plan?.id || 'p2',
+        planName: plan?.name || 'Swift Fiber 50 Mbps',
+        monthlyFee: plan?.monthlyFee || 1299,
+        billingDay: 1,
+        status: 'pending_install',
+        installationDate: app.surveyDate || new Date().toISOString().slice(0, 10),
+        balance: 0,
+        advanceDeposit: 0,
+        network: {
+          pppoeUsername: `swift_${app.applicantName.toLowerCase().replace(/[^a-z0-9]/g, '')}`,
+          ipAddress: `10.200.14.${Math.floor(10 + Math.random() * 200)}`,
+          napBoxId: assignedNap?.id || 'nap-01',
+          napPortNumber: 1,
+          isMikrotikSynced: false,
+        },
+        notes: `Converted from Online Application ${app.applicationNumber}. Notes: ${app.notes || 'None'}`,
+      });
+
+      if (app.email) {
+        syncCustomerApprovalToUser(app.email, {
+          accountNo: targetAccountNo,
+          fullName: app.applicantName,
+          planName: plan?.name,
+          planId: plan?.id,
+          mobile: app.phone,
+        });
+      }
+    }
 
     const approvedApp: OnlineApplication = {
       ...app,

@@ -127,6 +127,7 @@ const MainLayout: React.FC = () => {
               openAuthModal('signin');
             }
           }}
+          onOpenSignIn={(email) => openAuthModal('signin', email)}
         />
         <AuthModal
           isOpen={isAuthModalOpen}

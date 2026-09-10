@@ -36,11 +36,15 @@ import {
   Minus,
   Plus,
   Activity,
+  AlertCircle,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { useApp } from '../../context/AppContext';
 import { Plan, OnlineApplication } from '../../types';
 import { saveFirestoreDoc, COLLECTIONS } from '../../services/firestoreService';
+import { signUpWithEmail } from '../../services/authService';
 import { formatCurrency, formatPhoneNumber } from '../../utils/formatters';
 import { GeminiAiAssistant } from '../ai/GeminiAiAssistant';
 import { LAGONOY_BARANGAYS, PRESENTACION_BARANGAYS } from '../network/CoverageAreaManager';
@@ -48,11 +52,13 @@ import { LAGONOY_BARANGAYS, PRESENTACION_BARANGAYS } from '../network/CoverageAr
 interface HomePageProps {
   onOpenClientPortal: (customerId?: string) => void;
   onOpenAdminDashboard: () => void;
+  onOpenSignIn?: (email?: string) => void;
 }
 
 export const HomePage: React.FC<HomePageProps> = ({
   onOpenClientPortal,
   onOpenAdminDashboard,
+  onOpenSignIn,
 }) => {
   const {
     plans,
@@ -86,6 +92,7 @@ export const HomePage: React.FC<HomePageProps> = ({
     speedMbps: number;
     monthlyFee: number;
     mobile: string;
+    email: string;
     address: string;
     installDate: string;
   }
@@ -94,6 +101,12 @@ export const HomePage: React.FC<HomePageProps> = ({
   const [applicantName, setApplicantName] = useState<string>('');
   const [applicantMobile, setApplicantMobile] = useState<string>('09');
   const [applicantEmail, setApplicantEmail] = useState<string>('');
+  const [applicantPassword, setApplicantPassword] = useState<string>('');
+  const [applicantConfirmPassword, setApplicantConfirmPassword] = useState<string>('');
+  const [showPassword, setShowPassword] = useState<boolean>(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState<boolean>(false);
+  const [signUpLoading, setSignUpLoading] = useState<boolean>(false);
+  const [signUpError, setSignUpError] = useState<string | null>(null);
   const [applicantInstallDate, setApplicantInstallDate] = useState<string>(
     new Date().toISOString().slice(0, 10)
   );
@@ -259,6 +272,9 @@ export const HomePage: React.FC<HomePageProps> = ({
     if (defaultBarangay) {
       setApplicantBarangay(defaultBarangay);
     }
+    setSignUpError(null);
+    setApplicantPassword('');
+    setApplicantConfirmPassword('');
     setSignUpSuccessInfo(null);
     setIsCopied(false);
     setShowSignUpModal(true);
@@ -271,123 +287,203 @@ export const HomePage: React.FC<HomePageProps> = ({
     setTimeout(() => setIsCopied(false), 2000);
   };
 
-  const handleSignUpSubmit = (e: React.FormEvent) => {
+  const handleSignUpSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!applicantName.trim() || !applicantMobile.trim() || !applicantStreet.trim()) {
-      showToast('error', 'Missing Information', 'Please fill in your complete name, mobile number, and installation address.');
+    setSignUpError(null);
+
+    if (!applicantName.trim()) {
+      setSignUpError('Please enter your complete applicant full name.');
+      return;
+    }
+    if (!applicantMobile.trim() || applicantMobile.trim().length < 11) {
+      setSignUpError('Please provide a valid 11-digit Philippine mobile number (e.g. 0917 123 4567).');
+      return;
+    }
+    const cleanEmail = applicantEmail.trim().toLowerCase();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!cleanEmail || !emailRegex.test(cleanEmail)) {
+      setSignUpError('Please enter a valid email address (e.g. juan@gmail.com). Email is required for your Subscriber Portal login.');
+      return;
+    }
+    if (!applicantPassword || applicantPassword.length < 6) {
+      setSignUpError('Password must be at least 6 characters long.');
+      return;
+    }
+    if (applicantPassword !== applicantConfirmPassword) {
+      setSignUpError('Passwords do not match. Please re-enter your password to confirm.');
+      return;
+    }
+    if (!applicantStreet.trim()) {
+      setSignUpError('Please enter your street address, zone, purok, or house number.');
       return;
     }
 
-    const selectedPlan = currentSelectedPlan || plans[0];
-    const year = new Date().getFullYear();
-    const generatedAccountNo = `SWIFT-${year}-${String(Math.floor(Math.random() * 900) + 100)}`;
-    const randomIp = `192.168.10.${Math.floor(Math.random() * 200 + 20)}`;
-    const assignedNap = napBoxes[0];
+    setSignUpLoading(true);
 
-    const isPresentacion = applicantMunicipality === 'Presentacion' || PRESENTACION_BARANGAYS.some(
-      (b) => b.toLowerCase() === applicantBarangay.toLowerCase()
-    );
-    const targetCity = isPresentacion ? 'Presentacion' : (businessProfile.address.city || 'Lagonoy');
-    const targetProvince = businessProfile.address.province || 'Camarines Sur';
+    try {
+      const selectedPlan = currentSelectedPlan || plans[0];
+      const year = new Date().getFullYear();
+      const generatedAccountNo = `SWIFT-${year}-${String(Math.floor(Math.random() * 900) + 100)}`;
+      const randomIp = `192.168.10.${Math.floor(Math.random() * 200 + 20)}`;
+      const assignedNap = napBoxes[0];
 
-    // 1. Add customer to database
-    addCustomer({
-      accountNo: generatedAccountNo,
-      fullName: applicantName.trim(),
-      mobile: applicantMobile.trim(),
-      email: applicantEmail.trim(),
-      address: {
-        street: applicantStreet.trim(),
+      const isPresentacion = applicantMunicipality === 'Presentacion' || PRESENTACION_BARANGAYS.some(
+        (b) => b.toLowerCase() === applicantBarangay.toLowerCase()
+      );
+      const targetCity = isPresentacion ? 'Presentacion' : (businessProfile.address.city || 'Lagonoy');
+      const targetProvince = businessProfile.address.province || 'Camarines Sur';
+
+      // 1. Register subscriber account in Firebase Authentication & Firestore system_users
+      try {
+        await signUpWithEmail(
+          cleanEmail,
+          applicantPassword,
+          applicantName.trim(),
+          'subscriber',
+          {
+            accountNo: generatedAccountNo,
+            planId: selectedPlan.id,
+            planName: selectedPlan.name,
+            monthlyFee: selectedPlan.monthlyFee,
+            mobile: applicantMobile.trim(),
+            installationDate: applicantInstallDate,
+            address: {
+              street: applicantStreet.trim(),
+              barangay: applicantBarangay.trim(),
+              city: targetCity,
+              province: targetProvince,
+              landmark: applicantLandmark.trim(),
+            },
+          }
+        );
+      } catch (authErr: any) {
+        console.warn('Firebase Auth user registration info:', authErr);
+        if (authErr?.code === 'auth/email-already-in-use') {
+          setSignUpError('This email address is already registered. If you already submitted an application, please click "Sign In" instead, or use a different email.');
+          setSignUpLoading(false);
+          return;
+        } else if (authErr?.code === 'auth/weak-password') {
+          setSignUpError('Password is too weak. Please choose a password with at least 6 characters.');
+          setSignUpLoading(false);
+          return;
+        } else if (authErr?.code === 'auth/invalid-email') {
+          setSignUpError('Invalid email address format. Please check your email.');
+          setSignUpLoading(false);
+          return;
+        } else if (authErr?.message && !authErr.message.includes('offline')) {
+          setSignUpError(`Registration error: ${authErr.message}`);
+          setSignUpLoading(false);
+          return;
+        }
+      }
+
+      // 2. Add customer to database with status 'pending_approval'
+      addCustomer({
+        accountNo: generatedAccountNo,
+        fullName: applicantName.trim(),
+        mobile: applicantMobile.trim(),
+        email: cleanEmail,
+        address: {
+          street: applicantStreet.trim(),
+          barangay: applicantBarangay.trim(),
+          city: targetCity,
+          province: targetProvince,
+          landmark: applicantLandmark.trim(),
+        },
+        planId: selectedPlan.id,
+        planName: selectedPlan.name,
+        monthlyFee: selectedPlan.monthlyFee,
+        billingDay: 1,
+        status: 'pending_approval',
+        installationDate: applicantInstallDate || new Date().toISOString().slice(0, 10),
+        balance: 0,
+        advanceDeposit: 0,
+        network: {
+          pppoeUsername: `swift_${generatedAccountNo.toLowerCase()}`,
+          ipAddress: randomIp,
+          napBoxId: assignedNap?.id || 'nap-01-binauahan',
+          napPortNumber: 5,
+          onuSerial: 'HWTC-NEWAPPLICANT',
+          routerModel: 'Gigabit Dual-Band WiFi 6 ONU',
+          vlanId: '100',
+          oltPonPort: 'PON-1/1',
+          isMikrotikSynced: false,
+        },
+        notes: `New online application submitted via SwiftStream Website (${targetCity}). Landmark: ${applicantLandmark || 'N/A'}. Preferred Install: ${applicantInstallDate}`,
+      });
+
+      // 3. Also log as an OnlineApplication in storage & Firestore
+      const newApp: OnlineApplication = {
+        id: `app_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+        applicationNumber: generatedAccountNo,
+        applicantName: applicantName.trim(),
+        phone: applicantMobile.trim(),
+        email: cleanEmail,
+        address: applicantStreet.trim(),
         barangay: applicantBarangay.trim(),
         city: targetCity,
         province: targetProvince,
         landmark: applicantLandmark.trim(),
-      },
-      planId: selectedPlan.id,
-      planName: selectedPlan.name,
-      monthlyFee: selectedPlan.monthlyFee,
-      billingDay: 1,
-      status: 'pending_install',
-      installationDate: applicantInstallDate || new Date().toISOString().slice(0, 10),
-      balance: 0,
-      advanceDeposit: 0,
-      network: {
-        pppoeUsername: `swift_${generatedAccountNo.toLowerCase()}`,
-        ipAddress: randomIp,
-        napBoxId: assignedNap?.id || 'nap-01-binauahan',
-        napPortNumber: 5,
-        onuSerial: 'HWTC-NEWAPPLICANT',
-        routerModel: 'Gigabit Dual-Band WiFi 6 ONU',
-        vlanId: '100',
-        oltPonPort: 'PON-1/1',
-        isMikrotikSynced: false,
-      },
-      notes: `New online application submitted via SwiftStream Website (${targetCity}). Landmark: ${applicantLandmark || 'N/A'}. Preferred Install: ${applicantInstallDate}`,
-    });
+        preferredPlanId: selectedPlan.id,
+        preferredPlanName: selectedPlan.name,
+        preferredSpeedMbps: selectedPlan.speedMbps,
+        monthlyFee: selectedPlan.monthlyFee,
+        status: 'pending',
+        notes: `Applied online via website (${targetCity}). Preferred date: ${applicantInstallDate || 'Earliest available'}`,
+        surveyDate: applicantInstallDate,
+        createdAt: new Date().toISOString(),
+      };
 
-    // 2. Also log as an OnlineApplication in storage & Firestore
-    const newApp: OnlineApplication = {
-      id: `app_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
-      applicationNumber: generatedAccountNo,
-      applicantName: applicantName.trim(),
-      phone: applicantMobile.trim(),
-      email: applicantEmail.trim(),
-      address: applicantStreet.trim(),
-      barangay: applicantBarangay.trim(),
-      city: targetCity,
-      province: targetProvince,
-      landmark: applicantLandmark.trim(),
-      preferredPlanId: selectedPlan.id,
-      preferredPlanName: selectedPlan.name,
-      preferredSpeedMbps: selectedPlan.speedMbps,
-      monthlyFee: selectedPlan.monthlyFee,
-      status: 'pending',
-      notes: `Applied online via website (${targetCity}). Preferred date: ${applicantInstallDate || 'Earliest available'}`,
-      surveyDate: applicantInstallDate,
-      createdAt: new Date().toISOString(),
-    };
+      try {
+        const existingAppsStr = localStorage.getItem('swiftstream_online_applications_v4');
+        const existingApps: OnlineApplication[] = existingAppsStr ? JSON.parse(existingAppsStr) : [];
+        localStorage.setItem('swiftstream_online_applications_v4', JSON.stringify([newApp, ...existingApps]));
+        saveFirestoreDoc(COLLECTIONS.APPLICATIONS, newApp);
+      } catch (_) {}
 
-    try {
-      const existingAppsStr = localStorage.getItem('swiftstream_online_applications_v4');
-      const existingApps: OnlineApplication[] = existingAppsStr ? JSON.parse(existingAppsStr) : [];
-      localStorage.setItem('swiftstream_online_applications_v4', JSON.stringify([newApp, ...existingApps]));
-      saveFirestoreDoc(COLLECTIONS.APPLICATIONS, newApp);
-    } catch (_) {}
+      try {
+        confetti({
+          particleCount: 100,
+          spread: 70,
+          origin: { y: 0.6 },
+        });
+      } catch {
+        // ignore
+      }
 
-    try {
-      confetti({
-        particleCount: 100,
-        spread: 70,
-        origin: { y: 0.6 },
+      setSignUpSuccessInfo({
+        accountNo: generatedAccountNo,
+        name: applicantName.trim(),
+        planName: selectedPlan.name,
+        speedMbps: selectedPlan.speedMbps,
+        monthlyFee: selectedPlan.monthlyFee,
+        mobile: applicantMobile.trim(),
+        email: cleanEmail,
+        address: `${applicantStreet.trim()}, Brgy. ${applicantBarangay.trim()}, ${targetCity}`,
+        installDate: applicantInstallDate || new Date().toISOString().slice(0, 10),
       });
-    } catch {
-      // ignore
+
+      showToast(
+        'success',
+        'Application Submitted',
+        `Your application for ${selectedPlan.name} has been received! Account #${generatedAccountNo}`
+      );
+
+      setApplicantName('');
+      setApplicantMobile('09');
+      setApplicantEmail('');
+      setApplicantPassword('');
+      setApplicantConfirmPassword('');
+      setApplicantStreet('');
+      setApplicantLandmark('');
+      setApplicantMunicipality('Lagonoy');
+      setApplicantBarangay(lagonoyList[0] || 'Binauahan');
+    } catch (err: any) {
+      console.error('Error submitting application:', err);
+      setSignUpError(err?.message || 'Failed to submit application. Please check your details and try again.');
+    } finally {
+      setSignUpLoading(false);
     }
-
-    setSignUpSuccessInfo({
-      accountNo: generatedAccountNo,
-      name: applicantName.trim(),
-      planName: selectedPlan.name,
-      speedMbps: selectedPlan.speedMbps,
-      monthlyFee: selectedPlan.monthlyFee,
-      mobile: applicantMobile.trim(),
-      address: `${applicantStreet.trim()}, Brgy. ${applicantBarangay.trim()}, ${targetCity}`,
-      installDate: applicantInstallDate || new Date().toISOString().slice(0, 10),
-    });
-
-    showToast(
-      'success',
-      'Application Submitted',
-      `Your application for ${selectedPlan.name} has been received! Account #${generatedAccountNo}`
-    );
-
-    setApplicantName('');
-    setApplicantMobile('09');
-    setApplicantEmail('');
-    setApplicantStreet('');
-    setApplicantLandmark('');
-    setApplicantMunicipality('Lagonoy');
-    setApplicantBarangay(lagonoyList[0] || 'Binauahan');
   };
 
   const scrollToSection = (id: string) => {
@@ -1660,12 +1756,23 @@ export const HomePage: React.FC<HomePageProps> = ({
                       </strong>
                     </div>
                     <div>
+                      <span className="text-slate-400 block">Portal Login Username:</span>
+                      <span className="text-cyan-300 font-medium font-mono">{signUpSuccessInfo.email}</span>
+                    </div>
+                    <div>
                       <span className="text-slate-400 block">Installation Address:</span>
                       <span className="text-slate-200">{signUpSuccessInfo.address}</span>
                     </div>
+                  </div>
+
+                  {/* Firebase Auth Registration Status Callout */}
+                  <div className="p-3 bg-cyan-950/40 border border-cyan-800/60 rounded-xl text-[11px] text-cyan-200 flex items-start gap-2.5">
+                    <ShieldCheck className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
                     <div>
-                      <span className="text-slate-400 block">Target Installation:</span>
-                      <span className="text-cyan-300 font-semibold">{signUpSuccessInfo.installDate}</span>
+                      <p className="font-semibold text-cyan-100">Credentials Stored in Firebase</p>
+                      <p className="text-slate-300 mt-0.5">
+                        Your account credentials ({signUpSuccessInfo.email}) have been saved. Once our administrators conduct the line survey and approve your connection, you will be able to log in to your Subscriber Portal using your password.
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -1715,6 +1822,21 @@ export const HomePage: React.FC<HomePageProps> = ({
                   >
                     Done & Return to Website
                   </button>
+                  {onOpenSignIn && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const email = signUpSuccessInfo.email;
+                        setShowSignUpModal(false);
+                        setSignUpSuccessInfo(null);
+                        onOpenSignIn(email);
+                      }}
+                      className="w-full sm:w-auto px-5 py-2.5 bg-slate-700 hover:bg-slate-600 text-slate-100 font-bold rounded-xl text-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                    >
+                      <Lock className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>Sign In</span>
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => {
@@ -1732,6 +1854,16 @@ export const HomePage: React.FC<HomePageProps> = ({
             ) : (
               /* Application Form */
               <form onSubmit={handleSignUpSubmit} className="p-6 sm:p-8 space-y-5">
+                {signUpError && (
+                  <div className="p-3.5 rounded-2xl bg-rose-950/50 border border-rose-800 text-xs text-rose-200 flex items-start gap-2.5 animate-in fade-in">
+                    <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                    <div className="flex-1">
+                      <p className="font-semibold text-rose-300">Application Notice</p>
+                      <p className="text-rose-200/90 text-[11px] mt-0.5">{signUpError}</p>
+                    </div>
+                  </div>
+                )}
+
                 {/* Selected Plan Display & Selector */}
                 <div className="p-4 rounded-2xl bg-gradient-to-br from-slate-950 to-cyan-950/30 border border-cyan-500/40 space-y-3">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -1779,17 +1911,17 @@ export const HomePage: React.FC<HomePageProps> = ({
                   </div>
                 </div>
 
-                {/* Form Fields: Personal Info */}
+                {/* Form Fields: Personal Info & Login Credentials */}
                 <div className="space-y-3.5">
                   <h5 className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
                     <Users className="w-3.5 h-3.5 text-cyan-400" />
-                    <span>Applicant Information</span>
+                    <span>Applicant Contact & Portal Login Credentials</span>
                   </h5>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block text-[11px] font-bold text-slate-300 mb-1">
-                        Full Name <span className="text-rose-400">*</span>
+                        Full Name (Applicant) <span className="text-rose-400">*</span>
                       </label>
                       <input
                         type="text"
@@ -1816,17 +1948,80 @@ export const HomePage: React.FC<HomePageProps> = ({
                     </div>
                   </div>
 
+                  {/* Required Email Address (Login Username) */}
                   <div>
                     <label className="block text-[11px] font-bold text-slate-300 mb-1">
-                      Email Address <span className="text-slate-500 font-normal">(For e-Receipts & Billing Notices)</span>
+                      Email Address (Subscriber Portal Login) <span className="text-rose-400">*</span>
                     </label>
-                    <input
-                      type="email"
-                      placeholder="e.g. juan@gmail.com (Optional)"
-                      value={applicantEmail}
-                      onChange={(e) => setApplicantEmail(e.target.value)}
-                      className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-xs font-medium focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50"
-                    />
+                    <div className="relative">
+                      <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="email"
+                        required
+                        placeholder="e.g. juan@gmail.com"
+                        value={applicantEmail}
+                        onChange={(e) => setApplicantEmail(e.target.value)}
+                        className="w-full pl-10 pr-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-xs font-medium focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50"
+                      />
+                    </div>
+                    <p className="text-[10px] text-slate-400 mt-1">
+                      Required: Stored securely in Firebase for your Subscriber Portal login once your application is approved.
+                    </p>
+                  </div>
+
+                  {/* Required Password & Confirm Password Fields */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                        Create Portal Password <span className="text-rose-400">*</span>
+                      </label>
+                      <div className="relative">
+                        <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                        <input
+                          type={showPassword ? 'text' : 'password'}
+                          required
+                          minLength={6}
+                          placeholder="Min. 6 characters"
+                          value={applicantPassword}
+                          onChange={(e) => setApplicantPassword(e.target.value)}
+                          className="w-full pl-10 pr-10 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-xs font-mono font-medium focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword(!showPassword)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 cursor-pointer"
+                          title={showPassword ? 'Hide password' : 'Show password'}
+                        >
+                          {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                        Confirm Password <span className="text-rose-400">*</span>
+                      </label>
+                      <div className="relative">
+                        <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                        <input
+                          type={showConfirmPassword ? 'text' : 'password'}
+                          required
+                          minLength={6}
+                          placeholder="Re-enter password"
+                          value={applicantConfirmPassword}
+                          onChange={(e) => setApplicantConfirmPassword(e.target.value)}
+                          className="w-full pl-10 pr-10 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-xs font-mono font-medium focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 cursor-pointer"
+                          title={showConfirmPassword ? 'Hide password' : 'Show password'}
+                        >
+                          {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -1940,10 +2135,11 @@ export const HomePage: React.FC<HomePageProps> = ({
                   </button>
                   <button
                     type="submit"
-                    className="flex items-center gap-2 px-6 py-2.5 bg-gradient-to-r from-cyan-600 via-sky-500 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold rounded-xl text-xs shadow-lg shadow-cyan-600/30 transition-all hover:scale-105 active:scale-95 cursor-pointer"
+                    disabled={signUpLoading}
+                    className="flex items-center gap-2 px-6 py-2.5 bg-gradient-to-r from-cyan-600 via-sky-500 to-blue-600 hover:from-cyan-500 hover:to-blue-500 disabled:opacity-50 text-white font-bold rounded-xl text-xs shadow-lg shadow-cyan-600/30 transition-all hover:scale-105 active:scale-95 cursor-pointer"
                   >
                     <Zap className="w-4 h-4 text-amber-300" />
-                    <span>Submit Fiber Application</span>
+                    <span>{signUpLoading ? 'Registering with Firebase...' : 'Submit Fiber Application'}</span>
                   </button>
                 </div>
               </form>
