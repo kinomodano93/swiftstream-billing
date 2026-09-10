@@ -1145,12 +1145,13 @@ export const HomePage: React.FC<HomePageProps> = ({
                   <span className="flex items-center gap-1 text-emerald-400">
                     <Check className="w-3 h-3" /> Free Installation Promo
                   </span>
-                  <a
-                    href="#coverage"
-                    className="text-cyan-400 hover:text-cyan-300 underline underline-offset-2 transition-colors"
+                  <button
+                    type="button"
+                    onClick={() => scrollToSection('coverage')}
+                    className="text-cyan-400 hover:text-cyan-300 underline underline-offset-2 transition-colors cursor-pointer"
                   >
                     Check Barangay Coverage &darr;
-                  </a>
+                  </button>
                 </div>
               </div>
             </div>
