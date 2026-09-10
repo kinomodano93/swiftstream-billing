@@ -29,6 +29,13 @@ import {
   HelpCircle,
   Clock,
   Send,
+  Tv,
+  Gamepad2,
+  Smartphone,
+  Building2,
+  Minus,
+  Plus,
+  Activity,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { useApp } from '../../context/AppContext';
@@ -141,20 +148,98 @@ export const HomePage: React.FC<HomePageProps> = ({
     return plans.find((p) => p.id === signUpPlanId) || plans[0];
   }, [plans, signUpPlanId]);
 
-  // Calculate Recommended Plan based on interactive calculator
-  const getRecommendedPlan = () => {
-    if (primaryActivity === 'business' || deviceCount > 15) {
-      return plans.find((p) => p.speedMbps >= 100) || plans[plans.length - 1];
+  // Interactive Speed Matcher Calculator & Capacity Telemetry
+  const speedCalculation = useMemo(() => {
+    const activePlans = plans.filter((p) => p.isActive !== false);
+    const sortedPlans = [...activePlans].sort(
+      (a, b) => a.speedMbps - b.speedMbps || a.monthlyFee - b.monthlyFee
+    );
+
+    let perDeviceMbps = 5;
+    let baseHeadroom = 5;
+    let pingRating = '< 15ms Fast Bicol Gateway';
+    let activityLabel = 'Social & Web Surfing';
+    let badgeText = 'PERFECT HOME MATCH';
+
+    if (primaryActivity === 'casual') {
+      perDeviceMbps = 4;
+      baseHeadroom = 4;
+      pingRating = '< 15ms Local CDN Cache';
+      activityLabel = 'Social & Light Browsing';
+      badgeText = 'PERFECT HOME STARTER';
+    } else if (primaryActivity === 'streaming') {
+      perDeviceMbps = 11;
+      baseHeadroom = 8;
+      pingRating = '< 12ms 4K Video Buffer Route';
+      activityLabel = '4K Ultra-HD & Remote Work';
+      badgeText = 'TOP FAMILY FAVORITE';
+    } else if (primaryActivity === 'gaming') {
+      perDeviceMbps = 15;
+      baseHeadroom = 15;
+      pingRating = '< 8ms Direct Routing (ML/Valorant)';
+      activityLabel = 'Esports & Ultra Low Ping';
+      badgeText = 'GAMER LOW-PING VERIFIED';
+    } else if (primaryActivity === 'business') {
+      perDeviceMbps = 22;
+      baseHeadroom = 25;
+      pingRating = '< 6ms Dedicated SLA Uplink';
+      activityLabel = 'Commercial & Multi-Tenant';
+      badgeText = 'COMMERCIAL HIGH BURST';
     }
-    if (primaryActivity === 'gaming' || deviceCount > 8) {
-      return plans.find((p) => p.speedMbps >= 50 && p.speedMbps < 100) || plans[1] || plans[0];
+
+    const estimatedDemand = Math.max(12, Math.round(deviceCount * perDeviceMbps + baseHeadroom));
+
+    let matched: Plan | undefined;
+
+    if (primaryActivity === 'business') {
+      const bizPlans = sortedPlans.filter(
+        (p) => p.category === 'business' || p.category === 'enterprise' || p.category === 'piso_wifi'
+      );
+      matched = bizPlans.find((p) => p.speedMbps >= estimatedDemand) || bizPlans[bizPlans.length - 1];
+    } else {
+      const resPlans = sortedPlans.filter((p) => p.category === 'residential');
+      if (primaryActivity === 'gaming') {
+        // Guarantee at least 50 Mbps for gaming QoS buffer
+        matched = resPlans.find((p) => p.speedMbps >= Math.max(50, estimatedDemand));
+      } else {
+        matched = resPlans.find((p) => p.speedMbps >= estimatedDemand);
+      }
     }
-    if (primaryActivity === 'streaming' || deviceCount >= 4) {
-      return plans.find((p) => p.speedMbps >= 35) || plans[0];
+
+    // Fallback if demand exceeds residential or if no direct category match
+    if (!matched) {
+      matched = sortedPlans.find((p) => p.speedMbps >= estimatedDemand) || sortedPlans[sortedPlans.length - 1] || plans[0];
     }
-    return plans[0];
-  };
-  const recommendedPlan = getRecommendedPlan();
+
+    const capacityMbps = matched?.speedMbps || 50;
+    const utilizationPercent = Math.min(100, Math.round((estimatedDemand / capacityMbps) * 100));
+    const headroomMbps = Math.max(0, capacityMbps - estimatedDemand);
+    const simultaneous4kStreams = Math.max(1, Math.floor(capacityMbps / 15));
+    const simultaneous1080pStreams = Math.max(2, Math.floor(capacityMbps / 5));
+
+    let bufferRisk = '0% Buffer Risk (Flawless)';
+    let bufferColor = 'text-emerald-400';
+    if (utilizationPercent > 85) {
+      bufferRisk = 'Peak Load (< 5% Congestion Risk)';
+      bufferColor = 'text-amber-400';
+    }
+
+    return {
+      estimatedDemand,
+      matchedPlan: matched,
+      utilizationPercent,
+      headroomMbps,
+      simultaneous4kStreams,
+      simultaneous1080pStreams,
+      pingRating,
+      activityLabel,
+      badgeText,
+      bufferRisk,
+      bufferColor,
+    };
+  }, [plans, deviceCount, primaryActivity]);
+
+  const recommendedPlan = speedCalculation.matchedPlan;
 
   const handleOpenSignUp = (planId?: string, defaultBarangay?: string, defaultMunicipality?: string) => {
     if (planId) {
@@ -701,7 +786,7 @@ export const HomePage: React.FC<HomePageProps> = ({
       </section>
 
       {/* ================= 4. SPEED MATCHER CALCULATOR ================= */}
-      <section id="calculator" className="py-16 px-6 sm:px-12 max-w-5xl mx-auto">
+      <section id="calculator" className="py-16 px-6 sm:px-12 max-w-6xl mx-auto">
         <div className="p-8 sm:p-10 rounded-3xl bg-gradient-to-br from-slate-900 via-slate-900 to-cyan-950/40 border border-slate-800 shadow-2xl space-y-8">
           <div className="text-center space-y-2">
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-cyan-950 text-cyan-300 border border-cyan-800/60">
@@ -711,99 +796,278 @@ export const HomePage: React.FC<HomePageProps> = ({
             <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-100">
               Not sure which plan is right for your home?
             </h2>
-            <p className="text-xs sm:text-sm text-slate-400 max-w-xl mx-auto">
-              Select the number of active smartphones, laptops, and smart TVs in your household to find the perfect speed.
+            <p className="text-xs sm:text-sm text-slate-400 max-w-2xl mx-auto">
+              Select your connected devices and primary online habits. Our real-time bandwidth engine calculates your peak Mbps demand and matches the ideal fiber tier with zero buffer risk.
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
-            {/* Left Controls */}
-            <div className="space-y-6">
-              {/* Slider: Device Count */}
-              <div className="space-y-2">
-                <div className="flex justify-between items-center">
-                  <label className="font-bold text-slate-200 text-xs">
-                    Connected Devices at Peak Hours:
-                  </label>
-                  <span className="font-mono font-bold text-cyan-400 text-sm bg-cyan-950 px-2.5 py-0.5 rounded-lg border border-cyan-800/50">
-                    {deviceCount} {deviceCount === 1 ? 'Device' : 'Devices'}
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min="1"
-                  max="20"
-                  value={deviceCount}
-                  onChange={(e) => setDeviceCount(parseInt(e.target.value))}
-                  className="w-full h-2 bg-slate-950 rounded-lg appearance-none cursor-pointer accent-cyan-500"
-                />
-                <div className="flex justify-between text-[10px] text-slate-500 font-mono">
-                  <span>1 Device</span>
-                  <span>10 Devices</span>
-                  <span>20+ Devices</span>
-                </div>
-              </div>
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+            {/* Left Controls (7 cols on lg) */}
+            <div className="lg:col-span-7 space-y-6">
+              {/* Device Count with Stepper and Presets */}
+              <div className="p-5 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="space-y-0.5">
+                    <label className="font-bold text-slate-200 text-xs sm:text-sm flex items-center gap-2">
+                      <Users className="w-4 h-4 text-cyan-400" />
+                      <span>Connected Devices at Peak Hours</span>
+                    </label>
+                    <span className="text-[11px] text-slate-500 block">
+                      Smartphones, laptops, smart TVs, PCs & consoles
+                    </span>
+                  </div>
 
-              {/* Activity Selector */}
-              <div className="space-y-2">
-                <label className="font-bold text-slate-200 text-xs block">
-                  Primary Online Activity:
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  {[
-                    { id: 'casual', label: '📱 Social & Web', desc: 'Browsing, Facebook & Chat' },
-                    { id: 'streaming', label: '🎬 4K Movies & Work', desc: 'Netflix, YouTube & Zoom' },
-                    { id: 'gaming', label: '🎮 Low-Ping Gaming', desc: 'ML, Valorant, Roblox' },
-                    { id: 'business', label: '💼 Enterprise & Shop', desc: 'Piso-WiFi & Commercial' },
-                  ].map((act) => (
+                  <div className="flex items-center gap-2 self-start sm:self-auto">
                     <button
-                      key={act.id}
                       type="button"
-                      onClick={() => setPrimaryActivity(act.id as any)}
-                      className={`p-3 rounded-2xl border text-left transition-all cursor-pointer ${
-                        primaryActivity === act.id
-                          ? 'bg-cyan-950/60 border-cyan-500 text-cyan-200'
-                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                      onClick={() => setDeviceCount(Math.max(1, deviceCount - 1))}
+                      disabled={deviceCount <= 1}
+                      aria-label="Decrease devices"
+                      className="w-8 h-8 rounded-lg bg-slate-900 hover:bg-slate-800 disabled:opacity-30 border border-slate-700 text-slate-200 flex items-center justify-center transition-colors cursor-pointer"
+                    >
+                      <Minus className="w-3.5 h-3.5" />
+                    </button>
+                    <span className="font-mono font-bold text-cyan-400 text-sm bg-cyan-950/80 px-3 py-1 rounded-lg border border-cyan-800/60 min-w-[5.5rem] text-center">
+                      {deviceCount} {deviceCount === 1 ? 'Device' : 'Devices'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setDeviceCount(Math.min(30, deviceCount + 1))}
+                      disabled={deviceCount >= 30}
+                      aria-label="Increase devices"
+                      className="w-8 h-8 rounded-lg bg-slate-900 hover:bg-slate-800 disabled:opacity-30 border border-slate-700 text-slate-200 flex items-center justify-center transition-colors cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <input
+                    type="range"
+                    min="1"
+                    max="25"
+                    value={deviceCount}
+                    onChange={(e) => setDeviceCount(parseInt(e.target.value))}
+                    className="w-full h-2.5 bg-slate-900 rounded-lg appearance-none cursor-pointer accent-cyan-400"
+                  />
+                  <div className="flex justify-between text-[10px] text-slate-500 font-mono">
+                    <span>1 Device (Solo)</span>
+                    <span>5 Devices (Family)</span>
+                    <span>12 Devices (Streamers)</span>
+                    <span>25+ (Heavy/Biz)</span>
+                  </div>
+                </div>
+
+                {/* Quick Presets */}
+                <div className="pt-2 border-t border-slate-800/80 flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 mr-1">Quick Presets:</span>
+                  {[
+                    { label: 'Solo (1-2)', count: 2 },
+                    { label: 'Family (4-6)', count: 5 },
+                    { label: 'Gamer / Streamer (8-10)', count: 8 },
+                    { label: 'Shop / Vendo (15+)', count: 16 },
+                  ].map((preset) => (
+                    <button
+                      key={preset.label}
+                      type="button"
+                      onClick={() => setDeviceCount(preset.count)}
+                      className={`text-[11px] px-2.5 py-1 rounded-lg border transition-all cursor-pointer ${
+                        deviceCount === preset.count
+                          ? 'bg-cyan-950 border-cyan-500 text-cyan-300 font-bold'
+                          : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
                       }`}
                     >
-                      <span className="font-bold text-xs block text-slate-200">{act.label}</span>
-                      <span className="text-[10px] text-slate-500 block mt-0.5">{act.desc}</span>
+                      {preset.label}
                     </button>
                   ))}
                 </div>
               </div>
+
+              {/* Activity Selector */}
+              <div className="space-y-2.5">
+                <label className="font-bold text-slate-200 text-xs sm:text-sm flex items-center justify-between">
+                  <span>Primary Online Activity</span>
+                  <span className="text-[11px] font-normal text-cyan-400 font-mono">
+                    {speedCalculation.activityLabel}
+                  </span>
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {[
+                    {
+                      id: 'casual',
+                      icon: <Smartphone className="w-4 h-4 text-emerald-400" />,
+                      label: 'Social & Web Surfing',
+                      desc: 'Facebook, TikTok, Chats & Banking',
+                      demandTag: '~4 Mbps / dev',
+                    },
+                    {
+                      id: 'streaming',
+                      icon: <Tv className="w-4 h-4 text-cyan-400" />,
+                      label: '4K Movies & WFH',
+                      desc: 'Netflix UHD, YouTube HDR, Zoom & Teams',
+                      demandTag: '~11 Mbps / dev',
+                    },
+                    {
+                      id: 'gaming',
+                      icon: <Gamepad2 className="w-4 h-4 text-purple-400" />,
+                      label: 'Low-Ping Gaming',
+                      desc: 'Valorant, MLBB, Steam, Fast QoS',
+                      demandTag: '~15 Mbps / dev + QoS',
+                    },
+                    {
+                      id: 'business',
+                      icon: <Building2 className="w-4 h-4 text-amber-400" />,
+                      label: 'Commercial & Vendo',
+                      desc: 'Piso-WiFi, POS, CCTV & Heavy Offices',
+                      demandTag: '~22 Mbps / dev',
+                    },
+                  ].map((act) => {
+                    const isSelected = primaryActivity === act.id;
+                    return (
+                      <button
+                        key={act.id}
+                        type="button"
+                        onClick={() => setPrimaryActivity(act.id as any)}
+                        className={`p-3.5 rounded-2xl border text-left transition-all cursor-pointer relative ${
+                          isSelected
+                            ? 'bg-cyan-950/60 border-cyan-500 shadow-md shadow-cyan-950/50 ring-1 ring-cyan-500/50'
+                            : 'bg-slate-950 border-slate-800/90 text-slate-400 hover:border-slate-700 hover:bg-slate-900/40'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between">
+                          <div className="flex items-center gap-2">
+                            <div className={`p-1.5 rounded-lg ${isSelected ? 'bg-cyan-900/50' : 'bg-slate-900'}`}>
+                              {act.icon}
+                            </div>
+                            <span className="font-bold text-xs text-slate-100">{act.label}</span>
+                          </div>
+                          <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-400">
+                            {act.demandTag}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-400 mt-2 pl-0.5 leading-relaxed">{act.desc}</p>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
 
-            {/* Right Recommended Box */}
-            <div className="p-6 rounded-3xl bg-slate-950 border-2 border-cyan-500/60 shadow-xl space-y-4 text-center sm:text-left">
+            {/* Right Recommended Box (5 cols on lg) */}
+            <div className="lg:col-span-5 p-6 rounded-3xl bg-slate-950 border-2 border-cyan-500/60 shadow-2xl space-y-5">
+              {/* Badge & Icon */}
               <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 bg-emerald-950 px-2.5 py-0.5 rounded-full border border-emerald-800/40">
-                  Recommended For You
+                <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 bg-emerald-950 px-3 py-1 rounded-full border border-emerald-800/50 flex items-center gap-1.5">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>{speedCalculation.badgeText}</span>
                 </span>
-                <Sparkles className="w-4 h-4 text-cyan-400 animate-bounce" />
+                <Sparkles className="w-4 h-4 text-cyan-400 animate-pulse" />
               </div>
 
-              <div>
-                <h3 className="text-xl font-black text-slate-100">{recommendedPlan?.name}</h3>
-                <p className="text-xs text-slate-400 mt-1">{recommendedPlan?.description}</p>
+              {/* Matched Plan Info */}
+              <div className="space-y-1">
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="text-xl font-black text-slate-100 tracking-tight">
+                    {recommendedPlan?.name}
+                  </h3>
+                  <span className="text-[10px] uppercase font-bold font-mono px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800">
+                    {recommendedPlan?.category}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  {recommendedPlan?.description}
+                </p>
               </div>
 
-              <div className="flex items-baseline justify-center sm:justify-start gap-2 pt-1">
-                <span className="font-mono text-3xl font-black text-cyan-400">
-                  {recommendedPlan?.speedMbps} Mbps
-                </span>
-                <span className="text-slate-400 text-sm font-semibold">
-                  @ {formatCurrency(recommendedPlan?.monthlyFee || 1299)}/mo
-                </span>
+              {/* Speed & Price */}
+              <div className="p-3.5 rounded-2xl bg-slate-900/70 border border-slate-800 flex items-baseline justify-between">
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-slate-500 block">Plan Speed</span>
+                  <span className="font-mono text-3xl font-black text-cyan-400">
+                    {recommendedPlan?.speedMbps} Mbps
+                  </span>
+                </div>
+                <div className="text-right">
+                  <span className="text-[10px] uppercase font-bold text-slate-500 block">Monthly Rate</span>
+                  <span className="text-lg font-black font-mono text-slate-100">
+                    {formatCurrency(recommendedPlan?.monthlyFee || 1299)}
+                    <span className="text-xs text-slate-400 font-normal"> / mo</span>
+                  </span>
+                </div>
               </div>
 
-              <button
-                type="button"
-                onClick={() => handleOpenSignUp(recommendedPlan?.id)}
-                className="w-full py-3 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold rounded-xl text-xs shadow-lg shadow-cyan-600/25 transition-all hover:scale-[1.02] cursor-pointer"
-              >
-                Apply for {recommendedPlan?.name} &rarr;
-              </button>
+              {/* Real-time Bandwidth Demand & Capacity Gauge */}
+              <div className="p-3.5 rounded-2xl bg-cyan-950/20 border border-cyan-900/50 space-y-2.5">
+                <div className="flex justify-between items-center text-xs">
+                  <span className="font-semibold text-slate-300 flex items-center gap-1.5">
+                    <Activity className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Estimated Peak Demand:</span>
+                  </span>
+                  <span className="font-mono font-bold text-cyan-300">
+                    ~{speedCalculation.estimatedDemand} Mbps
+                  </span>
+                </div>
+
+                {/* Progress bar */}
+                <div className="space-y-1">
+                  <div className="w-full bg-slate-900 h-2.5 rounded-full overflow-hidden p-0.5 border border-slate-800">
+                    <div
+                      className="h-full bg-gradient-to-r from-cyan-500 to-emerald-400 rounded-full transition-all duration-300"
+                      style={{ width: `${speedCalculation.utilizationPercent}%` }}
+                    />
+                  </div>
+                  <div className="flex justify-between text-[10px] font-mono text-slate-400">
+                    <span>{speedCalculation.utilizationPercent}% Capacity Utilized</span>
+                    <span className="text-emerald-400">+{speedCalculation.headroomMbps} Mbps Headroom</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Capability Matrix Pills */}
+              <div className="grid grid-cols-2 gap-2 text-[11px]">
+                <div className="p-2 rounded-xl bg-slate-900/50 border border-slate-800/80 flex items-center gap-2">
+                  <Tv className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                  <span className="text-slate-300">
+                    Up to <strong className="text-slate-100 font-semibold">{speedCalculation.simultaneous4kStreams}x</strong> 4K Streams
+                  </span>
+                </div>
+                <div className="p-2 rounded-xl bg-slate-900/50 border border-slate-800/80 flex items-center gap-2">
+                  <Zap className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span className={speedCalculation.bufferColor}>
+                    {speedCalculation.bufferRisk}
+                  </span>
+                </div>
+                <div className="p-2 rounded-xl bg-slate-900/50 border border-slate-800/80 flex items-center gap-2 col-span-2">
+                  <Gauge className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                  <span className="text-slate-300">
+                    Ping Latency: <strong className="text-purple-300 font-semibold">{speedCalculation.pingRating}</strong>
+                  </span>
+                </div>
+              </div>
+
+              {/* CTA Apply button */}
+              <div className="space-y-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => handleOpenSignUp(recommendedPlan?.id)}
+                  className="w-full py-3.5 bg-gradient-to-r from-cyan-600 via-cyan-500 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold rounded-xl text-xs shadow-lg shadow-cyan-600/30 transition-all hover:scale-[1.02] cursor-pointer flex items-center justify-center gap-2"
+                >
+                  <span>Apply for {recommendedPlan?.name}</span>
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+                <div className="flex items-center justify-between text-[11px] text-slate-400 px-1">
+                  <span className="flex items-center gap-1 text-emerald-400">
+                    <Check className="w-3 h-3" /> Free Installation Promo
+                  </span>
+                  <a
+                    href="#coverage"
+                    className="text-cyan-400 hover:text-cyan-300 underline underline-offset-2 transition-colors"
+                  >
+                    Check Barangay Coverage &darr;
+                  </a>
+                </div>
+              </div>
             </div>
           </div>
         </div>
