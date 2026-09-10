@@ -63,6 +63,7 @@ import {
 } from '../services/firestoreService';
 import {
   AppUserProfile,
+  isStaffUser,
   subscribeToAuth,
   signOutUser,
   syncCustomerApprovalToUser,
@@ -324,8 +325,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const hash = window.location.hash.replace(/^#\/?/, '').trim();
         // If an explicit tab is specified in the URL (e.g. #customers, #billing, #dashboard, #portal, #home)
         if (hash) {
+          if (hash === 'home') return 'home';
+          if (hash === 'portal') return 'portal';
           if (VALID_TABS.has(hash)) {
-            return hash;
+            // Guard admin tabs: Only allow direct deep-link into admin tabs if user is authenticated staff
+            const localRaw = localStorage.getItem('swiftstream_current_auth_user');
+            if (localRaw) {
+              try {
+                const user = JSON.parse(localRaw) as AppUserProfile;
+                if (isStaffUser(user)) {
+                  return hash;
+                }
+              } catch {}
+            }
+            // If not logged in as staff, safely default to home
+            return 'home';
           }
         } else {
           // If no hash in URL (direct root visit e.g. http://localhost:5173/ or domain), always land on public Home Page
@@ -353,23 +367,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       }
     } catch {}
-  }, [activeTab]);
-
-  // Support browser forward/back buttons and direct hash navigation
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const handleHashChange = () => {
-      try {
-        const hash = window.location.hash.replace(/^#\/?/, '').trim();
-        if (!hash) {
-          setActiveTab('home');
-        } else if (VALID_TABS.has(hash) && hash !== activeTab) {
-          setActiveTab(hash);
-        }
-      } catch {}
-    };
-    window.addEventListener('hashchange', handleHashChange);
-    return () => window.removeEventListener('hashchange', handleHashChange);
   }, [activeTab]);
 
   const [searchTerm, setSearchTerm] = useState<string>('');
@@ -474,20 +471,36 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [currentAuthUser]);
 
   const canAccessTab = (tabId: string): boolean => {
+    if (tabId === 'home' || tabId === 'portal') return true;
+    if (!isStaffUser(currentAuthUser)) return false;
     const permissions = ROLE_PERMISSIONS[systemRole];
-    return permissions ? permissions.allowedTabs.includes(tabId) : true;
+    return permissions ? permissions.allowedTabs.includes(tabId) : false;
   };
 
   const hasPermission = (perm: keyof RolePermissions): boolean => {
+    if (!isStaffUser(currentAuthUser)) return false;
     const permissions = ROLE_PERMISSIONS[systemRole];
-    if (!permissions) return true;
+    if (!permissions) return false;
     return Boolean(permissions[perm]);
   };
 
-  // If activeTab is disallowed for current role, automatically navigate to role's primary landing view
+  // If activeTab is disallowed for current role/user, automatically navigate to appropriate view
   useEffect(() => {
+    if (activeTab === 'home' || activeTab === 'portal') return;
+
+    // Admin/staff tabs require active staff login
+    if (!isStaffUser(currentAuthUser)) {
+      if (currentAuthUser?.role === 'subscriber') {
+        setActiveTab('portal');
+        showToast('error', 'Access Restricted', 'Subscribers cannot access the administrative operations workspace.');
+      } else {
+        setActiveTab('home');
+      }
+      return;
+    }
+
     const perms = ROLE_PERMISSIONS[systemRole];
-    if (perms && activeTab !== 'home' && activeTab !== 'portal' && !perms.allowedTabs.includes(activeTab)) {
+    if (perms && !perms.allowedTabs.includes(activeTab)) {
       if (systemRole === 'cashier') {
         setActiveTab('dashboard');
       } else if (systemRole === 'technician') {
@@ -496,7 +509,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setActiveTab('dashboard');
       }
     }
-  }, [systemRole, activeTab]);
+  }, [systemRole, activeTab, currentAuthUser]);
+
+  // Support browser forward/back buttons and direct hash navigation with auth check
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleHashChange = () => {
+      try {
+        const hash = window.location.hash.replace(/^#\/?/, '').trim();
+        if (!hash || hash === 'home') {
+          setActiveTab('home');
+        } else if (hash === 'portal') {
+          setActiveTab('portal');
+        } else if (VALID_TABS.has(hash) && hash !== activeTab) {
+          if (!isStaffUser(currentAuthUser)) {
+            setActiveTab('home');
+            showToast('info', 'Staff Login Required', 'Please sign in with an authorized staff account to access operations.');
+            openAuthModal('signin');
+          } else {
+            setActiveTab(hash);
+          }
+        }
+      } catch {}
+    };
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, [activeTab, currentAuthUser]);
 
   const logout = async () => {
     try {
@@ -505,13 +543,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       console.warn('Sign out error:', err);
     }
     setCurrentAuthUser(null);
-    setActiveTab('home');
+    setSystemRoleState('cashier');
     try {
+      localStorage.removeItem(STORAGE_KEYS.SYSTEM_ROLE);
+      localStorage.removeItem('swiftstream_current_auth_user');
       localStorage.setItem('swiftstream_active_tab', 'home');
       if (typeof window !== 'undefined') {
         window.history.replaceState(null, '', window.location.pathname + window.location.search);
       }
     } catch {}
+    setActiveTab('home');
     setSearchTerm('');
     showToast('info', 'Signed Out', 'You have been signed out of SwiftStream.');
   };

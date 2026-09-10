@@ -35,7 +35,8 @@ import { StaffUserManager } from './components/users/StaffUserManager';
 import { SystemLogsViewer } from './components/logs/SystemLogsViewer';
 import { FinancialTransactionLogs } from './components/logs/FinancialTransactionLogs';
 import { Customer, RepairOrder, SYSTEM_ROLES_CONFIG } from './types';
-import { ShieldAlert, ArrowLeft } from 'lucide-react';
+import { isStaffUser } from './services/authService';
+import { ShieldAlert, ArrowLeft, Lock, KeyRound, Globe, ShieldCheck } from 'lucide-react';
 
 const MainLayout: React.FC = () => {
   const {
@@ -45,7 +46,9 @@ const MainLayout: React.FC = () => {
     isAuthModalOpen,
     authModalMode,
     authModalEmail,
+    openAuthModal,
     closeAuthModal,
+    currentAuthUser,
     systemRole,
     canAccessTab,
   } = useApp();
@@ -106,6 +109,8 @@ const MainLayout: React.FC = () => {
     setShowRepairModal(true);
   };
 
+  const isAuthorizedStaff = isStaffUser(currentAuthUser);
+
   // 1. PUBLIC WEBSITE HOME PAGE (Full Screen)
   if (activeTab === 'home') {
     return (
@@ -115,7 +120,13 @@ const MainLayout: React.FC = () => {
             if (cid) setPortalCustomerId(cid);
             setActiveTab('portal');
           }}
-          onOpenAdminDashboard={() => setActiveTab('dashboard')}
+          onOpenAdminDashboard={() => {
+            if (isAuthorizedStaff) {
+              setActiveTab('dashboard');
+            } else {
+              openAuthModal('signin');
+            }
+          }}
         />
         <AuthModal
           isOpen={isAuthModalOpen}
@@ -135,8 +146,12 @@ const MainLayout: React.FC = () => {
         <ClientPortal
           initialCustomerId={portalCustomerId}
           onExitToAdmin={() => {
-            setActiveTab('dashboard');
-            setPortalCustomerId(null);
+            if (isAuthorizedStaff) {
+              setActiveTab('dashboard');
+              setPortalCustomerId(null);
+            } else {
+              openAuthModal('signin');
+            }
           }}
           onExitToHome={() => {
             setActiveTab('home');
@@ -154,7 +169,76 @@ const MainLayout: React.FC = () => {
     );
   }
 
-  // 3. ADMIN ERP OPERATIONS WORKSPACE (Sidebar + Header + Management Views)
+  // 3. SECURE AUTH GUARD FOR ADMIN & STAFF OPERATIONS WORKSPACE
+  if (!isAuthorizedStaff) {
+    return (
+      <div className="h-screen w-screen flex flex-col items-center justify-center bg-slate-950 text-slate-100 p-6 selection:bg-cyan-500 selection:text-white relative overflow-hidden">
+        {/* Ambient background glow */}
+        <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-cyan-600/10 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-1/3 left-1/2 -translate-x-1/2 translate-y-1/2 w-96 h-96 bg-blue-600/10 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="relative z-10 max-w-md w-full p-8 rounded-3xl bg-slate-900/90 border border-slate-800 shadow-2xl space-y-6 text-center backdrop-blur-xl">
+          <div className="w-16 h-16 rounded-2xl bg-cyan-950/80 border border-cyan-800/80 flex items-center justify-center text-cyan-400 mx-auto shadow-lg shadow-cyan-950/50">
+            <Lock className="w-8 h-8" />
+          </div>
+
+          <div className="space-y-2">
+            <span className="inline-block px-3 py-1 rounded-full text-[10px] font-mono font-bold uppercase tracking-wider bg-rose-950/60 border border-rose-800/50 text-rose-300">
+              {currentAuthUser ? 'Subscriber Account - Staff Only' : 'Staff Authentication Required'}
+            </span>
+            <h2 className="text-xl sm:text-2xl font-black text-slate-100">
+              Operations Console Locked
+            </h2>
+            <p className="text-xs sm:text-sm text-slate-400 leading-relaxed">
+              {currentAuthUser
+                ? `You are currently logged in as a subscriber (${currentAuthUser.email}). The operations dashboard and network telemetry modules are strictly restricted to authorized staff.`
+                : 'You must be signed in with an authorized SwiftStream staff account (Admin, Cashier, or Field Technician) to access the operations workspace, subscriber records, and billing.'}
+            </p>
+          </div>
+
+          <div className="space-y-3 pt-2">
+            <button
+              type="button"
+              onClick={() => openAuthModal('signin')}
+              className="w-full py-3 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold rounded-xl text-xs shadow-lg shadow-cyan-600/25 transition-all hover:scale-[1.02] cursor-pointer flex items-center justify-center gap-2"
+            >
+              <KeyRound className="w-4 h-4" />
+              <span>{currentAuthUser ? 'Switch to Staff Account' : 'Sign In to Operations Console'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('home')}
+              className="w-full py-2.5 bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white font-semibold rounded-xl text-xs border border-slate-700/60 transition-all cursor-pointer flex items-center justify-center gap-2"
+            >
+              <Globe className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Return to Public Website</span>
+            </button>
+
+            {currentAuthUser && currentAuthUser.role === 'subscriber' && (
+              <button
+                type="button"
+                onClick={() => setActiveTab('portal')}
+                className="w-full py-2.5 bg-cyan-950/50 hover:bg-cyan-900/60 text-cyan-300 hover:text-white font-semibold rounded-xl text-xs border border-cyan-800/60 transition-all cursor-pointer flex items-center justify-center gap-2"
+              >
+                <span>Go to My Subscriber Portal &rarr;</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        <AuthModal
+          isOpen={isAuthModalOpen}
+          onClose={closeAuthModal}
+          initialMode={authModalMode}
+          initialEmail={authModalEmail}
+        />
+        <NotificationToast />
+      </div>
+    );
+  }
+
+  // 4. ADMIN ERP OPERATIONS WORKSPACE (Sidebar + Header + Management Views)
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-slate-950 text-slate-100 selection:bg-cyan-500 selection:text-white">
       {/* Sidebar Navigation */}

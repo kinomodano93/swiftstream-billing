@@ -504,26 +504,48 @@ export const HomePage: React.FC<HomePageProps> = ({
 
         {/* Right CTA Actions & Mobile Hamburger */}
         <div className="flex items-center gap-2 sm:gap-3">
-          {currentAuthUser && currentAuthUser.role === 'subscriber' ? (
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => onOpenClientPortal()}
-                className="flex items-center gap-1.5 px-3 sm:px-3.5 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-cyan-600/20 cursor-pointer"
-              >
-                <span>My Portal</span>
-                <ArrowRight className="w-3.5 h-3.5" />
-              </button>
+          {currentAuthUser ? (
+            currentAuthUser.role === 'subscriber' ? (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => onOpenClientPortal()}
+                  className="flex items-center gap-1.5 px-3 sm:px-3.5 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-cyan-600/20 cursor-pointer"
+                >
+                  <span>My Portal</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
 
-              <button
-                type="button"
-                onClick={logout}
-                className="p-2 text-rose-400 hover:text-rose-200 hover:bg-rose-950/40 rounded-xl transition-all cursor-pointer"
-                title="Sign Out"
-              >
-                <Lock className="w-3.5 h-3.5" />
-              </button>
-            </div>
+                <button
+                  type="button"
+                  onClick={logout}
+                  className="p-2 text-rose-400 hover:text-rose-200 hover:bg-rose-950/40 rounded-xl transition-all cursor-pointer"
+                  title="Sign Out"
+                >
+                  <Lock className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => onOpenAdminDashboard()}
+                  className="flex items-center gap-1.5 px-3 sm:px-3.5 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-cyan-600/20 cursor-pointer"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>{currentAuthUser.role === 'cashier' ? 'Cashier Operations' : 'Admin Console'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={logout}
+                  className="p-2 text-rose-400 hover:text-rose-200 hover:bg-rose-950/40 rounded-xl transition-all cursor-pointer"
+                  title="Sign Out"
+                >
+                  <Lock className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )
           ) : (
             <div className="flex items-center gap-1.5 sm:gap-2">
               <button
@@ -582,7 +604,70 @@ export const HomePage: React.FC<HomePageProps> = ({
               <ArrowRight className="w-3.5 h-3.5 text-slate-500" />
             </button>
           ))}
-          <div className="pt-2 border-t border-slate-800/80">
+          <div className="pt-2 border-t border-slate-800/80 space-y-2">
+            {currentAuthUser ? (
+              currentAuthUser.role === 'subscriber' ? (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsMobileNavOpen(false);
+                      onOpenClientPortal();
+                    }}
+                    className="flex-1 py-2.5 bg-gradient-to-r from-cyan-600 to-blue-600 text-white rounded-xl text-xs font-bold text-center shadow-lg shadow-cyan-600/20 cursor-pointer"
+                  >
+                    My Subscriber Portal
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsMobileNavOpen(false);
+                      logout();
+                    }}
+                    className="px-3 py-2.5 bg-slate-800 text-rose-400 hover:text-rose-300 rounded-xl text-xs font-bold"
+                  >
+                    Sign Out
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsMobileNavOpen(false);
+                      onOpenAdminDashboard();
+                    }}
+                    className="flex-1 py-2.5 bg-gradient-to-r from-cyan-600 to-blue-600 text-white rounded-xl text-xs font-bold text-center shadow-lg shadow-cyan-600/20 cursor-pointer flex items-center justify-center gap-2"
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    <span>{currentAuthUser.role === 'cashier' ? 'Cashier Operations' : 'Admin Console'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsMobileNavOpen(false);
+                      logout();
+                    }}
+                    className="px-3 py-2.5 bg-slate-800 text-rose-400 hover:text-rose-300 rounded-xl text-xs font-bold"
+                  >
+                    Sign Out
+                  </button>
+                </div>
+              )
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setIsMobileNavOpen(false);
+                  openAuthModal('signin');
+                }}
+                className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold text-center border border-slate-700 cursor-pointer flex items-center justify-center gap-2"
+              >
+                <Lock className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Sign In to Account</span>
+              </button>
+            )}
+
             <button
               type="button"
               onClick={() => {
