@@ -539,7 +539,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const perms = ROLE_PERMISSIONS[systemRole];
     if (perms && !perms.allowedTabs.includes(activeTab)) {
       if (systemRole === 'cashier') {
-        setActiveTab('dashboard');
+        setActiveTab('billing');
       } else if (systemRole === 'technician') {
         setActiveTab('field_ops');
       } else {

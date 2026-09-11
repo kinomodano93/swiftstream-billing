@@ -193,7 +193,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
       </div>
 
       {/* Pending Proofs Action Banner */}
-      {pendingProofsCount > 0 && (
+      {pendingProofsCount > 0 && hasPermission('canAccessVerificationQueue') && (
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3.5 p-4 rounded-2xl bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-slate-900 border border-amber-500/30 text-amber-200 animate-in fade-in shadow-lg shadow-amber-500/5">
           <div className="flex items-center gap-3">
             <div className="p-2.5 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0">
@@ -245,19 +245,21 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
           <span>💰 Daily Admin Remittance & Drawer</span>
         </button>
 
-        <button
-          onClick={() => setActiveTab('verification_queue')}
-          className="flex items-center gap-2 px-3.5 py-2 rounded-xl font-bold transition-all bg-slate-900/60 text-amber-300 border border-amber-500/30 hover:bg-amber-500/10 hover:border-amber-500/50 ml-auto"
-          title="Direct link to Cashier Proof Verification Queue"
-        >
-          <CheckCircle2 className="w-4 h-4 text-amber-400" />
-          <span>Online Proofs Queue</span>
-          {pendingProofsCount > 0 && (
-            <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-500 text-slate-950 animate-pulse">
-              {pendingProofsCount}
-            </span>
-          )}
-        </button>
+        {hasPermission('canAccessVerificationQueue') && (
+          <button
+            onClick={() => setActiveTab('verification_queue')}
+            className="flex items-center gap-2 px-3.5 py-2 rounded-xl font-bold transition-all bg-slate-900/60 text-amber-300 border border-amber-500/30 hover:bg-amber-500/10 hover:border-amber-500/50 ml-auto"
+            title="Direct link to Cashier Proof Verification Queue"
+          >
+            <CheckCircle2 className="w-4 h-4 text-amber-400" />
+            <span>Online Proofs Queue</span>
+            {pendingProofsCount > 0 && (
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-500 text-slate-950 animate-pulse">
+                {pendingProofsCount}
+              </span>
+            )}
+          </button>
+        )}
       </div>
 
       {activeBillingTab === 'remittances' ? (

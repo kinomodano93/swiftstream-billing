@@ -152,8 +152,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         setActiveTab('portal');
         showToast('success', 'Subscriber Portal', `Welcome back, ${profile.displayName || profile.email}!`);
       } else if (profile.role === 'cashier') {
-        setActiveTab('dashboard');
-        showToast('success', 'Cashier Portal', `Welcome, ${profile.displayName || profile.email}! Cashier operations active.`);
+        setActiveTab('billing');
+        showToast('success', 'Cashier Billing Desk', `Welcome, ${profile.displayName || profile.email}! Cashier billing desk active.`);
       } else if (profile.role === 'technician' || profile.role === 'tech') {
         setActiveTab('dashboard');
         showToast('success', 'Technician Portal', `Welcome, ${profile.displayName || profile.email}! Field operations active.`);
@@ -303,8 +303,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         setActiveTab('portal');
         showToast('success', 'Subscriber Portal', `Welcome, ${profile.displayName}!`);
       } else if (profile.role === 'cashier') {
-        setActiveTab('dashboard');
-        showToast('success', 'Cashier Portal', `Welcome, ${profile.displayName}! Cashier operations active.`);
+        setActiveTab('billing');
+        showToast('success', 'Cashier Billing Desk', `Welcome, ${profile.displayName}! Cashier billing desk active.`);
       } else if (profile.role === 'technician' || profile.role === 'tech') {
         setActiveTab('dashboard');
         showToast('success', 'Technician Portal', `Welcome, ${profile.displayName}! Field operations active.`);

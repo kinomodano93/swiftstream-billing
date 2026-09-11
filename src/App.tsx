@@ -274,11 +274,11 @@ const MainLayout: React.FC = () => {
               <div className="flex flex-wrap items-center justify-center gap-3">
                 <button
                   type="button"
-                  onClick={() => setActiveTab('dashboard')}
+                  onClick={() => setActiveTab(canAccessTab('dashboard') ? 'dashboard' : 'billing')}
                   className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-cyan-600/20 transition-all cursor-pointer"
                 >
                   <ArrowLeft className="w-4 h-4" />
-                  Return to Dashboard
+                  {canAccessTab('dashboard') ? 'Return to Dashboard' : 'Return to Billing & Invoices'}
                 </button>
               </div>
             </div>

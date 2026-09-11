@@ -293,7 +293,7 @@ export const Sidebar: React.FC = () => {
         <div className={`p-4 border-b border-slate-800/80 flex items-center ${isCollapsed ? 'justify-center' : 'justify-between'}`}>
           <div className="flex items-center gap-3 min-w-0">
             <div
-              onClick={() => setActiveTab('dashboard')}
+              onClick={() => setActiveTab(canAccessTab('dashboard') ? 'dashboard' : 'billing')}
               className="w-10 h-10 rounded-xl bg-slate-900 border border-slate-700/60 flex items-center justify-center shadow-lg shadow-cyan-500/10 shrink-0 cursor-pointer overflow-hidden p-1"
               title={businessProfile.name || 'ISP ERP'}
             >

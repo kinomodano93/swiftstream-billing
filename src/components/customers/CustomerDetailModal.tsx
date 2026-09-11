@@ -61,6 +61,8 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
     hasPermission,
     setActiveTab: setGlobalActiveTab,
     setSearchTerm,
+    canAccessTab,
+    systemRole,
   } = useApp();
 
   const [activeTab, setActiveTab] = useState<'profile' | 'invoices' | 'payments' | 'repairs'>('profile');
@@ -126,13 +128,15 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
-            <button
-              onClick={onOpenEditModal}
-              className="p-2 text-slate-400 hover:text-cyan-400 hover:bg-slate-800 rounded-xl transition-colors"
-              title="Edit Profile"
-            >
-              <Edit2 className="w-4 h-4" />
-            </button>
+            {canAccessTab('customers') && (
+              <button
+                onClick={onOpenEditModal}
+                className="p-2 text-slate-400 hover:text-cyan-400 hover:bg-slate-800 rounded-xl transition-colors"
+                title="Edit Profile"
+              >
+                <Edit2 className="w-4 h-4" />
+              </button>
+            )}
             <button
               onClick={onClose}
               className="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-xl transition-colors"
@@ -166,13 +170,15 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
               <span>Send SMS Advisory</span>
             </button>
 
-            <button
-              onClick={() => syncCustomerMikrotik(customer.id)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-600/20 text-purple-400 hover:bg-purple-600 hover:text-white rounded-lg font-semibold transition-colors"
-            >
-              <Wifi className="w-3.5 h-3.5" />
-              <span>Sync Mikrotik</span>
-            </button>
+            {hasPermission('canAccessNetworkConfig') && (
+              <button
+                onClick={() => syncCustomerMikrotik(customer.id)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-600/20 text-purple-400 hover:bg-purple-600 hover:text-white rounded-lg font-semibold transition-colors"
+              >
+                <Wifi className="w-3.5 h-3.5" />
+                <span>Sync Mikrotik</span>
+              </button>
+            )}
 
             <button
               onClick={() => setShowCreditInput((prev) => !prev)}
@@ -183,17 +189,19 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
               <span>+ Add Credit</span>
             </button>
 
-            <button
-              onClick={() => {
-                onClose();
-                setGlobalActiveTab('portal');
-              }}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-950 text-cyan-300 hover:bg-cyan-900 border border-cyan-800/60 rounded-lg font-semibold transition-colors"
-              title="Open Subscriber Self-Service Portal"
-            >
-              <Radio className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
-              <span>Client Portal</span>
-            </button>
+            {systemRole !== 'cashier' && (
+              <button
+                onClick={() => {
+                  onClose();
+                  setGlobalActiveTab('portal');
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-950 text-cyan-300 hover:bg-cyan-900 border border-cyan-800/60 rounded-lg font-semibold transition-colors"
+                title="Open Subscriber Self-Service Portal"
+              >
+                <Radio className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
+                <span>Client Portal</span>
+              </button>
+            )}
 
             {hasPermission('canResetCustomerPassword') && (
               <button

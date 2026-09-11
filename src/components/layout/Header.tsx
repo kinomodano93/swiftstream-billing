@@ -58,6 +58,7 @@ export const Header: React.FC<HeaderProps> = ({
     systemRole,
     overdueOperationalBillsCount,
     dueSoonOperationalBillsCount,
+    canAccessTab,
   } = useApp();
 
   const currentRoleMeta = SYSTEM_ROLES_CONFIG[systemRole] || SYSTEM_ROLES_CONFIG.admin;
@@ -107,7 +108,7 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Center Details (Visible on Desktop) */}
       <div className="hidden xl:flex items-center gap-3 text-xs text-slate-400 mx-3">
-        {coreRouter && (
+        {coreRouter && canAccessTab('mikrotik') && (
           <button
             onClick={() => setActiveTab('mikrotik')}
             className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-950/50 hover:bg-emerald-900/60 border border-emerald-500/40 text-emerald-300 font-mono text-[11px] transition-all cursor-pointer"
@@ -142,30 +143,32 @@ export const Header: React.FC<HeaderProps> = ({
         </button>
 
         {/* Bill Due Date Calendar quick access */}
-        <button
-          type="button"
-          onClick={() => setActiveTab('bill_calendar')}
-          className={`relative flex items-center gap-1.5 px-2.5 sm:px-3 py-2 rounded-xl text-xs font-semibold shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer ${
-            overdueOperationalBillsCount > 0
-              ? 'bg-rose-950/60 hover:bg-rose-900/70 text-rose-300 border border-rose-500/50 animate-pulse'
-              : dueSoonOperationalBillsCount > 0
-              ? 'bg-amber-950/60 hover:bg-amber-900/70 text-amber-300 border border-amber-500/50'
-              : 'bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800'
-          }`}
-          title="Operational Payables & Due Date Calendar (DIA, Power, Rent)"
-        >
-          <Calendar className="w-3.5 h-3.5 text-indigo-400" />
-          <span className="hidden lg:inline">Bill Calendar</span>
-          {(overdueOperationalBillsCount > 0 || dueSoonOperationalBillsCount > 0) && (
-            <span
-              className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold font-mono ${
-                overdueOperationalBillsCount > 0 ? 'bg-rose-500 text-white' : 'bg-amber-500 text-slate-950'
-              }`}
-            >
-              {overdueOperationalBillsCount > 0 ? overdueOperationalBillsCount : dueSoonOperationalBillsCount}
-            </span>
-          )}
-        </button>
+        {canAccessTab('bill_calendar') && (
+          <button
+            type="button"
+            onClick={() => setActiveTab('bill_calendar')}
+            className={`relative flex items-center gap-1.5 px-2.5 sm:px-3 py-2 rounded-xl text-xs font-semibold shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer ${
+              overdueOperationalBillsCount > 0
+                ? 'bg-rose-950/60 hover:bg-rose-900/70 text-rose-300 border border-rose-500/50 animate-pulse'
+                : dueSoonOperationalBillsCount > 0
+                ? 'bg-amber-950/60 hover:bg-amber-900/70 text-amber-300 border border-amber-500/50'
+                : 'bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800'
+            }`}
+            title="Operational Payables & Due Date Calendar (DIA, Power, Rent)"
+          >
+            <Calendar className="w-3.5 h-3.5 text-indigo-400" />
+            <span className="hidden lg:inline">Bill Calendar</span>
+            {(overdueOperationalBillsCount > 0 || dueSoonOperationalBillsCount > 0) && (
+              <span
+                className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold font-mono ${
+                  overdueOperationalBillsCount > 0 ? 'bg-rose-500 text-white' : 'bg-amber-500 text-slate-950'
+                }`}
+              >
+                {overdueOperationalBillsCount > 0 ? overdueOperationalBillsCount : dueSoonOperationalBillsCount}
+              </span>
+            )}
+          </button>
+        )}
 
         {/* Collect Payment (POS) - Hidden for technician */}
         {systemRole !== 'technician' && (
@@ -192,14 +195,16 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
         )}
 
-        <button
-          onClick={onOpenCustomerModal}
-          className="flex items-center gap-1.5 px-2.5 sm:px-3 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-cyan-600/20 transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
-          title="Register New Subscriber"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          <span className="hidden xs:inline sm:inline">New Client</span>
-        </button>
+        {canAccessTab('customers') && (
+          <button
+            onClick={onOpenCustomerModal}
+            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-cyan-600/20 transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
+            title="Register New Subscriber"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span className="hidden xs:inline sm:inline">New Client</span>
+          </button>
+        )}
 
         {/* System Role Indicator (Read-only, governed by authenticated account) */}
         <div
