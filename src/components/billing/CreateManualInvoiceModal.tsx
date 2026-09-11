@@ -44,7 +44,8 @@ export const CreateManualInvoiceModal: React.FC<CreateManualInvoiceModalProps> =
   preselectedCustomerId,
   onInvoiceCreated,
 }) => {
-  const { customers, plans, businessProfile, createInvoice, showToast } = useApp();
+  const { customers, invoices, plans, businessProfile, createInvoice, showToast } = useApp();
+
 
   const now = new Date();
   const currentMonthNum = String(now.getMonth() + 1).padStart(2, '0');
@@ -136,15 +137,44 @@ export const CreateManualInvoiceModal: React.FC<CreateManualInvoiceModalProps> =
       return;
     }
 
+    const todayStr = new Date().toISOString().slice(0, 10);
+
+    // Business rule: Due date cannot be earlier than issue date
+    if (customDueDate && customDueDate < todayStr) {
+      showToast('error', 'Invalid Due Date', 'The invoice due date cannot be set before today (issue date).');
+      return;
+    }
+
+    // Business rule: Prorated days validation
+    const proratedActive = isProrated || invoiceType === 'prorated';
+    if (proratedActive && (proratedDays < 1 || proratedDays > daysInSelectedMonth)) {
+      showToast('error', 'Invalid Prorated Days', `Prorated days must be between 1 and ${daysInSelectedMonth} for ${billingYear}-${billingMonth}.`);
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
       const startDate = `${billingYear}-${billingMonth}-01`;
       const endDate = `${billingYear}-${billingMonth}-${String(daysInSelectedMonth).padStart(2, '0')}`;
-      const todayStr = new Date().toISOString().slice(0, 10);
       const invoiceNumber = `INV-${billingYear.slice(2)}${billingMonth}-${String(Date.now()).slice(-4)}`;
 
+      // Warning check: Duplicate invoice detection for same billing period
+      const existingInv = invoices.find(
+        (inv) =>
+          inv.customerId === selectedCustomer.id &&
+          (inv.billingPeriodStart?.startsWith(`${billingYear}-${billingMonth}`) || inv.issueDate?.startsWith(`${billingYear}-${billingMonth}`))
+      );
+      if (existingInv) {
+        showToast(
+          'warning',
+          'Notice: Existing Invoice Found',
+          `Customer already has an invoice (${existingInv.invoiceNumber} - ${existingInv.status.toUpperCase()}) for ${billingYear}-${billingMonth}. Creating an additional invoice.`
+        );
+      }
+
       const items: InvoiceItem[] = [];
+
 
       // Primary Plan Item
       const proratedActive = isProrated || invoiceType === 'prorated';

@@ -1098,8 +1098,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deleteCustomer = (id: string) => {
+    if (!hasPermission('canDeleteCustomer')) {
+      showToast('error', 'Access Denied', 'You do not have permission to delete subscriber accounts.');
+      return;
+    }
     const target = customers.find((c) => c.id === id);
     if (!target) return;
+
 
     deleteFirestoreDoc(COLLECTIONS.CUSTOMERS, id);
 
@@ -1423,6 +1428,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateInvoice = (id: string, updates: Partial<Invoice>) => {
+    // Financial integrity audit: log when a paid invoice is reversed to unpaid
+    if (updates.status && updates.status !== 'paid') {
+      const existingInvoice = invoices.find((inv) => inv.id === id);
+      if (existingInvoice && existingInvoice.status === 'paid') {
+        logAuditEvent({
+          userName: currentAuthUser?.displayName || 'Admin',
+          action: 'INVOICE_PAYMENT_REVERSED',
+          category: 'billing',
+          severity: 'warning',
+          details: `Payment reversed on invoice ${existingInvoice.invoiceNumber} for ${existingInvoice.customerName}. Status changed from PAID → ${updates.status.toUpperCase()}. Amount: ₱${existingInvoice.totalAmount.toLocaleString()}.`,
+          status: 'success',
+          metadata: { invoiceId: id, invoiceNumber: existingInvoice.invoiceNumber, newStatus: updates.status },
+        });
+      }
+    }
+
     setInvoices((prev) =>
       prev.map((inv) => {
         if (inv.id === id) {
@@ -1435,9 +1456,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
   };
 
+
   const deleteInvoice = (id: string) => {
+    if (!hasPermission('canDeleteInvoice')) {
+      showToast('error', 'Access Denied', 'You do not have permission to delete invoices.');
+      return;
+    }
     const target = invoices.find((inv) => inv.id === id);
     if (!target) return;
+
+    // Financial integrity: log critical event if deleting a paid invoice
+    if (target.status === 'paid') {
+      logAuditEvent({
+        userName: currentAuthUser?.displayName || 'Admin',
+        action: 'PAID_INVOICE_DELETED',
+        category: 'billing',
+        severity: 'critical',
+        details: `⚠️ CRITICAL: Deleted PAID invoice ${target.invoiceNumber} for ${target.customerName} (Amount: ₱${target.totalAmount.toLocaleString()}). Payment record was NOT automatically reversed.`,
+        status: 'success',
+        metadata: { invoiceId: target.id, invoiceNumber: target.invoiceNumber, amount: target.totalAmount },
+      });
+    }
+
 
     deleteFirestoreDoc(COLLECTIONS.INVOICES, id);
     setInvoices((prev) => prev.filter((inv) => inv.id !== id));
@@ -2106,8 +2146,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deletePayment = (id: string) => {
+    if (!hasPermission('canDeletePayment')) {
+      showToast('error', 'Access Denied', 'You do not have permission to void payment records.');
+      return;
+    }
     const target = payments.find((p) => p.id === id);
     if (!target) return;
+
 
     deleteFirestoreDoc(COLLECTIONS.PAYMENTS, id);
     setPayments((prev) => prev.filter((p) => p.id !== id));
@@ -2240,13 +2285,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // --- Plan Operations ---
   const addPlan = (planData: Omit<Plan, 'id'>) => {
+    if (!hasPermission('canManagePlans')) {
+      showToast('error', 'Access Denied', 'You do not have permission to create or manage internet plans.');
+      return;
+    }
     const newPlan: Plan = { ...planData, id: generateId('PLAN') };
+
     setPlans((prev) => [...prev, newPlan]);
     saveFirestoreDoc(COLLECTIONS.PLANS, newPlan);
     showToast('success', 'Plan Created', `Internet plan "${newPlan.name}" is now available.`);
   };
 
   const updatePlan = (id: string, updates: Partial<Plan>) => {
+    if (!hasPermission('canManagePlans')) {
+      showToast('error', 'Access Denied', 'You do not have permission to modify internet plans.');
+      return;
+    }
+
     setPlans((prev) =>
       prev.map((p) => {
         if (p.id === id) {
@@ -2279,10 +2334,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deletePlan = (id: string) => {
+    if (!hasPermission('canManagePlans')) {
+      showToast('error', 'Access Denied', 'You do not have permission to delete internet plans.');
+      return;
+    }
     deleteFirestoreDoc(COLLECTIONS.PLANS, id);
     setPlans((prev) => prev.filter((p) => p.id !== id));
     showToast('warning', 'Plan Deleted', 'Plan removed from catalog.');
   };
+
 
   // --- Coverage Area Operations ---
   const addCoverageArea = (areaData: Omit<CoverageArea, 'id'>): CoverageArea => {
@@ -3146,7 +3206,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // --- Staff & System Roles Management ---
   const addStaffUser = async (newUserData: Omit<StaffUser, 'id' | 'createdAt'>): Promise<StaffUser> => {
+    if (!hasPermission('canManageStaff')) {
+      showToast('error', 'Access Denied', 'Only administrators can add staff accounts.');
+      throw new Error('Permission denied: canManageStaff');
+    }
     const newStaff: StaffUser = {
+
       ...newUserData,
       id: `staff-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       createdAt: new Date().toISOString(),
@@ -3206,6 +3271,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateStaffUser = async (id: string, updates: Partial<StaffUser>): Promise<void> => {
+    if (!hasPermission('canManageStaff')) {
+      showToast('error', 'Access Denied', 'Only administrators can modify staff accounts.');
+      return;
+    }
+
     const updated = staffUsers.map((u) => (u.id === id ? { ...u, ...updates, updatedAt: new Date().toISOString() } : u));
     setStaffUsers(updated);
     setStoredStaffUsers(updated);
@@ -3243,8 +3313,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deleteStaffUser = async (id: string): Promise<void> => {
+    if (!hasPermission('canManageStaff')) {
+      showToast('error', 'Access Denied', 'Only administrators can delete staff accounts.');
+      return;
+    }
     const target = staffUsers.find((u) => u.id === id);
     if (!target) return;
+
 
     if (target.role === 'admin') {
       const activeAdmins = staffUsers.filter((u) => u.role === 'admin' && u.id !== id && u.status === 'active');

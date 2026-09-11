@@ -98,6 +98,11 @@ export const BatchBillingModal: React.FC<BatchBillingModalProps> = ({ onClose })
     );
   }, [eligibleSubscribers]);
 
+  const skippedCount = useMemo(() => {
+    return customers.length - eligibleSubscribers.length;
+  }, [customers.length, eligibleSubscribers.length]);
+
+
   const handleRunBatch = () => {
     if (eligibleSubscribers.length === 0) {
       showToast('warning', 'No Subscribers to Bill', 'All selected subscribers already have invoices for this period.');
@@ -254,21 +259,34 @@ export const BatchBillingModal: React.FC<BatchBillingModalProps> = ({ onClose })
               )}
 
               {/* Live Count & Estimated Amount Preview */}
-              <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800 flex items-center justify-between">
-                <div className="flex items-center gap-2 text-slate-300">
-                  <Users className="w-4 h-4 text-cyan-400" />
-                  <span>Subscribers to Bill:</span>
-                  <span className="font-bold text-white px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-300 border border-cyan-500/30 font-mono">
-                    {eligibleSubscribers.length}
-                  </span>
+              <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-slate-300">
+                    <Users className="w-4 h-4 text-cyan-400" />
+                    <span>Subscribers to Bill:</span>
+                    <span className="font-bold text-white px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-300 border border-cyan-500/30 font-mono">
+                      {eligibleSubscribers.length}
+                    </span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[10px] text-slate-500 block">Est. Total:</span>
+                    <span className="font-mono font-bold text-emerald-400 text-xs">
+                      {formatCurrency(previewTotalAmount)}
+                    </span>
+                  </div>
                 </div>
-                <div className="text-right">
-                  <span className="text-[10px] text-slate-500 block">Est. Total:</span>
-                  <span className="font-mono font-bold text-emerald-400 text-xs">
-                    {formatCurrency(previewTotalAmount)}
-                  </span>
-                </div>
+
+                {skippedCount > 0 && (
+                  <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
+                    <span className="flex items-center gap-1">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Already Invoiced (Skipped):</span>
+                    </span>
+                    <span className="font-mono text-slate-300 font-semibold">{skippedCount} subscribers</span>
+                  </div>
+                )}
               </div>
+
 
               {/* Stacked Action Buttons (Matching Image 1) */}
               <div className="pt-2 space-y-2">

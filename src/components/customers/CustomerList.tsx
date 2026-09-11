@@ -16,13 +16,17 @@ import {
   ExternalLink,
   Zap,
   KeyRound,
+  PauseCircle,
+  PlayCircle,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { Customer, CustomerStatus } from '../../types';
 import { formatCurrency, formatPhoneNumber, getCustomerStatusBadge } from '../../utils/formatters';
 import { ProvisionModal } from './ProvisionModal';
 import { ConfirmDeleteModal } from '../common/ConfirmDeleteModal';
+import { ConfirmActionModal } from '../common/ConfirmActionModal';
 import { ResetCustomerPasswordModal } from './ResetCustomerPasswordModal';
+
 
 interface CustomerListProps {
   onOpenCustomerModal: (customer?: Customer) => void;
@@ -52,6 +56,8 @@ export const CustomerList: React.FC<CustomerListProps> = ({
   const [selectedCustomerForProvision, setSelectedCustomerForProvision] = useState<Customer | null>(null);
   const [customerToDelete, setCustomerToDelete] = useState<Customer | null>(null);
   const [customerForPasswordReset, setCustomerForPasswordReset] = useState<Customer | null>(null);
+  const [statusActionCustomer, setStatusActionCustomer] = useState<{ customer: Customer; targetStatus: CustomerStatus } | null>(null);
+
 
   // Extract unique barangays
   const barangays = Array.from(new Set(customers.map((c) => c.address.barangay)));
@@ -405,6 +411,26 @@ export const CustomerList: React.FC<CustomerListProps> = ({
                             </button>
                           )}
 
+                          {customer.status === 'active' && (
+                            <button
+                              onClick={() => setStatusActionCustomer({ customer, targetStatus: 'suspended' })}
+                              className="p-1.5 bg-slate-800 text-amber-400 hover:bg-amber-600 hover:text-white rounded-lg transition-colors cursor-pointer"
+                              title="Suspend Subscriber Service"
+                            >
+                              <PauseCircle className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+
+                          {(customer.status === 'suspended' || customer.status === 'disconnected') && (
+                            <button
+                              onClick={() => setStatusActionCustomer({ customer, targetStatus: 'active' })}
+                              className="p-1.5 bg-slate-800 text-emerald-400 hover:bg-emerald-600 hover:text-white rounded-lg transition-colors cursor-pointer"
+                              title="Reactivate Subscriber Service"
+                            >
+                              <PlayCircle className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+
                           {hasPermission('canDeleteCustomer') && (
                             <button
                               onClick={() => setCustomerToDelete(customer)}
@@ -455,7 +481,29 @@ export const CustomerList: React.FC<CustomerListProps> = ({
         }}
         onClose={() => setCustomerToDelete(null)}
       />
+
+      {/* Confirmation Dialog for Customer Status Change (Suspend / Disconnect / Reactivate) */}
+      {statusActionCustomer && (
+        <ConfirmActionModal
+          isOpen={!!statusActionCustomer}
+          title={statusActionCustomer.targetStatus === 'suspended' ? 'Suspend Subscriber Service' : 'Reactivate Subscriber Service'}
+          itemName={`${statusActionCustomer.customer.fullName} (${statusActionCustomer.customer.accountNo})`}
+          description={
+            statusActionCustomer.targetStatus === 'suspended'
+              ? 'Are you sure you want to suspend this subscriber? Their PPPoE secret on the MikroTik router will be isolated/blocked, cutting their internet connectivity immediately until reactivated.'
+              : 'Reactivating this subscriber will re-enable their PPPoE credentials and restore internet connectivity on the MikroTik router.'
+          }
+          severity={statusActionCustomer.targetStatus === 'suspended' ? 'critical' : 'warning'}
+          confirmLabel={statusActionCustomer.targetStatus === 'suspended' ? 'Yes, Suspend Line' : 'Yes, Reactivate Line'}
+          onConfirm={() => {
+            toggleCustomerStatus(statusActionCustomer.customer.id, statusActionCustomer.targetStatus);
+            setStatusActionCustomer(null);
+          }}
+          onClose={() => setStatusActionCustomer(null)}
+        />
+      )}
     </div>
   );
 };
+
 

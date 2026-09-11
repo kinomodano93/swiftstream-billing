@@ -517,9 +517,13 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
       <ConfirmDeleteModal
         isOpen={!!invoiceToDelete}
         title="Delete Billing Invoice"
-        itemName={invoiceToDelete ? `Invoice #${invoiceToDelete.invoiceNumber} — ₱${invoiceToDelete.totalAmount.toLocaleString()} (${invoiceToDelete.customerName})` : undefined}
-        description="Are you sure you want to permanently delete this invoice? The billing record and outstanding balance will be removed from your accounts ledger and Cloud Firestore."
-        confirmLabel="Yes, Delete Invoice"
+        itemName={invoiceToDelete ? `Invoice #${invoiceToDelete.invoiceNumber} — ₱${invoiceToDelete.totalAmount.toLocaleString()} (${invoiceToDelete.customerName}) • ${invoiceToDelete.status.toUpperCase()}` : undefined}
+        description={
+          invoiceToDelete?.status === 'paid'
+            ? '⚠️ CRITICAL FINANCIAL WARNING: This invoice is already marked as PAID. Deleting it will permanently remove the billing record from your ledger, but will NOT automatically refund or reverse the official payment receipt. Proceed with extreme caution.'
+            : 'Are you sure you want to permanently delete this invoice? The billing record and outstanding balance will be removed from your accounts ledger and Cloud Firestore.'
+        }
+        confirmLabel={invoiceToDelete?.status === 'paid' ? 'Confirm Deletion of Paid Invoice' : 'Yes, Delete Invoice'}
         onConfirm={() => {
           if (invoiceToDelete) {
             deleteInvoice(invoiceToDelete.id);

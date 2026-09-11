@@ -47,6 +47,7 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
   onClose,
 }) => {
   const {
+    customers,
     addCustomer,
     updateCustomer,
     updateMikrotikDevice,
@@ -350,16 +351,54 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
     e.preventDefault();
 
     if (!fullName.trim() || !mobile.trim()) {
-      alert('Please provide customer full name and mobile number.');
+      setSubmitError('Please provide customer full name and mobile number.');
       return;
+    }
+
+    // Business rule: Mobile phone must be at least 10 digits
+    const cleanMobile = mobile.replace(/[^0-9]/g, '');
+    if (cleanMobile.length < 10) {
+      setSubmitError('Please provide a valid 10-11 digit Philippine mobile number (e.g. 09171234567).');
+      return;
+    }
+
+    const finalPppoeUser =
+      pppoeUsername.trim() ||
+      `swift_${fullName.toLowerCase().replace(/[^a-z0-9]/g, '_').slice(0, 16)}`;
+
+    // Business rule: Check PPPoE username uniqueness across subscribers
+    const pppoeDuplicate = customers.find(
+      (c) =>
+        c.network?.pppoeUsername &&
+        c.network.pppoeUsername.toLowerCase().trim() === finalPppoeUser.toLowerCase().trim() &&
+        c.id !== customerToEdit?.id
+    );
+    if (pppoeDuplicate) {
+      setSubmitError(
+        `PPPoE Dial-Up Username "${finalPppoeUser}" is already in use by subscriber "${pppoeDuplicate.fullName}" (${pppoeDuplicate.accountNo}). PPPoE usernames must be unique.`
+      );
+      return;
+    }
+
+    // Business rule: Check email uniqueness if email was provided
+    if (email.trim()) {
+      const emailDuplicate = customers.find(
+        (c) =>
+          c.email &&
+          c.email.toLowerCase().trim() === email.trim().toLowerCase() &&
+          c.id !== customerToEdit?.id
+      );
+      if (emailDuplicate) {
+        setSubmitError(
+          `Email address "${email.trim()}" is already assigned to subscriber "${emailDuplicate.fullName}" (${emailDuplicate.accountNo}).`
+        );
+        return;
+      }
     }
 
     setSubmitError(null);
     setIsSaving(true);
 
-    const finalPppoeUser =
-      pppoeUsername.trim() ||
-      `swift_${fullName.toLowerCase().replace(/[^a-z0-9]/g, '_').slice(0, 16)}`;
 
     const networkData: any = {
       pppoeUsername: finalPppoeUser,

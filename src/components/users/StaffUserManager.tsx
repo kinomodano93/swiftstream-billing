@@ -38,7 +38,11 @@ export const StaffUserManager: React.FC = () => {
     toggleStaffUserStatus,
     systemRole,
     currentAuthUser,
+    hasPermission,
   } = useApp();
+
+  const canManageStaff = hasPermission('canManageStaff');
+
 
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState<'all' | SystemRole>('all');
@@ -228,14 +232,21 @@ export const StaffUserManager: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={handleOpenCreateModal}
-            className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-cyan-600/20 transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
-          >
-            <UserPlus className="w-4 h-4" />
-            <span>Add Staff Member</span>
-          </button>
+          {canManageStaff ? (
+            <button
+              type="button"
+              onClick={handleOpenCreateModal}
+              className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-cyan-600/20 transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
+            >
+              <UserPlus className="w-4 h-4" />
+              <span>Add Staff Member</span>
+            </button>
+          ) : (
+            <span className="flex items-center gap-1.5 px-3 py-2 bg-slate-800/80 border border-slate-700 text-slate-400 rounded-xl text-xs font-medium">
+              <Lock className="w-3.5 h-3.5" />
+              <span>Read-Only (Admin Restricted)</span>
+            </span>
+          )}
         </div>
       </div>
 
@@ -413,13 +424,16 @@ export const StaffUserManager: React.FC = () => {
                       <td className="px-4 py-3.5">
                         <button
                           type="button"
-                          onClick={() => toggleStaffUserStatus(staff.id)}
-                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border transition-all cursor-pointer ${
+                          disabled={!canManageStaff}
+                          onClick={() => canManageStaff && toggleStaffUserStatus(staff.id)}
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border transition-all ${
+                            canManageStaff ? 'cursor-pointer' : 'cursor-not-allowed opacity-80'
+                          } ${
                             staff.status === 'active'
                               ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
                               : 'bg-rose-500/10 border-rose-500/30 text-rose-400 hover:bg-rose-500/20'
                           }`}
-                          title="Click to toggle status"
+                          title={canManageStaff ? 'Click to toggle status' : 'Status change restricted to Admin'}
                         >
                           <span
                             className={`w-1.5 h-1.5 rounded-full ${
@@ -459,27 +473,31 @@ export const StaffUserManager: React.FC = () => {
 
                       {/* Actions */}
                       <td className="px-4 py-3.5 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          {/* Edit */}
-                          <button
-                            type="button"
-                            onClick={() => handleOpenEditModal(staff)}
-                            className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg border border-slate-700 transition-colors cursor-pointer"
-                            title="Edit Staff Member"
-                          >
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </button>
+                        {canManageStaff ? (
+                          <div className="flex items-center justify-end gap-1.5">
+                            {/* Edit */}
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEditModal(staff)}
+                              className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg border border-slate-700 transition-colors cursor-pointer"
+                              title="Edit Staff Member"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
 
-                          {/* Delete */}
-                          <button
-                            type="button"
-                            onClick={() => setStaffToDelete(staff)}
-                            className="p-1.5 bg-slate-800 hover:bg-rose-950/60 text-slate-400 hover:text-rose-400 border border-slate-700 hover:border-rose-800/50 rounded-lg transition-colors cursor-pointer"
-                            title="Delete Staff Member"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
+                            {/* Delete */}
+                            <button
+                              type="button"
+                              onClick={() => setStaffToDelete(staff)}
+                              className="p-1.5 bg-slate-800 hover:bg-rose-950/60 text-slate-400 hover:text-rose-400 border border-slate-700 hover:border-rose-800/50 rounded-lg transition-colors cursor-pointer"
+                              title="Delete Staff Member"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-[11px] text-slate-500 font-mono italic">View Only</span>
+                        )}
                       </td>
                     </tr>
                   );
