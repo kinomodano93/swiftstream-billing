@@ -44,7 +44,9 @@ export const CreateManualInvoiceModal: React.FC<CreateManualInvoiceModalProps> =
   preselectedCustomerId,
   onInvoiceCreated,
 }) => {
-  const { customers, invoices, plans, businessProfile, createInvoice, showToast } = useApp();
+  const { customers, invoices, plans, businessProfile, createInvoice, showToast, hasPermission, systemRole } = useApp();
+  const canDirectPay = hasPermission('canAccessFinancials');
+
 
 
   const now = new Date();
@@ -237,15 +239,16 @@ export const CreateManualInvoiceModal: React.FC<CreateManualInvoiceModalProps> =
         proratedDays: proratedActive ? proratedDays : undefined,
         previousBalance: previousBal,
         totalAmount,
-        amountPaid,
-        balanceDue,
-        status: initialStatus,
+        amountPaid: canDirectPay && initialStatus === 'paid' ? totalAmount : 0,
+        balanceDue: canDirectPay && initialStatus === 'paid' ? 0 : totalAmount,
+        status: canDirectPay && initialStatus === 'paid' ? 'paid' : 'unpaid',
         sentViaSms: false,
         sentViaEmail: false,
-        paidAt: initialStatus === 'paid' ? new Date().toISOString() : undefined,
-        paymentMethodUsed: initialStatus === 'paid' ? 'cash' : undefined,
+        paidAt: canDirectPay && initialStatus === 'paid' ? new Date().toISOString() : undefined,
+        paymentMethodUsed: canDirectPay && initialStatus === 'paid' ? 'cash' : undefined,
         allowDuplicate: true,
       });
+
 
       showToast(
         'success',
@@ -455,21 +458,26 @@ export const CreateManualInvoiceModal: React.FC<CreateManualInvoiceModalProps> =
             </div>
 
             <div>
-              <fieldset className="border border-slate-700/90 rounded-xl px-3 pb-2 pt-0.5 bg-slate-950/60 focus-within:border-blue-500 transition-all">
+              <fieldset className={`border ${canDirectPay ? 'border-slate-700/90 focus-within:border-blue-500' : 'border-slate-800 bg-slate-900/40'} rounded-xl px-3 pb-2 pt-0.5 bg-slate-950/60 transition-all`}>
                 <legend className="px-1.5 text-[11px] font-medium text-slate-400">
                   Initial Invoice Status
                 </legend>
                 <select
-                  value={initialStatus}
+                  value={canDirectPay ? initialStatus : 'unpaid'}
+                  disabled={!canDirectPay}
                   onChange={(e) => setInitialStatus(e.target.value as any)}
-                  className="w-full bg-transparent text-slate-100 text-xs py-1 focus:outline-none cursor-pointer"
+                  className={`w-full bg-transparent text-slate-100 text-xs py-1 focus:outline-none ${canDirectPay ? 'cursor-pointer' : 'cursor-not-allowed text-slate-400'}`}
                 >
-                  <option value="unpaid" className="bg-slate-900 text-slate-100">Unpaid</option>
-                  <option value="paid" className="bg-slate-900 text-slate-100">Paid</option>
+                  <option value="unpaid" className="bg-slate-900 text-slate-100">Unpaid (Default)</option>
+                  {canDirectPay && (
+                    <option value="paid" className="bg-slate-900 text-slate-100">Paid (Admin Direct Settle)</option>
+                  )}
                 </select>
               </fieldset>
               <p className="text-[10px] text-slate-400 mt-1 pl-1">
-                Select Paid if this invoice is issued to restore paid data.
+                {canDirectPay
+                  ? 'Admins may directly mark paid if restoring historical records.'
+                  : 'Cashier Guard: Payments must be collected via the Register to issue an Official Receipt and record drawer cash.'}
               </p>
             </div>
           </div>

@@ -34,10 +34,11 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   onClose,
   onOpenPaymentModal,
 }) => {
-  const { invoices, customers, plans, businessProfile, applyInvoiceDiscount, sendReminder } = useApp();
+  const { invoices, customers, plans, businessProfile, applyInvoiceDiscount, sendReminder, hasPermission } = useApp();
 
   const [discountInput, setDiscountInput] = useState<string>('');
   const [showDiscountForm, setShowDiscountForm] = useState<boolean>(false);
+
 
   const invoice = invoices.find((inv) => inv.id === invoiceId);
   if (!invoice) return null;
@@ -494,43 +495,45 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
           </div>
 
           {/* 6. Discount Tool Section (no-print) */}
-          <div className="no-print pt-2 border-t border-slate-800">
-            {!showDiscountForm ? (
-              <button
-                onClick={() => setShowDiscountForm(true)}
-                className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1.5 transition-colors cursor-pointer"
-              >
-                <Tag className="w-3.5 h-3.5" />
-                <span>Apply Promo Discount or Credit Adjustment to this Bill</span>
-              </button>
-            ) : (
-              <form onSubmit={handleApplyDiscount} className="flex items-center gap-3 p-3 bg-slate-950 rounded-xl border border-slate-800">
-                <span className="text-xs text-slate-400">Discount Amount (PHP ₱):</span>
-                <input
-                  type="number"
-                  step="any"
-                  required
-                  value={discountInput}
-                  onChange={(e) => setDiscountInput(e.target.value)}
-                  placeholder="e.g. 100"
-                  className="px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-100 font-mono focus:outline-none focus:border-cyan-500 w-32"
-                />
+          {hasPermission('canApplyInvoiceDiscount') && (
+            <div className="no-print pt-2 border-t border-slate-800">
+              {!showDiscountForm ? (
                 <button
-                  type="submit"
-                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                  onClick={() => setShowDiscountForm(true)}
+                  className="text-xs text-cyan-400 hover:text-cyan-300 flex items-center gap-1.5 transition-colors cursor-pointer"
                 >
-                  Apply
+                  <Tag className="w-3.5 h-3.5" />
+                  <span>Apply Promo Discount or Credit Adjustment to this Bill</span>
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setShowDiscountForm(false)}
-                  className="text-xs text-slate-500 hover:text-slate-300 cursor-pointer"
-                >
-                  Cancel
-                </button>
-              </form>
-            )}
-          </div>
+              ) : (
+                <form onSubmit={handleApplyDiscount} className="flex items-center gap-3 p-3 bg-slate-950 rounded-xl border border-slate-800">
+                  <span className="text-xs text-slate-400">Discount Amount (PHP ₱):</span>
+                  <input
+                    type="number"
+                    step="any"
+                    required
+                    value={discountInput}
+                    onChange={(e) => setDiscountInput(e.target.value)}
+                    placeholder="e.g. 100"
+                    className="px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-100 font-mono focus:outline-none focus:border-cyan-500 w-32"
+                  />
+                  <button
+                    type="submit"
+                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                  >
+                    Apply
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowDiscountForm(false)}
+                    className="text-xs text-slate-500 hover:text-slate-300 cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                </form>
+              )}
+            </div>
+          )}
 
           {/* 7. Signature & Official Reminders */}
           <div className="pt-4 border-t border-slate-800 print:border-slate-300 flex flex-col sm:flex-row justify-between items-end gap-6 text-[11px] text-slate-400 print:text-slate-600">

@@ -76,6 +76,9 @@ export interface RolePermissions {
   canAccessVerificationQueue: boolean;
   canManageStaff: boolean;
   canResetCustomerPassword: boolean;
+  canBulkGenerateInvoices: boolean;
+  canApplyInvoiceDiscount: boolean;
+  canRunGraceAudit: boolean;
 }
 
 export const ROLE_PERMISSIONS: Record<SystemRole, RolePermissions> = {
@@ -113,6 +116,9 @@ export const ROLE_PERMISSIONS: Record<SystemRole, RolePermissions> = {
     canAccessVerificationQueue: true,
     canManageStaff: true,
     canResetCustomerPassword: true,
+    canBulkGenerateInvoices: true,
+    canApplyInvoiceDiscount: true,
+    canRunGraceAudit: true,
   },
   cashier: {
     allowedTabs: [
@@ -138,6 +144,9 @@ export const ROLE_PERMISSIONS: Record<SystemRole, RolePermissions> = {
     canAccessVerificationQueue: true,
     canManageStaff: false,
     canResetCustomerPassword: true,
+    canBulkGenerateInvoices: false,
+    canApplyInvoiceDiscount: false,
+    canRunGraceAudit: false,
   },
   technician: {
     allowedTabs: [
@@ -162,6 +171,9 @@ export const ROLE_PERMISSIONS: Record<SystemRole, RolePermissions> = {
     canAccessVerificationQueue: false,
     canManageStaff: false,
     canResetCustomerPassword: false,
+    canBulkGenerateInvoices: false,
+    canApplyInvoiceDiscount: false,
+    canRunGraceAudit: false,
   },
 };
 

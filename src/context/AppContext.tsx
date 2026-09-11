@@ -1516,9 +1516,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     applyWalletCredits?: boolean;
     enableProration?: boolean;
   }): { count: number; totalAmount: number } => {
+    if (!hasPermission('canBulkGenerateInvoices')) {
+      showToast('error', 'Access Restricted', 'Only administrators have permission to run bulk billing generation.');
+      return { count: 0, totalAmount: 0 };
+    }
+
     const activeSubscribers = customers.filter(
       (c) => c.status === 'active' || c.status === 'overdue'
     );
+
 
     let generatedCount = 0;
     let totalGeneratedAmount = 0;
@@ -1704,8 +1710,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const applyInvoiceDiscount = (invoiceId: string, discountAmount: number) => {
+    if (!hasPermission('canApplyInvoiceDiscount')) {
+      showToast('error', 'Access Restricted', 'Only administrators have permission to grant courtesy invoice discounts.');
+      return;
+    }
+
     const invoice = invoices.find((inv) => inv.id === invoiceId);
     if (!invoice) return;
+
 
     const newBalanceDue = Math.max(0, invoice.totalAmount - discountAmount - invoice.amountPaid);
     const newStatus = newBalanceDue === 0 ? 'paid' : invoice.amountPaid > 0 ? 'partially_paid' : 'unpaid';
@@ -1770,8 +1782,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // --- Automated Grace Period & Isolation Audit ---
   const runDailyGraceAudit = (): { isolatedCount: number; reactivatedCount: number; graceCount: number } => {
+    if (!hasPermission('canRunGraceAudit')) {
+      showToast('error', 'Access Restricted', 'Only administrators can initiate automated network isolation and grace audits.');
+      return { isolatedCount: 0, reactivatedCount: 0, graceCount: 0 };
+    }
+
     const today = new Date();
     const graceDays = businessProfile.invoiceGracePeriodDays || 5;
+
 
     let isolatedCount = 0;
     let reactivatedCount = 0;

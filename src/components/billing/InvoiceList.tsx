@@ -18,11 +18,13 @@ import {
   DollarSign,
   Layers,
   Clock,
+  Lock,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { Invoice, InvoiceStatus, Payment } from '../../types';
 import { formatCurrency, formatDate, getInvoiceStatusBadge } from '../../utils/formatters';
 import { generateInvoicePDF } from '../../utils/pdfGenerator';
+
 import { DailyRemittanceAudit } from './DailyRemittanceAudit';
 import { ThermalReceiptModal } from './ThermalReceiptModal';
 import { ConfirmDeleteModal } from '../common/ConfirmDeleteModal';
@@ -141,14 +143,16 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
-          <button
-            onClick={() => runDailyGraceAudit()}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold transition-all hover:scale-105"
-            title="Evaluate 5-day grace period, auto-isolate overdue accounts, and unsuspend paid accounts"
-          >
-            <ShieldCheck className="w-4 h-4 text-emerald-400" />
-            <span>Run Daily Grace Audit</span>
-          </button>
+          {hasPermission('canRunGraceAudit') && (
+            <button
+              onClick={() => runDailyGraceAudit()}
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold transition-all hover:scale-105"
+              title="Evaluate 5-day grace period, auto-isolate overdue accounts, and unsuspend paid accounts"
+            >
+              <ShieldCheck className="w-4 h-4 text-emerald-400" />
+              <span>Run Daily Grace Audit</span>
+            </button>
+          )}
 
           <button
             onClick={exportInvoicesToCSV}
@@ -167,14 +171,24 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
             <span>Create Manual Invoice</span>
           </button>
 
-          <button
-            onClick={onOpenBatchBillingModal}
-            className="flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white rounded-xl text-xs font-semibold shadow-md shadow-amber-600/20 transition-all hover:scale-105 cursor-pointer"
-            title="Generate invoices in bulk across subscriber categories"
-          >
-            <Zap className="w-4 h-4 text-amber-100" />
-            <span>Bulk Generate Invoices</span>
-          </button>
+          {hasPermission('canBulkGenerateInvoices') ? (
+            <button
+              onClick={onOpenBatchBillingModal}
+              className="flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white rounded-xl text-xs font-semibold shadow-md shadow-amber-600/20 transition-all hover:scale-105 cursor-pointer"
+              title="Generate invoices in bulk across subscriber categories"
+            >
+              <Zap className="w-4 h-4 text-amber-100" />
+              <span>Bulk Generate Invoices</span>
+            </button>
+          ) : (
+            <span
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-800/70 border border-slate-700/80 text-slate-400 rounded-xl text-xs font-medium cursor-not-allowed"
+              title="Bulk invoice generation is restricted to Administrator"
+            >
+              <Lock className="w-3.5 h-3.5 text-slate-500" />
+              <span>Bulk Billing (Admin Only)</span>
+            </span>
+          )}
         </div>
       </div>
 
