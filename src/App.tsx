@@ -48,11 +48,15 @@ const MainLayout: React.FC = () => {
     isAuthModalOpen,
     authModalMode,
     authModalEmail,
+    authModalPlanId,
+    authModalBarangay,
+    authModalMunicipality,
     openAuthModal,
     closeAuthModal,
     currentAuthUser,
     systemRole,
     canAccessTab,
+    isAuthReady,
   } = useApp();
   // Modal States
   const [showPaymentModal, setShowPaymentModal] = useState<boolean>(false);
@@ -138,6 +142,9 @@ const MainLayout: React.FC = () => {
           onClose={closeAuthModal}
           initialMode={authModalMode}
           initialEmail={authModalEmail}
+          initialPlanId={authModalPlanId}
+          initialBarangay={authModalBarangay}
+          initialMunicipality={authModalMunicipality}
         />
         <NotificationToast />
       </div>
@@ -168,8 +175,23 @@ const MainLayout: React.FC = () => {
           onClose={closeAuthModal}
           initialMode={authModalMode}
           initialEmail={authModalEmail}
+          initialPlanId={authModalPlanId}
+          initialBarangay={authModalBarangay}
+          initialMunicipality={authModalMunicipality}
         />
         <NotificationToast />
+      </div>
+    );
+  }
+
+  // While Firebase auth handshake is resolving on refresh / initial load, show clean loading state instead of false unauthorized lock
+  if (!isAuthReady && activeTab !== 'home' && activeTab !== 'portal') {
+    return (
+      <div className="h-screen w-screen flex flex-col items-center justify-center bg-slate-950 text-slate-100 p-6 selection:bg-cyan-500 selection:text-white relative overflow-hidden">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-10 h-10 border-4 border-cyan-500/30 border-t-cyan-500 rounded-full animate-spin" />
+          <p className="text-sm font-medium text-slate-400 font-mono tracking-wide">Validating session...</p>
+        </div>
       </div>
     );
   }
@@ -237,6 +259,9 @@ const MainLayout: React.FC = () => {
           onClose={closeAuthModal}
           initialMode={authModalMode}
           initialEmail={authModalEmail}
+          initialPlanId={authModalPlanId}
+          initialBarangay={authModalBarangay}
+          initialMunicipality={authModalMunicipality}
         />
         <NotificationToast />
       </div>
@@ -475,6 +500,9 @@ const MainLayout: React.FC = () => {
         onClose={closeAuthModal}
         initialMode={authModalMode}
         initialEmail={authModalEmail}
+        initialPlanId={authModalPlanId}
+        initialBarangay={authModalBarangay}
+        initialMunicipality={authModalMunicipality}
       />
 
       {/* Toast Notification Container */}

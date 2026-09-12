@@ -94,10 +94,18 @@ interface AppContextType {
   // Auth state & actions
   currentAuthUser: AppUserProfile | null;
   setCurrentAuthUser: (user: AppUserProfile | null) => void;
+  isAuthReady: boolean;
   isAuthModalOpen: boolean;
   authModalMode: 'signin' | 'signup' | 'forgot';
   authModalEmail: string;
-  openAuthModal: (mode?: 'signin' | 'signup' | 'forgot', initialEmail?: string) => void;
+  authModalPlanId?: string;
+  authModalBarangay?: string;
+  authModalMunicipality?: string;
+  openAuthModal: (
+    mode?: 'signin' | 'signup' | 'forgot',
+    initialEmail?: string,
+    options?: { planId?: string; barangay?: string; municipality?: string }
+  ) => void;
   closeAuthModal: () => void;
 
   // System Role & RBAC
@@ -364,26 +372,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       if (typeof window !== 'undefined') {
         const hash = window.location.hash.replace(/^#\/?/, '').trim();
-        // If an explicit tab is specified in the URL (e.g. #customers, #billing, #dashboard, #portal, #home)
-        if (hash) {
-          if (hash === 'home') return 'home';
-          if (hash === 'portal') return 'portal';
-          if (VALID_TABS.has(hash)) {
-            // Guard admin tabs: Only allow direct deep-link into admin tabs if user is authenticated staff
+        const savedTab = localStorage.getItem('swiftstream_active_tab') || '';
+        const candidateTab = hash || savedTab;
+
+        // If an explicit tab is specified in the URL hash or saved in localStorage
+        if (candidateTab) {
+          if (candidateTab === 'home') return 'home';
+          if (candidateTab === 'portal') return 'portal';
+          if (VALID_TABS.has(candidateTab)) {
+            // Check local auth cache first
             const localRaw = localStorage.getItem('swiftstream_current_auth_user');
             if (localRaw) {
               try {
                 const user = JSON.parse(localRaw) as AppUserProfile;
                 if (isStaffUser(user)) {
-                  return hash;
+                  return candidateTab;
                 }
               } catch {}
             }
-            // If not logged in as staff, safely default to home
-            return 'home';
+            // If auth is still initializing, preserve candidateTab during initial hydration.
+            // The role-guard useEffect will verify permissions once isAuthReady is true.
+            return candidateTab;
           }
         } else {
-          // If no hash in URL (direct root visit e.g. http://localhost:5173/ or domain), always land on public Home Page
+          // Direct root visit with no hash and no saved tab defaults to home
           return 'home';
         }
       }
@@ -456,25 +468,46 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch {}
     return null;
   });
+  const [isAuthReady, setIsAuthReady] = useState<boolean>(() => {
+    try {
+      return !!localStorage.getItem('swiftstream_current_auth_user');
+    } catch {
+      return false;
+    }
+  });
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
   const [authModalMode, setAuthModalMode] = useState<'signin' | 'signup' | 'forgot'>('signin');
   const [authModalEmail, setAuthModalEmail] = useState<string>('');
+  const [authModalPlanId, setAuthModalPlanId] = useState<string | undefined>();
+  const [authModalBarangay, setAuthModalBarangay] = useState<string | undefined>();
+  const [authModalMunicipality, setAuthModalMunicipality] = useState<string | undefined>();
 
-  const openAuthModal = (mode: 'signin' | 'signup' | 'forgot' = 'signin', initialEmail: string = '') => {
+  const openAuthModal = (
+    mode: 'signin' | 'signup' | 'forgot' = 'signin',
+    initialEmail: string = '',
+    options?: { planId?: string; barangay?: string; municipality?: string }
+  ) => {
     setAuthModalMode(mode);
     setAuthModalEmail(initialEmail);
+    setAuthModalPlanId(options?.planId);
+    setAuthModalBarangay(options?.barangay);
+    setAuthModalMunicipality(options?.municipality);
     setIsAuthModalOpen(true);
   };
 
   const closeAuthModal = () => {
     setIsAuthModalOpen(false);
     setAuthModalEmail('');
+    setAuthModalPlanId(undefined);
+    setAuthModalBarangay(undefined);
+    setAuthModalMunicipality(undefined);
   };
 
   // Subscribe to Firebase Auth changes
   useEffect(() => {
     const unsubAuth = subscribeToAuth((profile) => {
       setCurrentAuthUser(profile);
+      setIsAuthReady(true);
     });
     return () => unsubAuth();
   }, []);
@@ -482,6 +515,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // System Role State (admin, cashier, technician)
   const [systemRole, setSystemRoleState] = useState<SystemRole>(() => {
     try {
+      const localRaw = localStorage.getItem('swiftstream_current_auth_user');
+      if (localRaw) {
+        const user = JSON.parse(localRaw) as AppUserProfile;
+        if (user.role === 'admin') return 'admin';
+        if (user.role === 'cashier') return 'cashier';
+        if (user.role === 'technician' || user.role === 'tech') return 'technician';
+      }
       const saved = localStorage.getItem(STORAGE_KEYS.SYSTEM_ROLE);
       if (saved === 'admin' || saved === 'cashier' || saved === 'technician') {
         return saved as SystemRole;
@@ -527,6 +567,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // If activeTab is disallowed for current role/user, automatically navigate to appropriate view
   useEffect(() => {
+    // Wait until auth state is fully loaded and verified before enforcing access guards
+    if (!isAuthReady) return;
+
     if (activeTab === 'home' || activeTab === 'portal') return;
 
     // Admin/staff tabs require active staff login
@@ -550,7 +593,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setActiveTab('dashboard');
       }
     }
-  }, [systemRole, activeTab, currentAuthUser]);
+  }, [systemRole, activeTab, currentAuthUser, isAuthReady]);
 
   // Support browser forward/back buttons and direct hash navigation with auth check
   useEffect(() => {
@@ -563,7 +606,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         } else if (hash === 'portal') {
           setActiveTab('portal');
         } else if (VALID_TABS.has(hash) && hash !== activeTab) {
-          if (!isStaffUser(currentAuthUser)) {
+          if (isAuthReady && !isStaffUser(currentAuthUser)) {
             setActiveTab('home');
             showToast('info', 'Staff Login Required', 'Please sign in with an authorized staff account to access operations.');
             openAuthModal('signin');
@@ -575,7 +618,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
-  }, [activeTab, currentAuthUser]);
+  }, [activeTab, currentAuthUser, isAuthReady]);
 
   const logout = async () => {
     try {
@@ -584,6 +627,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       console.warn('Sign out error:', err);
     }
     setCurrentAuthUser(null);
+    setIsAuthReady(true);
     setSystemRoleState('cashier');
     try {
       localStorage.removeItem(STORAGE_KEYS.SYSTEM_ROLE);
@@ -3668,9 +3712,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       value={{
         currentAuthUser,
         setCurrentAuthUser,
+        isAuthReady,
         isAuthModalOpen,
         authModalMode,
         authModalEmail,
+        authModalPlanId,
+        authModalBarangay,
+        authModalMunicipality,
         openAuthModal,
         closeAuthModal,
         systemRole,

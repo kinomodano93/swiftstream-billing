@@ -388,6 +388,7 @@ export const signInWithGoogle = async (): Promise<AppUserProfile> => {
         lastLoginAt: new Date().toISOString(),
       };
       await setDoc(userDocRef, updatedProfile, { merge: true });
+      localStorage.setItem('swiftstream_current_auth_user', JSON.stringify(updatedProfile));
       return updatedProfile;
     }
 
@@ -398,6 +399,7 @@ export const signInWithGoogle = async (): Promise<AppUserProfile> => {
         throw new Error('Your subscriber registration is currently under review by our Admin team. Please wait for approval.');
       }
       await setDoc(userDocRef, { lastLoginAt: new Date().toISOString() }, { merge: true });
+      localStorage.setItem('swiftstream_current_auth_user', JSON.stringify(data));
       return data;
     }
   }
@@ -423,6 +425,7 @@ export const signInWithGoogle = async (): Promise<AppUserProfile> => {
       console.warn('Could not save admin/staff profile to Firestore:', err);
     }
 
+    localStorage.setItem('swiftstream_current_auth_user', JSON.stringify(adminProfile));
     return adminProfile;
   }
 
@@ -449,6 +452,7 @@ export const signInWithGoogle = async (): Promise<AppUserProfile> => {
         lastLoginAt: new Date().toISOString(),
       };
       await setDoc(userDocRef, subscriberProfile, { merge: true });
+      localStorage.setItem('swiftstream_current_auth_user', JSON.stringify(subscriberProfile));
       return subscriberProfile;
     }
   } catch {
@@ -867,8 +871,10 @@ export const subscribeToAuth = (
       try {
         const profile = await fetchOrCreateUserProfile(user);
         if (profile.role === 'subscriber' && (profile.status === 'pending_approval' || profile.isApproved === false)) {
+          localStorage.removeItem('swiftstream_current_auth_user');
           onUserChanged(null);
         } else {
+          localStorage.setItem('swiftstream_current_auth_user', JSON.stringify(profile));
           onUserChanged(profile);
         }
       } catch {
@@ -918,6 +924,13 @@ export const subscribeToAuth = (
               displayName: matchedStaff.fullName,
               status: matchedStaff.status,
             });
+            return;
+          } else if (
+            localProfile.role === 'admin' &&
+            ((localProfile.email || '').toLowerCase().trim() === 'swiftstream.telecom@gmail.com' ||
+              (localProfile.email || '').toLowerCase().trim() === 'youlo1709@gmail.com')
+          ) {
+            onUserChanged(localProfile);
             return;
           } else if (localProfile.role !== 'subscriber') {
             localStorage.removeItem('swiftstream_current_auth_user');

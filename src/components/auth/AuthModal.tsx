@@ -15,6 +15,7 @@ import {
   Radio,
   Building2,
   Check,
+  Copy,
   Phone,
   MapPin,
   Clock,
@@ -38,12 +39,17 @@ import {
 } from '../../services/authService';
 import { formatCurrency } from '../../utils/formatters';
 import { LAGONOY_BARANGAYS, PRESENTACION_BARANGAYS } from '../network/CoverageAreaManager';
+import { OnlineApplication } from '../../types';
+import { saveFirestoreDoc, COLLECTIONS } from '../../services/firestoreService';
 
 interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
   initialMode?: 'signin' | 'signup' | 'forgot';
   initialEmail?: string;
+  initialPlanId?: string;
+  initialBarangay?: string;
+  initialMunicipality?: string;
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({
@@ -51,6 +57,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   onClose,
   initialMode = 'signin',
   initialEmail = '',
+  initialPlanId,
+  initialBarangay,
+  initialMunicipality,
 }) => {
   const {
     showToast,
@@ -66,6 +75,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [mode, setMode] = useState<'signin' | 'signup' | 'forgot'>(initialMode);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [fullName, setFullName] = useState('');
   const [mobile, setMobile] = useState('09');
   const [selectedPlanId, setSelectedPlanId] = useState<string>(plans[0]?.id || 'plan-50m');
@@ -78,6 +88,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [landmark, setLandmark] = useState('');
 
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [isCopied, setIsCopied] = useState(false);
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -89,6 +101,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     planName: string;
     monthlyFee: number;
     barangay: string;
+    address: string;
   } | null>(null);
 
   useEffect(() => {
@@ -97,14 +110,29 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setErrorMessage(null);
       setSuccessMessage(null);
       setPendingApplicationNotice(null);
+      setIsCopied(false);
+      setConfirmPassword('');
       if (initialEmail) {
         setEmail(initialEmail);
       }
-      if (plans.length > 0 && !selectedPlanId) {
+      if (initialPlanId) {
+        setSelectedPlanId(initialPlanId);
+      } else if (plans.length > 0 && !selectedPlanId) {
         setSelectedPlanId(plans[0].id);
       }
+      if (initialMunicipality === 'Presentacion' || initialMunicipality === 'Lagonoy') {
+        setMunicipality(initialMunicipality);
+      } else if (initialBarangay) {
+        const isPres = PRESENTACION_BARANGAYS.some(
+          (b) => b.toLowerCase() === initialBarangay.toLowerCase()
+        );
+        setMunicipality(isPres ? 'Presentacion' : 'Lagonoy');
+      }
+      if (initialBarangay) {
+        setBarangay(initialBarangay);
+      }
     }
-  }, [isOpen, initialMode, initialEmail, plans]);
+  }, [isOpen, initialMode, initialEmail, initialPlanId, initialBarangay, initialMunicipality, plans]);
 
   if (!isOpen) return null;
 
@@ -180,12 +208,22 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setErrorMessage('Please enter your complete applicant full name.');
       return;
     }
+    if (!mobile.trim() || mobile.length < 11) {
+      setErrorMessage('Please provide a valid 11-digit Philippine mobile number (e.g. 09171234567).');
+      return;
+    }
+    const cleanEmail = email.trim().toLowerCase();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!cleanEmail || !emailRegex.test(cleanEmail)) {
+      setErrorMessage('Please enter a valid email address (e.g. juan@gmail.com).');
+      return;
+    }
     if (password.length < 6) {
       setErrorMessage('Please choose a password with at least 6 characters.');
       return;
     }
-    if (!mobile.trim() || mobile.length < 11) {
-      setErrorMessage('Please provide a valid 11-digit Philippine mobile number (e.g. 09171234567).');
+    if (confirmPassword && password !== confirmPassword) {
+      setErrorMessage('Passwords do not match. Please re-enter your password to confirm.');
       return;
     }
     if (!street.trim()) {
@@ -202,12 +240,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         (b) => b.toLowerCase() === barangay.toLowerCase()
       );
       const targetCity = isPresentacion ? 'Presentacion' : 'Lagonoy';
+      const fullAddressStr = `${street.trim()}, Brgy. ${barangay.trim()}, ${targetCity}, Camarines Sur`;
 
       // 1. Immediately register customer in CRM, local state and Firestore
       addCustomer({
         accountNo: generatedAccountNo,
         fullName: fullName.trim(),
-        email: email.trim(),
+        email: cleanEmail,
         mobile: mobile.trim(),
         address: {
           street: street.trim(),
@@ -219,26 +258,55 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         planId: selectedPlan?.id || 'plan-50m',
         planName: selectedPlan?.name || 'Fiber Power 50 Mbps',
         monthlyFee: selectedPlan?.monthlyFee || 1299,
-        billingDay: 15,
+        billingDay: 1,
         status: 'pending_approval',
         installationDate: installationDate || new Date().toISOString().slice(0, 10),
         balance: 0,
         walletBalance: 0,
         advanceDeposit: 0,
         network: {
-          pppoeUsername: email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '_'),
+          pppoeUsername: cleanEmail.split('@')[0].replace(/[^a-z0-9]/g, '_'),
           ipAddress: `192.168.10.${Math.floor(20 + Math.random() * 200)}`,
           napBoxId: 'nap-01-binauahan',
           napPortNumber: 1,
           isMikrotikSynced: false,
         },
-        notes: `Online Registration via Portal Sign Up. Landmark: ${landmark || 'N/A'}. Preferred Install Date: ${installationDate || 'ASAP'}`,
+        notes: `Online Registration via Portal Sign Up (${targetCity}). Landmark: ${landmark || 'N/A'}. Preferred Install Date: ${installationDate || 'ASAP'}`,
       });
 
-      // 2. Register user in Firebase Auth directory
+      // 2. Also log as an OnlineApplication in storage & Firestore for Admin Applications queue
+      const newApp: OnlineApplication = {
+        id: `app_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+        applicationNumber: generatedAccountNo,
+        applicantName: fullName.trim(),
+        phone: mobile.trim(),
+        email: cleanEmail,
+        address: street.trim(),
+        barangay: barangay.trim(),
+        city: targetCity,
+        province: 'Camarines Sur',
+        landmark: landmark.trim(),
+        preferredPlanId: selectedPlan?.id || 'plan-50m',
+        preferredPlanName: selectedPlan?.name || 'Fiber Power 50 Mbps',
+        preferredSpeedMbps: selectedPlan?.speedMbps || 50,
+        monthlyFee: selectedPlan?.monthlyFee || 1299,
+        status: 'pending',
+        notes: `Applied online via website (${targetCity}). Preferred date: ${installationDate || 'Earliest available'}`,
+        surveyDate: installationDate,
+        createdAt: new Date().toISOString(),
+      };
+
+      try {
+        const existingAppsStr = localStorage.getItem('swiftstream_online_applications_v4');
+        const existingApps: OnlineApplication[] = existingAppsStr ? JSON.parse(existingAppsStr) : [];
+        localStorage.setItem('swiftstream_online_applications_v4', JSON.stringify([newApp, ...existingApps]));
+        saveFirestoreDoc(COLLECTIONS.APPLICATIONS, newApp);
+      } catch (_) {}
+
+      // 3. Register user in Firebase Auth directory
       try {
         await signUpWithEmail(
-          email.trim(),
+          cleanEmail,
           password,
           fullName.trim(),
           'subscriber',
@@ -252,6 +320,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             address: {
               street: street.trim(),
               barangay: barangay.trim(),
+              city: targetCity,
+              province: 'Camarines Sur',
               landmark: landmark.trim(),
             },
           }
@@ -266,11 +336,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
       setPendingApplicationNotice({
         name: fullName.trim(),
-        email: email.trim(),
+        email: cleanEmail,
         accountNo: generatedAccountNo,
         planName: selectedPlan?.name || 'Fiber Internet',
         monthlyFee: selectedPlan?.monthlyFee || 1299,
         barangay: barangay.trim(),
+        address: fullAddressStr,
       });
       showToast('success', 'Application Submitted', 'Your Fiber application is queued for Admin review.');
     } catch (err: any) {
@@ -442,18 +513,47 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <CheckCircle2 className="w-8 h-8" />
               </div>
 
-              <div className="space-y-1.5">
-                <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-cyan-400 bg-cyan-950 px-2.5 py-0.5 rounded-full border border-cyan-800/60">
-                  Account No: {pendingApplicationNotice.accountNo}
-                </span>
+              <div className="space-y-2">
+                <div className="flex items-center justify-center gap-2">
+                  <span className="text-xs font-mono font-bold uppercase tracking-wider text-cyan-400 bg-cyan-950 px-3 py-1 rounded-full border border-cyan-800/60">
+                    Account No: {pendingApplicationNotice.accountNo}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(pendingApplicationNotice.accountNo);
+                      setIsCopied(true);
+                      showToast('info', 'Copied to Clipboard', `Reference #${pendingApplicationNotice.accountNo} copied.`);
+                      setTimeout(() => setIsCopied(false), 2000);
+                    }}
+                    className="flex items-center gap-1 px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 rounded-xl text-[11px] font-semibold transition-all cursor-pointer"
+                  >
+                    {isCopied ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                        <span className="text-emerald-400 font-bold">Copied</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5 text-slate-400" />
+                        <span>Copy</span>
+                      </>
+                    )}
+                  </button>
+                </div>
                 <h4 className="text-lg font-bold text-slate-100 mt-1">Application Queued for Review!</h4>
                 <p className="text-xs text-slate-300 max-w-md mx-auto">
                   Thank you, <strong className="text-cyan-300">{pendingApplicationNotice.name}</strong>. Your subscription request for{' '}
                   <strong className="text-emerald-400">{pendingApplicationNotice.planName}</strong> ({formatCurrency(pendingApplicationNotice.monthlyFee)}/mo) has been registered.
                 </p>
+                {pendingApplicationNotice.address && (
+                  <p className="text-[11px] text-slate-400 max-w-md mx-auto">
+                    Installation Location: <span className="text-slate-200">{pendingApplicationNotice.address}</span>
+                  </p>
+                )}
               </div>
 
-              {/* 4-Step Next Steps Roadmap */}
+              {/* 3-Step Next Steps Roadmap */}
               <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 text-left space-y-3">
                 <span className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block">
                   Activation Roadmap:
@@ -491,17 +591,36 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={() => {
-                  setPendingApplicationNotice(null);
-                  setMode('signin');
-                  onClose();
-                }}
-                className="w-full py-3 px-4 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold rounded-2xl shadow-lg shadow-cyan-600/25 transition-all hover:scale-[1.02] cursor-pointer"
-              >
-                Return to Home Page
-              </button>
+              <div className="flex flex-col sm:flex-row items-center gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPendingApplicationNotice(null);
+                    setMode('signin');
+                    onClose();
+                  }}
+                  className="w-full sm:w-1/2 py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+                >
+                  Done & Return to Website
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const acc = pendingApplicationNotice.accountNo;
+                    setPendingApplicationNotice(null);
+                    setMode('signin');
+                    onClose();
+                    try {
+                      sessionStorage.setItem('swiftstream_portal_customer_id', acc);
+                    } catch {}
+                    setActiveTab('portal');
+                  }}
+                  className="w-full sm:w-1/2 py-2.5 px-4 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold rounded-xl text-xs shadow-lg shadow-cyan-600/25 transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  <span>View Client Portal</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
           ) : (
             <>
@@ -745,6 +864,28 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                             className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 cursor-pointer"
                           >
                             {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="sm:col-span-2">
+                        <label className="block text-slate-300 mb-1 font-medium">Confirm Password *</label>
+                        <div className="relative">
+                          <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                          <input
+                            type={showConfirmPassword ? 'text' : 'password'}
+                            required
+                            value={confirmPassword}
+                            onChange={(e) => setConfirmPassword(e.target.value)}
+                            placeholder="••••••••"
+                            className="w-full pl-9 pr-10 py-2 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 text-xs focus:outline-none focus:border-cyan-500 font-mono"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 cursor-pointer"
+                          >
+                            {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                           </button>
                         </div>
                       </div>
