@@ -2,7 +2,7 @@ import React from 'react';
 import { X, Printer, Download, Receipt, CheckCircle2, ShieldCheck, QrCode } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { useApp } from '../../context/AppContext';
-import { formatCurrency, formatDateTime, getPaymentMethodLabel } from '../../utils/formatters';
+import { formatBusinessAddress, formatCurrency, formatDateTime, getPaymentMethodLabel } from '../../utils/formatters';
 import { generateOfficialReceiptPDF } from '../../utils/pdfGenerator';
 
 interface OfficialReceiptModalProps {
@@ -81,7 +81,7 @@ export const OfficialReceiptModal: React.FC<OfficialReceiptModalProps> = ({ paym
             <p className="text-[10px] text-slate-600">{businessProfile.tradeName}</p>
             <p className="text-[10px] text-slate-600 font-bold">TIN: {businessProfile.tin}</p>
             <p className="text-[10px] text-slate-600">
-              {businessProfile.address.street}, {businessProfile.address.barangay}, {businessProfile.address.city}, {businessProfile.address.province}
+              {formatBusinessAddress(businessProfile.address)}
             </p>
             <p className="text-[10px] text-slate-600">Mobile / Helpline: {businessProfile.representative.mobile}</p>
           </div>
@@ -97,7 +97,7 @@ export const OfficialReceiptModal: React.FC<OfficialReceiptModalProps> = ({ paym
             </div>
             <div className="flex justify-between text-[11px] text-slate-600">
               <span>Cashier: {payment.cashierName}</span>
-              <span>Node: Lagonoy</span>
+              <span>Node: {businessProfile.address.city || 'Central Hub'}</span>
             </div>
           </div>
 

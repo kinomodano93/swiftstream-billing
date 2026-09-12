@@ -38,7 +38,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { Plan } from '../../types';
-import { formatCurrency, formatPhoneNumber } from '../../utils/formatters';
+import { formatBusinessAddress, formatCurrency, formatPhoneNumber } from '../../utils/formatters';
 import { GeminiAiAssistant } from '../ai/GeminiAiAssistant';
 import { LAGONOY_BARANGAYS, PRESENTACION_BARANGAYS } from '../network/CoverageAreaManager';
 
@@ -519,12 +519,44 @@ export const HomePage: React.FC<HomePageProps> = ({
             <span>Pure End-to-End Gigabit Fiber Internet in Lagonoy, Camarines Sur</span>
           </div>
 
-          <h1 className="text-3xl sm:text-5xl lg:text-6xl font-black text-slate-100 tracking-tight leading-[1.1]">
-            Ultra-Fast Fiber.<br />
-            <span className="bg-gradient-to-r from-cyan-400 via-sky-300 to-blue-500 bg-clip-text text-transparent">
-              Zero Lag. Pure Reliability.
-            </span>
-          </h1>
+          {(() => {
+            const rawTitle = (businessProfile.heroTitle || 'Ultra-Fast Fiber. Zero Lag. Pure Reliability.').trim();
+            let line1 = rawTitle;
+            let line2 = '';
+
+            if (rawTitle.includes('\n')) {
+              const parts = rawTitle.split('\n');
+              line1 = parts[0];
+              line2 = parts.slice(1).join(' ');
+            } else if (rawTitle.includes('.')) {
+              const dotIndex = rawTitle.indexOf('.');
+              if (dotIndex < rawTitle.length - 1) {
+                line1 = rawTitle.slice(0, dotIndex + 1).trim();
+                line2 = rawTitle.slice(dotIndex + 1).trim();
+              }
+            } else if (rawTitle.includes('|')) {
+              const pipeIndex = rawTitle.indexOf('|');
+              line1 = rawTitle.slice(0, pipeIndex).trim();
+              line2 = rawTitle.slice(pipeIndex + 1).trim();
+            }
+
+            return (
+              <h1 className="text-3xl sm:text-5xl lg:text-6xl font-black text-slate-100 tracking-tight leading-[1.1]">
+                {line2 ? (
+                  <>
+                    {line1}<br />
+                    <span className="bg-gradient-to-r from-cyan-400 via-sky-300 to-blue-500 bg-clip-text text-transparent">
+                      {line2}
+                    </span>
+                  </>
+                ) : (
+                  <span className="bg-gradient-to-r from-cyan-400 via-sky-300 to-blue-500 bg-clip-text text-transparent">
+                    {line1}
+                  </span>
+                )}
+              </h1>
+            );
+          })()}
 
           <p className="text-sm sm:text-base text-slate-300 max-w-2xl mx-auto leading-relaxed">
             Experience unthrottled, unlimited optical broadband engineered for smooth 4K streaming, low-latency online gaming, work-from-home video conferences, and seamless family connectivity.
@@ -1354,7 +1386,7 @@ export const HomePage: React.FC<HomePageProps> = ({
               <p className="flex items-start gap-1.5">
                 <MapPin className="w-3.5 h-3.5 text-rose-400 flex-shrink-0 mt-0.5" />
                 <span>
-                  {businessProfile.address.building}, {businessProfile.address.street}, Brgy. {businessProfile.address.barangay}, {businessProfile.address.city}, {businessProfile.address.province}
+                  {formatBusinessAddress(businessProfile.address)}
                 </span>
               </p>
               <p className="text-amber-400 font-medium pl-5">

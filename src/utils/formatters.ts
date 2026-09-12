@@ -60,6 +60,116 @@ export const formatPhoneNumber = (phone: string): string => {
   return phone;
 };
 
+const isMockStreetValue = (v?: string): boolean => {
+  if (!v) return true;
+  const s = v.trim().toLowerCase();
+  return (
+    s === 'unit 4' ||
+    s === 'commercial arcade bldg.' ||
+    s === 'commercial arcade bldg' ||
+    s === 'national highway, zone 3' ||
+    s === 'zone 5' ||
+    s === 'poblacion' ||
+    s.includes('across lagonoy municipal gymnasium')
+  );
+};
+
+/**
+ * Resolves the clean, official business address line for Invoices and Billing Statements.
+ * Excludes arbitrary internal room/building or mock landmark strings, focusing on official jurisdiction.
+ */
+export const getBusinessInvoiceAddress = (
+  address: BusinessProfile['address'] | undefined
+): string => {
+  if (!address) return '';
+
+  const brgyRaw = address.barangay?.trim() || '';
+  const brgy = brgyRaw
+    ? /^brgy\.?\s*/i.test(brgyRaw) || /^barangay\s*/i.test(brgyRaw)
+      ? brgyRaw
+      : `Brgy. ${brgyRaw}`
+    : '';
+
+  const parts = [
+    brgy,
+    address.city?.trim(),
+    address.province?.trim(),
+  ].filter(Boolean);
+
+  const base = parts.join(', ');
+  return address.zipCode?.trim() ? `${base} ${address.zipCode.trim()}` : base;
+};
+
+/**
+ * Assembles a clean, well-formatted string for a business address,
+ * gracefully omitting empty or undefined parts and preventing duplicate "Brgy." prefixes.
+ */
+export const formatBusinessAddress = (
+  address: BusinessProfile['address'] | undefined,
+  options?: { includeLandmark?: boolean; multiline?: boolean }
+): string => {
+  if (!address) return '';
+
+  const streetPart = [address.roomUnit, address.building, address.street, address.subdivision]
+    .map((s) => s?.trim())
+    .filter((s): s is string => Boolean(s) && !isMockStreetValue(s))
+    .join(', ');
+
+  const brgyRaw = address.barangay?.trim() || '';
+  const brgy = brgyRaw
+    ? /^brgy\.?\s*/i.test(brgyRaw) || /^barangay\s*/i.test(brgyRaw)
+      ? brgyRaw
+      : `Brgy. ${brgyRaw}`
+    : '';
+
+  const localityParts = [brgy, address.city?.trim(), address.province?.trim()]
+    .filter(Boolean)
+    .join(', ');
+
+  const localityWithZip = address.zipCode?.trim()
+    ? `${localityParts} ${address.zipCode.trim()}`
+    : localityParts;
+
+  const components = [streetPart, localityWithZip].filter(Boolean);
+
+  if (options?.includeLandmark && address.landmark?.trim() && !isMockStreetValue(address.landmark)) {
+    components.push(`(Landmark: ${address.landmark.trim()})`);
+  }
+
+  return options?.multiline ? components.join('\n') : components.join(', ');
+};
+
+/**
+ * Returns address separated into line1 (street/building level) and line2 (barangay, city, province, zip)
+ */
+export const getBusinessAddressLines = (
+  address: BusinessProfile['address'] | undefined
+): { line1: string; line2: string } => {
+  if (!address) return { line1: '', line2: '' };
+
+  const line1 = [address.roomUnit, address.building, address.street, address.subdivision]
+    .map((s) => s?.trim())
+    .filter((s): s is string => Boolean(s) && !isMockStreetValue(s))
+    .join(', ');
+
+  const brgyRaw = address.barangay?.trim() || '';
+  const brgy = brgyRaw
+    ? /^brgy\.?\s*/i.test(brgyRaw) || /^barangay\s*/i.test(brgyRaw)
+      ? brgyRaw
+      : `Brgy. ${brgyRaw}`
+    : '';
+
+  const localityParts = [brgy, address.city?.trim(), address.province?.trim()]
+    .filter(Boolean)
+    .join(', ');
+
+  const line2 = address.zipCode?.trim()
+    ? `${localityParts} ${address.zipCode.trim()}`
+    : localityParts;
+
+  return { line1, line2 };
+};
+
 export const getCustomerStatusBadge = (status: CustomerStatus): { text: string; bg: string; textCol: string; border: string; dot: string } => {
   switch (status) {
     case 'active':
@@ -242,9 +352,9 @@ export const resolveInvoicePlanDetails = (
 
   let serviceDescription: string;
   if (invoice.isProrated && invoice.proratedDays) {
-    serviceDescription = `Internet Plan: ${planName} (${speedMbps} Mbps Pure Fiber) — Prorated Subscription (${invoice.proratedDays} Days)`;
+    serviceDescription = `Internet Plan: ${planName} (${speedMbps} Mbps) — Prorated Subscription (${invoice.proratedDays} Days)`;
   } else {
-    serviceDescription = `Internet Plan: ${planName} (${speedMbps} Mbps Pure Fiber) — Monthly Subscription`;
+    serviceDescription = `Internet Plan: ${planName} (${speedMbps} Mbps) — Monthly Subscription`;
   }
 
   return {
@@ -300,6 +410,16 @@ export const getDynamicPortalUrl = (businessProfile?: BusinessProfile | null): s
 
   // 3. Dynamic cloud fallback (Firebase Hosting live app domain for this project)
   return 'https://swiftstream-portal.web.app/#portal';
+};
+
+/**
+ * Formats a day/number with its English ordinal suffix (e.g. 1 -> 1st, 2 -> 2nd, 3 -> 3rd, 4 -> 4th, 21 -> 21st)
+ */
+export const formatOrdinalNumber = (num: number | string): string => {
+  const n = parseInt(String(num), 10) || 1;
+  const s = ['th', 'st', 'nd', 'rd'];
+  const v = n % 100;
+  return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`;
 };
 
 export * from './billingRules';

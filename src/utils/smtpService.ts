@@ -1,5 +1,5 @@
 import { BusinessProfile, Customer, Invoice, Payment, SmtpConfig, SmtpProviderPreset } from '../types';
-import { formatCurrency, formatPhoneNumber } from './formatters';
+import { formatBusinessAddress, formatCurrency, formatPhoneNumber, getBusinessInvoiceAddress } from './formatters';
 
 export interface SmtpPresetInfo {
   name: string;
@@ -109,7 +109,7 @@ export const generateHtmlInvoiceEmail = (
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SwiftStream Statement of Account - #${invoice.invoiceNumber}</title>
+  <title>${businessProfile.name} Statement of Account - #${invoice.invoiceNumber}</title>
 </head>
 <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #0f172a; margin: 0; padding: 24px; color: #1e293b;">
   <table width="100%" cellpadding="0" cellspacing="0" style="max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.2);">
@@ -120,7 +120,7 @@ export const generateHtmlInvoiceEmail = (
           ${businessProfile.name}
         </h1>
         <p style="color: #bae6fd; margin: 6px 0 0 0; font-size: 12px;">
-          ${businessProfile.tradeName} • Lagonoy, Camarines Sur
+          ${businessProfile.tradeName || businessProfile.name}${getBusinessInvoiceAddress(businessProfile.address) ? ` • ${getBusinessInvoiceAddress(businessProfile.address)}` : ''}
         </p>
       </td>
     </tr>
@@ -210,9 +210,10 @@ export const generateHtmlInvoiceEmail = (
       <td style="padding: 0 24px 24px 24px;">
         <h3 style="font-size: 13px; text-transform: uppercase; color: #0f172a; margin: 0 0 12px 0;">Official Payment Channels</h3>
         <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; font-size: 12px; color: #334155; line-height: 1.6;">
-          <p style="margin: 0 0 6px 0;"><strong>📱 GCash App Transfer:</strong> Send to <strong>${businessProfile.paymentGateways.gcashNumber}</strong> (${businessProfile.paymentGateways.gcashName})</p>
-          <p style="margin: 0 0 6px 0;"><strong>💳 Maya:</strong> Send to <strong>${businessProfile.paymentGateways.mayaNumber}</strong> (${businessProfile.paymentGateways.mayaName})</p>
-          <p style="margin: 0;"><strong>🏦 Bank Deposit:</strong> ${businessProfile.paymentGateways.bankName} • Acct: <strong>${businessProfile.paymentGateways.bankAccountNumber}</strong> (${businessProfile.paymentGateways.bankAccountName})</p>
+          ${businessProfile.paymentGateways.gcashNumber ? `<p style="margin: 0 0 6px 0;"><strong>📱 GCash:</strong> Send to <strong>${businessProfile.paymentGateways.gcashNumber}</strong> ${businessProfile.paymentGateways.gcashName ? `(${businessProfile.paymentGateways.gcashName})` : ''}</p>` : ''}
+          ${businessProfile.paymentGateways.mayaNumber ? `<p style="margin: 0 0 6px 0;"><strong>💳 Maya:</strong> Send to <strong>${businessProfile.paymentGateways.mayaNumber}</strong> ${businessProfile.paymentGateways.mayaName ? `(${businessProfile.paymentGateways.mayaName})` : ''}</p>` : ''}
+          ${(businessProfile.paymentGateways.bankName || businessProfile.paymentGateways.bankAccountNumber) ? `<p style="margin: 0 0 6px 0;"><strong>🏦 Bank Transfer:</strong> ${businessProfile.paymentGateways.bankName || 'Bank'} • Acct: <strong>${businessProfile.paymentGateways.bankAccountNumber}</strong> ${businessProfile.paymentGateways.bankAccountName ? `(${businessProfile.paymentGateways.bankAccountName})` : ''}</p>` : ''}
+          <p style="margin: 0; color: #64748b;"><strong>🏢 Over-the-Counter:</strong> Settle at ${businessProfile.name} Office${getBusinessInvoiceAddress(businessProfile.address) ? `, ${getBusinessInvoiceAddress(businessProfile.address)}` : ''}</p>
         </div>
       </td>
     </tr>
@@ -221,10 +222,10 @@ export const generateHtmlInvoiceEmail = (
     <tr>
       <td style="background: #f1f5f9; padding: 20px 24px; text-align: center; border-top: 1px solid #e2e8f0; font-size: 11px; color: #64748b;">
         <p style="margin: 0 0 4px 0;">
-          Need assistance? Call our 24/7 Hotline: <strong>${formatPhoneNumber(businessProfile.representative.mobile)}</strong>
+          Need assistance? Call our Hotline: <strong>${formatPhoneNumber(businessProfile.representative.mobile)}</strong>
         </p>
         <p style="margin: 0;">
-          TIN: ${businessProfile.tin} • ${businessProfile.address.street}, Brgy. ${businessProfile.address.barangay}, ${businessProfile.address.city}
+          TIN: ${businessProfile.tin} • ${getBusinessInvoiceAddress(businessProfile.address) || formatBusinessAddress(businessProfile.address)}
         </p>
       </td>
     </tr>

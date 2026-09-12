@@ -1,7 +1,16 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { BusinessProfile, Customer, Invoice, Payment, Plan } from '../types';
-import { formatCurrencyPdf, formatDate, formatDateTime, resolveInvoicePlanDetails } from './formatters';
+import {
+  formatBusinessAddress,
+  formatCurrencyPdf,
+  formatDate,
+  formatDateTime,
+  formatOrdinalNumber,
+  getBusinessAddressLines,
+  getBusinessInvoiceAddress,
+  resolveInvoicePlanDetails,
+} from './formatters';
 
 export const generateInvoicePDF = (
   invoice: Invoice,
@@ -52,30 +61,26 @@ export const generateInvoicePDF = (
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(13);
   doc.setFont('helvetica', 'bold');
-  doc.text((business.name || 'SWIFTSTREAM TELECOMMUNICATIONS').toUpperCase(), 14, 13);
+  doc.text((business.name || 'TELECOMMUNICATIONS PROVIDER').toUpperCase(), 14, 13);
 
   doc.setFontSize(8.5);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(6, 182, 212); // Cyan-400
-  doc.text('High-Speed Pure Fiber Internet & Digital Telecom Services', 14, 18);
+  const rawSubtitle = business.heroTitle || business.tradeName || (business.industry && business.industry !== 'Information Technology & Telecommunications' ? business.industry : '') || 'Internet & Digital Telecom Services';
+  const businessSubtitle = rawSubtitle.length > 55 ? rawSubtitle.slice(0, 52) + '...' : rawSubtitle;
+  doc.text(businessSubtitle, 14, 18);
 
   doc.setFontSize(7.5);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(203, 213, 225); // Slate-300
-  doc.text(
-    `${business.address.building}, ${business.address.street}, Brgy. ${business.address.barangay}`,
-    14,
-    23
-  );
-  doc.text(
-    `${business.address.city}, ${business.address.province} ${business.address.zipCode} | NOC: Binauahan, Lagonoy`,
-    14,
-    27.5
-  );
+  const invoiceAddr = getBusinessInvoiceAddress(business.address);
+  if (invoiceAddr) {
+    doc.text(invoiceAddr, 14, 23.5);
+  }
   doc.text(
     `BIR Reg. TIN: ${business.tin} | Hotline: ${business.representative.mobile} | Email: ${business.representative.email}`,
     14,
-    32
+    29.5
   );
 
   // Statement of Account Title & Metadata (Right)
@@ -110,12 +115,11 @@ export const generateInvoicePDF = (
     doc.setFontSize(8.5);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(21, 128, 61); // Emerald-700
-    doc.text(
-      `✓ STATUS: PAID IN FULL${invoice.paidAt ? ` ON ${formatDate(invoice.paidAt)}` : ''} (${invoice.paymentMethodUsed?.toUpperCase() || 'OFFICIAL RECEIPT RECORDED'})`,
-      18,
-      ribbonY + 6
-    );
-    doc.text('BALANCE DUE: PHP 0.00', 192, ribbonY + 6, { align: 'right' });
+    doc.text('PAYMENT STATUS', 18, ribbonY + 6);
+
+    doc.setFontSize(11);
+    doc.setTextColor(22, 163, 74); // Green
+    doc.text('PAID', 192, ribbonY + 6.2, { align: 'right' });
   } else if (isOverdue) {
     doc.setFillColor(255, 241, 242); // Rose-50
     doc.setDrawColor(254, 205, 211); // Rose-200
@@ -123,7 +127,7 @@ export const generateInvoicePDF = (
     doc.setFontSize(8.5);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(190, 18, 60); // Rose-700
-    doc.text('⚠ STATUS: OVERDUE — PLEASE SETTLE IMMEDIATELY TO AVOID AUTOMATED SUSPENSION', 18, ribbonY + 6);
+    doc.text('STATUS: OVERDUE — PLEASE SETTLE IMMEDIATELY TO AVOID SERVICE INTERRUPTION', 18, ribbonY + 6);
     doc.text(`TOTAL DUE: ${formatCurrencyPdf(computedBalanceDue)}`, 192, ribbonY + 6, { align: 'right' });
   } else {
     doc.setFillColor(240, 249, 255); // Sky-50
@@ -165,13 +169,13 @@ export const generateInvoicePDF = (
 
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(71, 85, 105);
-  const truncatedAddress = invoice.customerAddress.length > 48
-    ? invoice.customerAddress.slice(0, 48) + '...'
+  const truncatedAddress = invoice.customerAddress.length > 52
+    ? invoice.customerAddress.slice(0, 52) + '...'
     : invoice.customerAddress;
   doc.text(`Service Address: ${truncatedAddress}`, 18, infoY + 19.5);
-  doc.text(`Mobile: ${invoice.customerMobile} | Email: ${invoice.customerEmail || 'N/A'}`, 18, infoY + 24);
+  doc.text(`Mobile: ${invoice.customerMobile}`, 18, infoY + 24);
 
-  // Right Card: Subscription & Billing Cycle
+  // Right Card: Billing Period & Statement Info
   doc.setFillColor(248, 250, 252);
   doc.setDrawColor(226, 232, 240);
   doc.roundedRect(108, infoY, 88, infoH, 1.5, 1.5, 'FD');
@@ -179,41 +183,38 @@ export const generateInvoicePDF = (
   doc.setFontSize(7.5);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(100, 116, 139);
-  doc.text('SUBSCRIPTION & BILLING CYCLE', 112, infoY + 5);
-
-  doc.setFontSize(8.5);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(2, 132, 199); // Cyan-600
-  const planTitle = `Internet Plan: ${planDetails.planName}`;
-  doc.text(planTitle.slice(0, 42), 112, infoY + 10);
+  doc.text('BILLING PERIOD & STATEMENT INFO', 112, infoY + 5);
 
   doc.setFontSize(7.5);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(71, 85, 105);
+  doc.text('Coverage Period:', 112, infoY + 11);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(15, 23, 42);
   doc.text(
-    `Speed: ${planDetails.speedMbps} Mbps Pure Fiber | Rate: ${formatCurrencyPdf(planDetails.monthlyFee)}/mo`,
+    `${formatDate(invoice.billingPeriodStart)} to ${formatDate(invoice.billingPeriodEnd)}`,
     112,
-    infoY + 14.5
-  );
-  doc.text(`Billing Cycle: Every ${planDetails.billingDay}th of the month`, 112, infoY + 18.5);
-  doc.text(
-    `Coverage Period: ${formatDate(invoice.billingPeriodStart)} to ${formatDate(invoice.billingPeriodEnd)}`,
-    112,
-    infoY + 22.5
+    infoY + 15.5
   );
 
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(71, 85, 105);
+  doc.text(`Statement Date: ${formatDate(invoice.issueDate)}`, 112, infoY + 20);
+  doc.text(`Payment Due: ${formatDate(invoice.dueDate)}`, 112, infoY + 24);
+
   // 5. Itemized Table
+  const cleanPlanName = planDetails.planName.replace(/\s*\|\s*\d+\s*mbps/i, '').trim();
   const tableData = serviceItems.map((item, index) => {
     const isPlanItem = item.type === 'plan' || (!item.type && index === 0);
     let description = item.description;
     if (isPlanItem) {
       if (invoice.isProrated && invoice.proratedDays) {
-        description = `Internet Plan: ${planDetails.planName} (${planDetails.speedMbps} Mbps Pure Fiber) - Prorated (${invoice.proratedDays} Days)`;
+        description = `Monthly Internet Subscription: ${cleanPlanName || planDetails.planName} (${planDetails.speedMbps} Mbps) — Prorated (${invoice.proratedDays} Days)`;
       } else {
-        description = `Internet Plan: ${planDetails.planName} (${planDetails.speedMbps} Mbps Pure Fiber) - Monthly Subscription`;
+        description = `Monthly Internet Subscription: ${cleanPlanName || planDetails.planName} (${planDetails.speedMbps} Mbps)`;
       }
     } else if (item.type === 'installation') {
-      description = item.description || 'Standard Optical Line Drop & Gigabit ONU WiFi Modem Installation Setup';
+      description = item.description || 'Installation & Setup Fee';
     }
 
     const unitPrice = isPlanItem && (item.unitPrice <= 0 || !invoice.isProrated) ? planDetails.monthlyFee : item.unitPrice;
@@ -268,7 +269,35 @@ export const generateInvoicePDF = (
   const rightW = 88;
 
   // Left: Payment Channels Box
-  const payH = 32;
+  const activeGateways: string[] = [];
+  if (business.paymentGateways.gcashNumber) {
+    activeGateways.push(`• GCash QR Ph: ${business.paymentGateways.gcashNumber}${business.paymentGateways.gcashName ? ` (${business.paymentGateways.gcashName})` : ''}`);
+  }
+  if (business.paymentGateways.mayaNumber) {
+    activeGateways.push(`• Maya: ${business.paymentGateways.mayaNumber}${business.paymentGateways.mayaName ? ` (${business.paymentGateways.mayaName})` : ''}`);
+  }
+  if (business.paymentGateways.bankName || business.paymentGateways.bankAccountNumber) {
+    activeGateways.push(`• Bank: ${business.paymentGateways.bankName || 'Bank'}${business.paymentGateways.bankAccountNumber ? ` - Acct: ${business.paymentGateways.bankAccountNumber}` : ''}`);
+  }
+  const otcLoc = [
+    business.address?.barangay
+      ? (/^brgy\.?\s*/i.test(business.address.barangay)
+        ? business.address.barangay
+        : `Brgy. ${business.address.barangay}`)
+      : '',
+    business.address?.city,
+  ].filter(Boolean).join(', ');
+  activeGateways.push(`• Over-the-Counter: ${business.name || 'Office'} Cashier Desk${otcLoc ? ` (${otcLoc})` : ''}`);
+
+  doc.setFontSize(7);
+  doc.setFont('helvetica', 'normal');
+  const maxLineWidth = 78;
+  const wrappedGateways: string[][] = activeGateways.map((gw) =>
+    doc.splitTextToSize(gw, maxLineWidth)
+  );
+  const totalLines = wrappedGateways.reduce((sum, lines) => sum + lines.length, 0);
+  const payH = Math.max(30, 8.5 + totalLines * 3.7 + (wrappedGateways.length - 1) * 0.8 + 3.5);
+
   doc.setFillColor(248, 250, 252);
   doc.setDrawColor(226, 232, 240);
   doc.roundedRect(14, postTableY, leftW, payH, 1.5, 1.5, 'FD');
@@ -281,11 +310,14 @@ export const generateInvoicePDF = (
   doc.setFontSize(7);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(51, 65, 85);
-  doc.text(`• GCash QR Ph: ${business.paymentGateways.gcashNumber} (${business.paymentGateways.gcashName})`, 18, postTableY + 10);
-  doc.text(`• Maya: ${business.paymentGateways.mayaNumber} (${business.paymentGateways.mayaName})`, 18, postTableY + 14.5);
-  doc.text(`• Bank: ${business.paymentGateways.bankName} - Acct: ${business.paymentGateways.bankAccountNumber}`, 18, postTableY + 19);
-  doc.text(`  Account Name: ${business.paymentGateways.bankAccountName}`, 18, postTableY + 23.5);
-  doc.text(`• Over-the-Counter: SwiftStream Central Office, Binauahan, Lagonoy`, 18, postTableY + 28);
+  let currentPayY = postTableY + 9.5;
+  wrappedGateways.forEach((lines) => {
+    lines.forEach((line, lIdx) => {
+      doc.text(line, lIdx === 0 ? 18 : 20.5, currentPayY);
+      currentPayY += 3.7;
+    });
+    currentPayY += 0.8;
+  });
 
   // Right: Financial Calculations Ledger
   let calcY = postTableY + 3;
@@ -293,33 +325,37 @@ export const generateInvoicePDF = (
   doc.setFontSize(7.8);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(71, 85, 105);
-  doc.text('Current Charges Subtotal:', rightX, calcY);
-  doc.text(formatCurrencyPdf(itemsSubtotal), 196, calcY, { align: 'right' });
 
   if (discountAmount > 0) {
+    doc.text('Current Charges Subtotal:', rightX, calcY);
+    doc.text(formatCurrencyPdf(itemsSubtotal), 196, calcY, { align: 'right' });
+
     calcY += 4.5;
     doc.setTextColor(16, 185, 129); // Green
     doc.text('Less: Promotional Discount / Credit:', rightX, calcY);
     doc.text(`-${formatCurrencyPdf(discountAmount)}`, 196, calcY, { align: 'right' });
-  }
 
-  calcY += 4.5;
-  doc.setTextColor(71, 85, 105);
-  doc.text('Net Current Month Charges:', rightX, calcY);
-  doc.text(formatCurrencyPdf(netCurrentCharges), 196, calcY, { align: 'right' });
+    calcY += 4.5;
+    doc.setTextColor(71, 85, 105);
+    doc.text('Net Current Month Charges:', rightX, calcY);
+    doc.text(formatCurrencyPdf(netCurrentCharges), 196, calcY, { align: 'right' });
+  } else {
+    doc.text('Current Month Charges:', rightX, calcY);
+    doc.text(formatCurrencyPdf(netCurrentCharges), 196, calcY, { align: 'right' });
+  }
 
   if (previousBalanceAmount > 0) {
     calcY += 4.5;
     doc.setTextColor(225, 29, 72); // Rose Red
     doc.text('Previous Unpaid Balance (Arrears):', rightX, calcY);
     doc.text(`+${formatCurrencyPdf(previousBalanceAmount)}`, 196, calcY, { align: 'right' });
-  }
 
-  calcY += 4.5;
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(15, 23, 42);
-  doc.text('Total Invoiced Amount:', rightX, calcY);
-  doc.text(formatCurrencyPdf(computedTotalAmount), 196, calcY, { align: 'right' });
+    calcY += 4.5;
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(15, 23, 42);
+    doc.text('Total Invoiced Amount:', rightX, calcY);
+    doc.text(formatCurrencyPdf(computedTotalAmount), 196, calcY, { align: 'right' });
+  }
 
   if (paidAmount > 0) {
     calcY += 4.5;
@@ -340,58 +376,53 @@ export const generateInvoicePDF = (
   doc.text('TOTAL AMOUNT DUE:', rightX + 3, calcY + 2.5);
 
   doc.setTextColor(6, 182, 212); // Cyan
-  doc.text(formatCurrencyPdf(computedBalanceDue), 194, calcY + 2.5, { align: 'right' });
+  doc.text(formatCurrencyPdf(computedTotalAmount), 194, calcY + 2.5, { align: 'right' });
 
-  // 7. Footer Notes & Authorized Signatory
-  const footerY = 248;
+  // 7. Footer Notes (Important Subscriber Notices)
+  const bottomOfContent = Math.max(postTableY + payH, calcY + 8);
+  const footerY = Math.max(246, bottomOfContent + 5);
+
   doc.setDrawColor(226, 232, 240);
   doc.setLineWidth(0.3);
   doc.line(14, footerY, 196, footerY);
 
-  doc.setFontSize(7);
+  doc.setFontSize(7.5);
   doc.setFont('helvetica', 'bold');
-  doc.setTextColor(100, 116, 139);
+  doc.setTextColor(71, 85, 105);
   doc.text('IMPORTANT SUBSCRIBER NOTICES:', 14, footerY + 5);
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(6.8);
   doc.setTextColor(100, 116, 139);
-  doc.text(
-    `1. Please include your Account No. (${invoice.accountNo}) in the payment notes when paying via GCash, Maya, or Bank.`,
-    14,
-    footerY + 9
-  );
-  doc.text(
-    `2. Settle on or before ${formatDate(invoice.dueDate)} to maintain uninterrupted optical fiber connectivity.`,
-    14,
-    footerY + 13
-  );
-  doc.text(
-    `3. 24/7 Hotline: ${business.representative.mobile} | Email: ${business.representative.email} | Office: Shop #4, Binauahan, Lagonoy.`,
-    14,
-    footerY + 17
-  );
-  doc.text(
+
+  const officeNoticeSummary = getBusinessInvoiceAddress(business.address);
+
+  let settlementNotice = '';
+  if (isPaid) {
+    settlementNotice = `2. Payment received in full${invoice.paidAt ? ` on ${formatDate(invoice.paidAt)}` : ''}. Thank you for keeping your account updated and active.`;
+  } else if (isOverdue) {
+    settlementNotice = `2. Payment was due on ${formatDate(invoice.dueDate)}. Please settle immediately to restore or maintain uninterrupted service connectivity.`;
+  } else if (paidAmount > 0 && computedBalanceDue > 0) {
+    settlementNotice = `2. Partial payment received. Please settle remaining balance of ${formatCurrencyPdf(computedBalanceDue)} on or before ${formatDate(invoice.dueDate)} to maintain uninterrupted service connectivity.`;
+  } else {
+    settlementNotice = `2. Settle on or before ${formatDate(invoice.dueDate)} to maintain uninterrupted service connectivity.`;
+  }
+
+  const notices: string[] = [
+    `1. Please include your Account No. (${invoice.accountNo}) in payment notes when paying via online channels.`,
+    settlementNotice,
+    `3. Hotline: ${business.representative.mobile} | Email: ${business.representative.email}${officeNoticeSummary ? ` | Office: ${officeNoticeSummary}` : ''}.`,
     '4. This document serves as an official Statement of Account for telecommunications services.',
-    14,
-    footerY + 21
-  );
+  ];
 
-  // Authorized Signatory
-  const repName = `${business.representative.firstName} ${business.representative.lastName}`;
-  doc.setFontSize(8);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(15, 23, 42);
-  doc.text(repName, 160, footerY + 15, { align: 'center' });
-
-  doc.setFontSize(7);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(100, 116, 139);
-  doc.text('Authorized Representative / Billing Lead', 160, footerY + 19, { align: 'center' });
-  doc.text((business.name || 'SwiftStream Telecommunications').slice(0, 32), 160, footerY + 23, { align: 'center' });
-
-  doc.setDrawColor(148, 163, 184);
-  doc.line(135, footerY + 11, 185, footerY + 11);
+  let currentNoticeY = footerY + 9.5;
+  notices.forEach((notice) => {
+    const wrappedLines: string[] = doc.splitTextToSize(notice, 182);
+    wrappedLines.forEach((line) => {
+      doc.text(line, 14, currentNoticeY);
+      currentNoticeY += 3.8;
+    });
+  });
 
   return doc;
 };
@@ -410,9 +441,9 @@ export const generateOfficialReceiptPDF = (payment: Payment, business: BusinessP
 
   doc.setFontSize(7.5);
   doc.setFont('helvetica', 'normal');
-  doc.text('High-Speed Pure Fiber Internet Services', 40, 14, { align: 'center' });
+  doc.text(business.tradeName || (business.industry && business.industry !== 'Information Technology & Telecommunications' ? business.industry : '') || 'Internet & Digital Telecom Services', 40, 14, { align: 'center' });
   doc.text(`TIN: ${business.tin}`, 40, 18, { align: 'center' });
-  doc.text(`${business.address.barangay}, ${business.address.city}, ${business.address.province}`, 40, 22, { align: 'center' });
+  doc.text(getBusinessAddressLines(business.address).line2 || formatBusinessAddress(business.address), 40, 22, { align: 'center' });
   doc.text(`Hotline: ${business.representative.mobile}`, 40, 26, { align: 'center' });
 
   doc.setLineWidth(0.3);
@@ -489,9 +520,9 @@ export const generateThermalReceiptPDF = (
 
   doc.setFontSize(paperWidth === '58mm' ? 6.5 : 7.5);
   doc.setFont('helvetica', 'normal');
-  doc.text('High-Speed Pure Fiber Internet Provider', centerX, 13, { align: 'center' });
+  doc.text(business.tradeName || (business.industry && business.industry !== 'Information Technology & Telecommunications' ? business.industry : '') || 'Internet Service Provider', centerX, 13, { align: 'center' });
   doc.text(`TIN: ${business.tin}`, centerX, 17, { align: 'center' });
-  doc.text(`${business.address.barangay}, ${business.address.city}, ${business.address.province}`, centerX, 21, { align: 'center' });
+  doc.text(getBusinessAddressLines(business.address).line2 || formatBusinessAddress(business.address), centerX, 21, { align: 'center' });
   doc.text(`Hotline: ${business.representative.mobile}`, centerX, 25, { align: 'center' });
 
   doc.setLineWidth(0.3);
@@ -541,7 +572,7 @@ export const generateThermalReceiptPDF = (
       currentY += 4.5;
     });
   } else {
-    doc.text('Fiber Internet Subscription', margin, currentY);
+    doc.text('Internet Service Subscription', margin, currentY);
     doc.text(formatCurrencyPdf(payment.amount), rightX, currentY, { align: 'right' });
     currentY += 4.5;
   }
@@ -609,9 +640,9 @@ export const generateEODReportPDF = (
 
   doc.setFontSize(7.5);
   doc.setFont('helvetica', 'normal');
-  doc.text('Pure High-Speed Fiber Internet Provider', 40, 14, { align: 'center' });
+  doc.text(business.tradeName || (business.industry && business.industry !== 'Information Technology & Telecommunications' ? business.industry : '') || 'Internet Service Provider', 40, 14, { align: 'center' });
   doc.text(`TIN: ${business.tin}`, 40, 18, { align: 'center' });
-  doc.text(`${business.address.barangay}, ${business.address.city}, ${business.address.province}`, 40, 22, { align: 'center' });
+  doc.text(getBusinessAddressLines(business.address).line2 || formatBusinessAddress(business.address), 40, 22, { align: 'center' });
 
   doc.setLineWidth(0.3);
   doc.line(5, 26, 75, 26);

@@ -2,9 +2,31 @@
 <html lang="en" class="h-full">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230284c7' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.55a11 11 0 0 1 14.08 0'/%3E%3Cpath d='M1.42 9a16 16 0 0 1 21.16 0'/%3E%3Cpath d='M8.53 16.11a6 6 0 0 1 6.95 0'/%3E%3Cline x1='12' y1='20' x2='12.01' y2='20'/%3E%3C/svg%3E" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" id="dynamic-favicon" />
+    <link rel="apple-touch-icon" href="/favicon.svg" id="dynamic-apple-icon" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>SwiftStream ISP & Repair Billing System</title>
+    <title>SwiftStream Telecommunications | Fiber Internet & IT Services</title>
+    <script>
+      (function() {
+        try {
+          var raw = localStorage.getItem('swiftstream_business_profile_v4') || localStorage.getItem('swiftstream_business_profile');
+          if (raw) {
+            var profile = JSON.parse(raw);
+            if (profile) {
+              if (profile.logoUrl) {
+                var icon = document.getElementById('dynamic-favicon');
+                if (icon) icon.href = profile.logoUrl;
+                var apple = document.getElementById('dynamic-apple-icon');
+                if (apple) apple.href = profile.logoUrl;
+              }
+              if (profile.tradeName || profile.name) {
+                document.title = (profile.tradeName || profile.name) + ' | Fiber Internet & Billing';
+              }
+            }
+          }
+        } catch (e) {}
+      })();
+    </script>
     <!-- Google Fonts Inter & JetBrains Mono -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>

@@ -1448,7 +1448,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         items: [
           {
             id: generateId('ITEM'),
-            description: `Internet Plan: ${planName} (${speedMbps} Mbps Pure Fiber) — 1st Month Subscription`,
+            description: `Internet Plan: ${planName} (${speedMbps} Mbps) — 1st Month Subscription`,
             quantity: 1,
             unitPrice: monthlyFee,
             amount: monthlyFee,
@@ -1456,7 +1456,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           },
           {
             id: generateId('ITEM'),
-            description: `Standard Optical Line Drop & Gigabit ONU WiFi Modem Installation Setup`,
+            description: `Installation & Setup Fee`,
             quantity: 1,
             unitPrice: installFee,
             amount: installFee,
@@ -1794,8 +1794,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         {
           id: generateId('ITEM'),
           description: isProrated
-            ? `Internet Plan: ${planName} (${speedMbps} Mbps Pure Fiber) — Prorated (${proratedDays}/${lastDayOfMonth} Days)`
-            : `Internet Plan: ${planName} (${speedMbps} Mbps Pure Fiber) — Monthly Subscription`,
+            ? `Internet Plan: ${planName} (${speedMbps} Mbps) — Prorated (${proratedDays}/${lastDayOfMonth} Days)`
+            : `Internet Plan: ${planName} (${speedMbps} Mbps) — Monthly Subscription`,
           quantity: 1,
           unitPrice: isProrated ? planFee : standardMonthlyFee,
           amount: planFee,

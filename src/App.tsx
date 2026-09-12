@@ -38,6 +38,7 @@ import { SystemLogsViewer } from './components/logs/SystemLogsViewer';
 import { FinancialTransactionLogs } from './components/logs/FinancialTransactionLogs';
 import { Customer, RepairOrder, SYSTEM_ROLES_CONFIG } from './types';
 import { isStaffUser } from './services/authService';
+import { updateBrowserBrandIdentity } from './utils/brandLogo';
 import { ShieldAlert, ArrowLeft, Lock, KeyRound, Globe, ShieldCheck } from 'lucide-react';
 
 const MainLayout: React.FC = () => {
@@ -511,10 +512,24 @@ const MainLayout: React.FC = () => {
   );
 };
 
+const AppContent: React.FC = () => {
+  const { businessProfile } = useApp();
+
+  useEffect(() => {
+    updateBrowserBrandIdentity(
+      businessProfile?.logoUrl,
+      businessProfile?.tradeName,
+      businessProfile?.name
+    );
+  }, [businessProfile?.logoUrl, businessProfile?.tradeName, businessProfile?.name]);
+
+  return <MainLayout />;
+};
+
 export function App() {
   return (
     <AppProvider>
-      <MainLayout />
+      <AppContent />
     </AppProvider>
   );
 }

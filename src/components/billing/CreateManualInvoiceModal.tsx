@@ -112,7 +112,7 @@ export const CreateManualInvoiceModal: React.FC<CreateManualInvoiceModalProps> =
     return effectiveMonthlyFee;
   }, [isProrated, invoiceType, proratedDays, daysInSelectedMonth, effectiveMonthlyFee]);
 
-  const installationFee = invoiceType === 'installation' ? 1500 : 0;
+  const installationFee = invoiceType === 'installation' ? (authoritativePlan?.installationFee ?? 1500) : 0;
   const subtotal = planCharge + installationFee;
 
   // Verify whether customer actually has open unpaid invoices in the system
@@ -210,8 +210,8 @@ export const CreateManualInvoiceModal: React.FC<CreateManualInvoiceModalProps> =
       items.push({
         id: generateId('ITEM'),
         description: proratedActive
-          ? `Internet Plan: ${authoritativePlan.name} (${authoritativePlan.speedMbps} Mbps Pure Fiber) — Prorated Subscription (${proratedDays}/${daysInSelectedMonth} Days)`
-          : `Internet Plan: ${authoritativePlan.name} (${authoritativePlan.speedMbps} Mbps Pure Fiber) — Monthly Subscription`,
+          ? `Internet Plan: ${authoritativePlan.name} (${authoritativePlan.speedMbps} Mbps) — Prorated Subscription (${proratedDays}/${daysInSelectedMonth} Days)`
+          : `Internet Plan: ${authoritativePlan.name} (${authoritativePlan.speedMbps} Mbps) — Monthly Subscription`,
         quantity: 1,
         unitPrice: proratedActive ? planCharge : authoritativePlan.monthlyFee,
         amount: planCharge,
@@ -222,10 +222,10 @@ export const CreateManualInvoiceModal: React.FC<CreateManualInvoiceModalProps> =
       if (invoiceType === 'installation') {
         items.push({
           id: generateId('ITEM'),
-          description: 'Standard Optical Line Drop & Gigabit ONU WiFi Modem Installation Setup',
+          description: 'Installation & Setup Fee',
           quantity: 1,
-          unitPrice: 1500,
-          amount: 1500,
+          unitPrice: installationFee,
+          amount: installationFee,
           type: 'installation',
         });
       }

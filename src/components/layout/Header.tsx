@@ -9,7 +9,6 @@ import {
   RefreshCw,
   Download,
   Radio,
-  Globe,
   LogOut,
   Server,
   LogIn,
@@ -131,17 +130,6 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Right Action Buttons */}
       <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0 ml-2">
-        {/* View Public Website */}
-        <button
-          type="button"
-          onClick={() => setActiveTab('home')}
-          className="flex items-center gap-1.5 px-2.5 sm:px-3 py-2 bg-slate-950 hover:bg-slate-800 text-slate-300 hover:text-cyan-300 border border-slate-800 hover:border-cyan-500/40 rounded-xl text-xs font-semibold shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
-          title="Open Public Website & Subscriber Portal"
-        >
-          <Globe className="w-3.5 h-3.5 text-cyan-400" />
-          <span className="hidden md:inline">Website</span>
-        </button>
-
         {/* Bill Due Date Calendar quick access */}
         {canAccessTab('bill_calendar') && (
           <button

@@ -207,6 +207,7 @@ export interface XenditConfig {
 export interface BusinessProfile {
   name: string;
   tradeName: string;
+  heroTitle?: string;
   logoUrl?: string;
   websiteUrl?: string;
   portalDomain?: string;

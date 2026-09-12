@@ -25,13 +25,13 @@ export const generateReminderMessage = (
 
   switch (type) {
     case 'upcoming_due':
-      return `SWIFTSTREAM BILL ADVISORY: Hi ${customer.fullName}, your Fiber Internet bill (${invoice?.invoiceNumber || 'Monthly Bill'}) for ${amountStr} is due on ${dueDateStr}. Pay conveniently via GCash ${business.paymentGateways.gcashNumber} (${business.paymentGateways.gcashName}) or at our Binauahan shop. Thank you!`;
+      return `SWIFTSTREAM BILL ADVISORY: Hi ${customer.fullName}, your Fiber Internet bill (${invoice?.invoiceNumber || 'Monthly Bill'}) for ${amountStr} is due on ${dueDateStr}. Pay conveniently via GCash ${business.paymentGateways.gcashNumber} (${business.paymentGateways.gcashName}) or at our ${business.address.city || 'local'} office. Thank you!`;
 
     case 'due_today':
       return `SWIFTSTREAM REMINDER: Hi ${customer.fullName}, your internet bill ${invoice?.invoiceNumber || ''} of ${amountStr} is DUE TODAY (${dueDateStr}). Please settle promptly via GCash ${business.paymentGateways.gcashNumber} to avoid service disruption.`;
 
     case 'overdue_warning':
-      return `SWIFTSTREAM OVERDUE NOTICE: Hi ${customer.fullName}, your account ${customer.accountNo} has an overdue balance of ${amountStr} (Due: ${dueDateStr}). Please settle today via GCash ${business.paymentGateways.gcashNumber} (${business.paymentGateways.gcashName}) or visit SwiftStream Shop Binauahan.`;
+      return `SWIFTSTREAM OVERDUE NOTICE: Hi ${customer.fullName}, your account ${customer.accountNo} has an overdue balance of ${amountStr} (Due: ${dueDateStr}). Please settle today via GCash ${business.paymentGateways.gcashNumber} (${business.paymentGateways.gcashName}) or visit ${business.name} Office in ${business.address.barangay || business.address.city || 'our branch'}.`;
 
     case 'disconnection_notice':
       return `SWIFTSTREAM FINAL NOTICE: Dear ${customer.fullName}, account ${customer.accountNo} is scheduled for temporary disconnection due to unpaid balance of ${amountStr}. Please settle via GCash ${business.paymentGateways.gcashNumber} or contact ${business.representative.mobile} for reconnection.`;
@@ -40,7 +40,7 @@ export const generateReminderMessage = (
       return `SWIFTSTREAM RECEIPT: Thank you ${customer.fullName}! We have received your payment of ${amountStr} for account ${customer.accountNo}. Your internet connection is active. Hotline: ${business.representative.mobile}.`;
 
     default:
-      return `SWIFTSTREAM: Hi ${customer.fullName}, this is regarding your internet subscription at SwiftStream Telecommunication. Contact ${business.representative.mobile} for any assistance.`;
+      return `SWIFTSTREAM: Hi ${customer.fullName}, this is regarding your internet subscription at ${business.name}. Contact ${business.representative.mobile} for any assistance.`;
   }
 };
 

@@ -13,7 +13,6 @@ import {
   Radio,
   Wifi,
   ChevronRight,
-  Globe,
   LogOut,
   Server,
   Smartphone,
@@ -315,7 +314,7 @@ export const Sidebar: React.FC = () => {
                   {businessProfile.tradeName || businessProfile.name || 'SwiftStream'}
                 </h1>
                 <p className="text-[10px] text-cyan-400 font-medium tracking-wide truncate uppercase">
-                  {businessProfile.industry || 'TELECOM & ISP'}
+                  {(businessProfile.industry && businessProfile.industry !== 'Information Technology & Telecommunications') ? businessProfile.industry : 'TELECOM & ISP'}
                 </p>
               </div>
             )}
@@ -450,21 +449,6 @@ export const Sidebar: React.FC = () => {
               <Wifi className="w-4 h-4 text-emerald-400" />
             </div>
           )}
-
-          <button
-            type="button"
-            onClick={() => {
-              setIsMobileMenuOpen(false);
-              setActiveTab('home');
-            }}
-            className={`w-full flex items-center justify-center gap-2 ${
-              isCollapsed ? 'p-2.5' : 'py-2 px-3'
-            } bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-cyan-300 border border-slate-800 hover:border-cyan-500/30 rounded-xl text-xs font-semibold transition-all group cursor-pointer`}
-            title="View Public Website & Plans"
-          >
-            <Globe className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-            {!isCollapsed && <span>Public Website</span>}
-          </button>
 
           <button
             onClick={() => {

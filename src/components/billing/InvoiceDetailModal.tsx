@@ -20,7 +20,17 @@ import {
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { useApp } from '../../context/AppContext';
-import { formatCurrency, formatDate, formatDateTime, getInvoiceStatusBadge, resolveInvoicePlanDetails } from '../../utils/formatters';
+import {
+  formatBusinessAddress,
+  formatCurrency,
+  formatDate,
+  formatDateTime,
+  formatOrdinalNumber,
+  getBusinessAddressLines,
+  getBusinessInvoiceAddress,
+  getInvoiceStatusBadge,
+  resolveInvoicePlanDetails,
+} from '../../utils/formatters';
 import { generateInvoicePDF } from '../../utils/pdfGenerator';
 
 interface InvoiceDetailModalProps {
@@ -94,7 +104,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   };
 
   const qrPayload = JSON.stringify({
-    isp: businessProfile.tradeName || 'SwiftStream Telecommunications',
+    isp: businessProfile.tradeName || businessProfile.name || 'Telecommunications Provider',
     inv: invoice.invoiceNumber,
     acct: invoice.accountNo,
     due: computedBalanceDue,
@@ -178,25 +188,29 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
           {/* 1. Header Banner & Company Profile */}
           <div className="flex flex-col sm:flex-row justify-between gap-4 border-b border-slate-800 pb-5 print:border-slate-300">
             <div className="space-y-1">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-cyan-600/20 border border-cyan-500/30 flex items-center justify-center text-cyan-400 print:hidden">
-                  <Zap className="w-5 h-5" />
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-cyan-600/10 border border-cyan-500/30 flex items-center justify-center overflow-hidden shrink-0 print:border-slate-300 print:bg-transparent">
+                  {businessProfile.logoUrl || '/favicon.svg' ? (
+                    <img
+                      src={businessProfile.logoUrl || '/favicon.svg'}
+                      alt={businessProfile.name}
+                      className="w-full h-full object-contain p-1"
+                    />
+                  ) : (
+                    <Zap className="w-5 h-5 text-cyan-400" />
+                  )}
                 </div>
                 <div>
                   <h2 className="text-xl font-black text-slate-100 print:text-slate-900 tracking-tight">
                     {businessProfile.name.toUpperCase()}
                   </h2>
                   <p className="text-[11px] font-bold text-cyan-400 print:text-cyan-700">
-                    High-Speed Pure Fiber Internet & Digital Telecom Services
+                    {businessProfile.heroTitle || businessProfile.tradeName || (businessProfile.industry && businessProfile.industry !== 'Information Technology & Telecommunications' ? businessProfile.industry : '') || 'Internet & Telecom Services'}
                   </p>
                 </div>
               </div>
               <p className="text-xs text-slate-400 print:text-slate-600 mt-1">
-                {businessProfile.address.building}, {businessProfile.address.street}, Brgy. {businessProfile.address.barangay}
-              </p>
-              <p className="text-xs text-slate-400 print:text-slate-600">
-                {businessProfile.address.city}, {businessProfile.address.province} {businessProfile.address.zipCode}
-                {businessProfile.address.landmark ? ` • Landmark: ${businessProfile.address.landmark}` : ''}
+                {getBusinessInvoiceAddress(businessProfile.address)}
               </p>
               <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400 print:text-slate-600 pt-0.5 font-mono">
                 <span>BIR Reg. TIN: <strong className="text-slate-200 print:text-black font-semibold">{businessProfile.tin}</strong></span>
@@ -243,7 +257,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               )}
               <span className="font-bold uppercase tracking-wide">
                 {isPaid
-                  ? `Payment Status: PAID IN FULL${invoice.paidAt ? ` on ${formatDate(invoice.paidAt)}` : ''}`
+                  ? 'Payment Status'
                   : isOverdue
                   ? 'Payment Status: OVERDUE — Immediate settlement required to prevent automated service interruption'
                   : `Payment Due Date: ${formatDate(invoice.dueDate)}`}
@@ -251,11 +265,17 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
             </div>
 
             <div className="font-mono font-black text-sm self-end sm:self-auto">
-              <span>{isPaid ? 'Balance Due: PHP 0.00' : `Total Amount Due: ${formatCurrency(computedBalanceDue)}`}</span>
+              {isPaid ? (
+                <span className="text-emerald-400 print:text-emerald-700 text-base font-extrabold tracking-wider">
+                  PAID
+                </span>
+              ) : (
+                <span>Total Amount Due: {formatCurrency(computedBalanceDue)}</span>
+              )}
             </div>
           </div>
 
-          {/* 3. Two Information Boxes: Subscriber Details & Subscription Overview */}
+          {/* 3. Two Information Boxes: Subscriber Details & Billing Period */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
             {/* Subscriber Box */}
             <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 print:border-slate-300 print:bg-slate-50 space-y-1.5">
@@ -271,55 +291,37 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                 <strong className="text-slate-500 font-normal">Service Address: </strong>
                 {invoice.customerAddress}
               </p>
-              <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-400 print:text-slate-600 pt-0.5">
+              <div className="text-[11px] text-slate-400 print:text-slate-600 pt-0.5">
                 <span>Mobile: <strong className="text-slate-200 print:text-black font-mono">{invoice.customerMobile}</strong></span>
-                <span>Email: <strong className="text-slate-200 print:text-black">{invoice.customerEmail || 'N/A'}</strong></span>
               </div>
             </div>
 
-            {/* Subscription & Billing Cycle Box */}
-            <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 print:border-slate-300 print:bg-slate-50 space-y-2">
-              <div className="flex items-center justify-between border-b border-slate-800/80 print:border-slate-200 pb-1.5">
-                <span className="text-[10px] font-bold text-slate-400 print:text-slate-600 uppercase tracking-wider block">
-                  Subscription & Billing Cycle
-                </span>
-                <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-cyan-500/10 text-cyan-300 border border-cyan-500/30 print:border-cyan-700 print:text-cyan-800">
-                  {planDetails.speedMbps} Mbps Pure Fiber
-                </span>
-              </div>
+            {/* Billing Period & Statement Dates Box */}
+            <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 print:border-slate-300 print:bg-slate-50 space-y-2.5">
+              <span className="text-[10px] font-bold text-slate-400 print:text-slate-600 uppercase tracking-wider block pb-1 border-b border-slate-800/80 print:border-slate-200">
+                Billing Period & Statement Info
+              </span>
 
               <div>
-                <span className="text-[10px] text-slate-500 print:text-slate-600 block">Subscribed Internet Plan:</span>
-                <p className="text-sm font-black text-cyan-300 print:text-cyan-900 flex items-center gap-1.5">
-                  <span>{planDetails.planName}</span>
-                  {customer?.network?.ipAddress ? (
-                    <span className="text-[10px] text-slate-400 font-mono font-normal">
-                      ({customer.network.ipAddress})
-                    </span>
-                  ) : null}
+                <span className="text-[10px] text-slate-500 print:text-slate-600 block">Coverage Period:</span>
+                <p className="text-xs font-bold text-cyan-300 print:text-cyan-900 pt-0.5">
+                  {formatDate(invoice.billingPeriodStart)} to {formatDate(invoice.billingPeriodEnd)}
                 </p>
               </div>
 
-              <div className="grid grid-cols-2 gap-2 text-xs pt-0.5">
+              <div className="grid grid-cols-2 gap-2 text-xs pt-1 border-t border-slate-800/60 print:border-slate-200">
                 <div>
-                  <span className="text-[10px] text-slate-500 print:text-slate-600 block">Billing Cycle:</span>
+                  <span className="text-[10px] text-slate-500 print:text-slate-600 block">Statement Date:</span>
                   <span className="font-semibold text-slate-200 print:text-black">
-                    Every {planDetails.billingDay}th of the month
+                    {formatDate(invoice.issueDate)}
                   </span>
                 </div>
                 <div>
-                  <span className="text-[10px] text-slate-500 print:text-slate-600 block">Monthly Plan Rate:</span>
-                  <span className="font-mono font-bold text-emerald-400 print:text-emerald-800">
-                    {formatCurrency(planDetails.monthlyFee)}/mo
+                  <span className="text-[10px] text-slate-500 print:text-slate-600 block">Payment Due:</span>
+                  <span className="font-semibold text-rose-400 print:text-rose-800">
+                    {formatDate(invoice.dueDate)}
                   </span>
                 </div>
-              </div>
-
-              <div className="flex items-center justify-between text-slate-300 print:text-slate-700 text-xs border-t border-slate-800/60 print:border-slate-200 pt-1.5">
-                <span className="text-slate-500">Coverage Period:</span>
-                <span className="font-semibold text-slate-200 print:text-black">
-                  {formatDate(invoice.billingPeriodStart)} to {formatDate(invoice.billingPeriodEnd)}
-                </span>
               </div>
             </div>
           </div>
@@ -340,22 +342,23 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               <tbody className="divide-y divide-slate-800/60 print:divide-slate-200">
                 {serviceItems.map((item, idx) => {
                   const isPlanItem = item.type === 'plan' || (!item.type && idx === 0);
+                  const cleanPlanName = planDetails.planName.replace(/\s*\|\s*\d+\s*mbps/i, '').trim();
                   let itemTitle = item.description;
                   let itemSubtext = '';
 
                   if (isPlanItem) {
                     if (invoice.isProrated && invoice.proratedDays) {
-                      itemTitle = `Internet Plan: ${planDetails.planName} (${planDetails.speedMbps} Mbps Pure Fiber) — Prorated Subscription (${invoice.proratedDays} Days)`;
+                      itemTitle = `Monthly Internet Subscription: ${cleanPlanName || planDetails.planName} (${planDetails.speedMbps} Mbps) — Prorated Subscription (${invoice.proratedDays} Days)`;
                     } else {
-                      itemTitle = `Internet Plan: ${planDetails.planName} (${planDetails.speedMbps} Mbps Pure Fiber) — Monthly Subscription`;
+                      itemTitle = `Monthly Internet Subscription: ${cleanPlanName || planDetails.planName} (${planDetails.speedMbps} Mbps)`;
                     }
-                    itemSubtext = planDetails.planDescription || '100% Pure Optical Fiber • Unlimited High-Speed Data • Symmetrical Bandwidth';
+                    itemSubtext = planDetails.planDescription || '';
                   } else if (item.type === 'installation') {
-                    itemTitle = item.description || 'Standard Optical Line Drop & Gigabit ONU WiFi Modem Installation Setup';
-                    itemSubtext = 'Premises fiber drop cable installation, optical splicing, signal testing & WiFi modem configuration';
+                    itemTitle = item.description || 'Installation & Setup Fee';
+                    itemSubtext = '';
                   } else if (item.type === 'addon') {
-                    itemTitle = item.description;
-                    itemSubtext = 'Optional Fiber Internet Add-on / Static IP Service';
+                    itemTitle = item.description || 'Add-on Service';
+                    itemSubtext = '';
                   }
 
                   const displayUnitPrice = isPlanItem && (item.unitPrice <= 0 || !invoice.isProrated) ? planDetails.monthlyFee : item.unitPrice;
@@ -413,20 +416,40 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   <div className="bg-white p-2 rounded-xl border border-slate-700 flex-shrink-0 print:border-slate-300">
                     <QRCodeSVG value={qrPayload} size={72} />
                   </div>
-                  <div className="space-y-1.5 text-[11px] text-slate-300 print:text-slate-700">
-                    <p>
-                      <strong className="text-cyan-400 print:text-cyan-800">GCash QR Ph:</strong>{' '}
-                      {businessProfile.paymentGateways.gcashNumber} ({businessProfile.paymentGateways.gcashName})
-                    </p>
-                    <p>
-                      <strong className="text-emerald-400 print:text-emerald-800">Maya:</strong>{' '}
-                      {businessProfile.paymentGateways.mayaNumber} ({businessProfile.paymentGateways.mayaName})
-                    </p>
-                    <p className="text-[10px] text-slate-400 print:text-slate-600">
-                      <strong>Bank Transfer:</strong> {businessProfile.paymentGateways.bankName} (Acct: {businessProfile.paymentGateways.bankAccountNumber})
-                    </p>
-                    <p className="text-[10px] text-slate-500 print:text-slate-600">
-                      <strong>Over-the-Counter:</strong> SwiftStream Central Office, Brgy. Binauahan, Lagonoy.
+                  <div className="min-w-0 flex-1 space-y-1.5 text-[11px] text-slate-300 print:text-slate-700 break-words">
+                    {businessProfile.paymentGateways.gcashNumber && (
+                      <p>
+                        <strong className="text-cyan-400 print:text-cyan-800">GCash QR Ph:</strong>{' '}
+                        {businessProfile.paymentGateways.gcashNumber}
+                        {businessProfile.paymentGateways.gcashName ? ` (${businessProfile.paymentGateways.gcashName})` : ''}
+                      </p>
+                    )}
+                    {businessProfile.paymentGateways.mayaNumber && (
+                      <p>
+                        <strong className="text-emerald-400 print:text-emerald-800">Maya:</strong>{' '}
+                        {businessProfile.paymentGateways.mayaNumber}
+                        {businessProfile.paymentGateways.mayaName ? ` (${businessProfile.paymentGateways.mayaName})` : ''}
+                      </p>
+                    )}
+                    {(businessProfile.paymentGateways.bankName || businessProfile.paymentGateways.bankAccountNumber) && (
+                      <p className="text-[10px] text-slate-400 print:text-slate-600">
+                        <strong>Bank Transfer:</strong> {businessProfile.paymentGateways.bankName || 'Bank'}
+                        {businessProfile.paymentGateways.bankAccountNumber ? ` (Acct: ${businessProfile.paymentGateways.bankAccountNumber})` : ''}
+                      </p>
+                    )}
+                    <p className="text-[10px] text-slate-500 print:text-slate-600 leading-relaxed">
+                      <strong>Over-the-Counter:</strong> {businessProfile.name || 'Office'} Cashier Desk
+                      {(() => {
+                        const loc = [
+                          businessProfile.address?.barangay
+                            ? (/^brgy\.?\s*/i.test(businessProfile.address.barangay)
+                              ? businessProfile.address.barangay
+                              : `Brgy. ${businessProfile.address.barangay}`)
+                            : '',
+                          businessProfile.address?.city,
+                        ].filter(Boolean).join(', ');
+                        return loc ? ` (${loc})` : '';
+                      })()}.
                     </p>
                   </div>
                 </div>
@@ -440,34 +463,40 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   Billing Account Ledger
                 </span>
 
-                <div className="flex justify-between py-1 border-b border-slate-800/80 print:border-slate-200">
-                  <span className="text-slate-400 print:text-slate-600">Current Charges Subtotal:</span>
-                  <span className="font-mono font-semibold text-slate-200 print:text-black">{formatCurrency(itemsSubtotal)}</span>
-                </div>
-
-                {discountAmount > 0 && (
-                  <div className="flex justify-between py-1 border-b border-slate-800/80 print:border-slate-200 text-emerald-400 print:text-emerald-700">
-                    <span>Less: Special Promo / Discount Credit:</span>
-                    <span className="font-mono font-semibold">-{formatCurrency(discountAmount)}</span>
+                {discountAmount > 0 ? (
+                  <>
+                    <div className="flex justify-between py-1 border-b border-slate-800/80 print:border-slate-200">
+                      <span className="text-slate-400 print:text-slate-600">Current Charges Subtotal:</span>
+                      <span className="font-mono font-semibold text-slate-200 print:text-black">{formatCurrency(itemsSubtotal)}</span>
+                    </div>
+                    <div className="flex justify-between py-1 border-b border-slate-800/80 print:border-slate-200 text-emerald-400 print:text-emerald-700">
+                      <span>Less: Special Promo / Discount Credit:</span>
+                      <span className="font-mono font-semibold">-{formatCurrency(discountAmount)}</span>
+                    </div>
+                    <div className="flex justify-between py-1 border-b border-slate-800/80 print:border-slate-200 text-slate-300 print:text-slate-700 font-medium">
+                      <span>Net Current Month Charges:</span>
+                      <span className="font-mono">{formatCurrency(netCurrentCharges)}</span>
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex justify-between py-1 border-b border-slate-800/80 print:border-slate-200">
+                    <span className="text-slate-400 print:text-slate-600">Current Month Charges:</span>
+                    <span className="font-mono font-semibold text-slate-200 print:text-black">{formatCurrency(netCurrentCharges)}</span>
                   </div>
                 )}
-
-                <div className="flex justify-between py-1 border-b border-slate-800/80 print:border-slate-200 text-slate-300 print:text-slate-700 font-medium">
-                  <span>Net Current Month Charges:</span>
-                  <span className="font-mono">{formatCurrency(netCurrentCharges)}</span>
-                </div>
 
                 {previousBalanceAmount > 0 && (
-                  <div className="flex justify-between py-1 border-b border-slate-800/80 print:border-slate-200 text-rose-400 print:text-rose-700 font-semibold">
-                    <span>Previous Unpaid Balance (Arrears):</span>
-                    <span className="font-mono">+{formatCurrency(previousBalanceAmount)}</span>
-                  </div>
+                  <>
+                    <div className="flex justify-between py-1 border-b border-slate-800/80 print:border-slate-200 text-rose-400 print:text-rose-700 font-semibold">
+                      <span>Previous Unpaid Balance (Arrears):</span>
+                      <span className="font-mono">+{formatCurrency(previousBalanceAmount)}</span>
+                    </div>
+                    <div className="flex justify-between py-1.5 border-b border-slate-700 print:border-slate-300 font-bold text-sm">
+                      <span className="text-slate-100 print:text-black">Total Invoiced Amount:</span>
+                      <span className="font-mono text-slate-100 print:text-black">{formatCurrency(computedTotalAmount)}</span>
+                    </div>
+                  </>
                 )}
-
-                <div className="flex justify-between py-1.5 border-b border-slate-700 print:border-slate-300 font-bold text-sm">
-                  <span className="text-slate-100 print:text-black">Total Invoiced Amount:</span>
-                  <span className="font-mono text-slate-100 print:text-black">{formatCurrency(computedTotalAmount)}</span>
-                </div>
 
                 {paidAmount > 0 && (
                   <div className="flex justify-between py-1 text-emerald-400 print:text-emerald-700 font-semibold">
@@ -484,11 +513,11 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                     Amount Payable
                   </span>
                   <span className="text-sm font-black text-slate-100 print:text-black">
-                    TOTAL BALANCE DUE
+                    TOTAL AMOUNT DUE
                   </span>
                 </div>
                 <span className="font-mono font-black text-xl text-cyan-300 print:text-slate-950">
-                  {formatCurrency(computedBalanceDue)}
+                  {formatCurrency(computedTotalAmount)}
                 </span>
               </div>
             </div>
@@ -535,28 +564,29 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
             </div>
           )}
 
-          {/* 7. Signature & Official Reminders */}
-          <div className="pt-4 border-t border-slate-800 print:border-slate-300 flex flex-col sm:flex-row justify-between items-end gap-6 text-[11px] text-slate-400 print:text-slate-600">
-            <div className="space-y-1">
+          {/* 7. Official Reminders */}
+          <div className="pt-4 border-t border-slate-800 print:border-slate-300 text-[11px] text-slate-400 print:text-slate-600">
+            <div className="space-y-1.5">
               <p className="font-semibold text-slate-300 print:text-black">Important Reminders:</p>
-              <p>• Please include your Account No. ({invoice.accountNo}) in payment notes when paying via GCash, Maya, or Bank.</p>
-              <p>• Settle on or before {formatDate(invoice.dueDate)} to ensure uninterrupted high-speed fiber connection.</p>
-              <p>• For billing assistance or 24/7 technical support hotline: <strong className="text-slate-200 print:text-black font-mono">{businessProfile.representative.mobile}</strong>.</p>
+              <p>• Please include your Account No. ({invoice.accountNo}) in payment notes when paying via online channels.</p>
+              {isPaid ? (
+                <p className="text-emerald-400 print:text-emerald-700 font-medium">
+                  • Payment received in full{invoice.paidAt ? ` on ${formatDate(invoice.paidAt)}` : ''}. Thank you for keeping your account active and in good standing.
+                </p>
+              ) : isOverdue ? (
+                <p className="text-rose-400 print:text-rose-700 font-medium">
+                  • Payment was due on {formatDate(invoice.dueDate)}. Please settle immediately to maintain uninterrupted service connectivity.
+                </p>
+              ) : paidAmount > 0 && computedBalanceDue > 0 ? (
+                <p>
+                  • Partial payment received. Please settle remaining balance of {formatCurrency(computedBalanceDue)} on or before {formatDate(invoice.dueDate)} to maintain uninterrupted service connectivity.
+                </p>
+              ) : (
+                <p>• Settle on or before {formatDate(invoice.dueDate)} to ensure uninterrupted service connectivity.</p>
+              )}
+              <p>• For billing assistance or hotline: <strong className="text-slate-200 print:text-black font-mono">{businessProfile.representative.mobile}</strong>{businessProfile.representative.email ? ` | Email: ${businessProfile.representative.email}` : ''}.</p>
               <p className="text-[10px] text-slate-500 print:text-slate-500 italic">
                 This Statement of Account serves as an official billing invoice for telecommunications services.
-              </p>
-            </div>
-
-            <div className="text-center sm:text-right min-w-[220px]">
-              <div className="w-40 border-b border-slate-600 print:border-slate-800 mx-auto sm:ml-auto mb-1.5" />
-              <p className="font-bold text-slate-200 print:text-black text-xs">
-                {businessProfile.representative.firstName} {businessProfile.representative.lastName}
-              </p>
-              <p className="text-[10px] text-slate-500 print:text-slate-600">
-                Authorized Representative / Billing Lead
-              </p>
-              <p className="text-[10px] text-cyan-400 print:text-slate-800 font-semibold">
-                {businessProfile.name}
               </p>
             </div>
           </div>

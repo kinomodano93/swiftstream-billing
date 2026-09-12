@@ -146,9 +146,22 @@ export const loadStoredData = () => {
     const rawBusinessProfile = JSON.parse(
       localStorage.getItem(STORAGE_KEYS.BUSINESS_PROFILE) || JSON.stringify(initialBusinessProfile)
     ) as BusinessProfile;
+    const cleanedAddress = {
+      ...rawBusinessProfile.address,
+      roomUnit: rawBusinessProfile.address?.roomUnit === 'Unit 4' ? '' : (rawBusinessProfile.address?.roomUnit || ''),
+      building: rawBusinessProfile.address?.building === 'Commercial Arcade Bldg.' ? '' : (rawBusinessProfile.address?.building || ''),
+      subdivision: rawBusinessProfile.address?.subdivision === 'Poblacion' ? '' : (rawBusinessProfile.address?.subdivision || ''),
+      landmark: rawBusinessProfile.address?.landmark?.includes('Across Lagonoy Municipal Gymnasium') ? '' : (rawBusinessProfile.address?.landmark || ''),
+      street: (rawBusinessProfile.address?.street === 'National Highway, Zone 3' || rawBusinessProfile.address?.street === 'Zone 5') ? '' : (rawBusinessProfile.address?.street || ''),
+    };
+
     const businessProfile: BusinessProfile = {
       ...rawBusinessProfile,
       name: rawBusinessProfile.name?.replace(/\s*&\s*REPAIR\s*SHOP/gi, '').trim() || 'SWIFTSTREAM TELECOMMUNICATIONS',
+      heroTitle: rawBusinessProfile.heroTitle !== undefined ? rawBusinessProfile.heroTitle : (initialBusinessProfile.heroTitle || 'Ultra-Fast Fiber. Zero Lag. Pure Reliability.'),
+      industry: (rawBusinessProfile.industry === 'Information Technology & Telecommunications') ? '' : (rawBusinessProfile.industry || ''),
+      logoUrl: rawBusinessProfile.logoUrl || '/favicon.svg',
+      address: cleanedAddress,
     };
 
     const rawPlans = JSON.parse(

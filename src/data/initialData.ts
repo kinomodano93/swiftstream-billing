@@ -24,9 +24,11 @@ import {
 export const initialBusinessProfile: BusinessProfile = {
   name: 'SWIFTSTREAM TELECOMMUNICATIONS',
   tradeName: 'SwiftStream IT Services & Fiber Internet',
+  heroTitle: 'Ultra-Fast Fiber. Zero Lag. Pure Reliability.',
+  logoUrl: '/favicon.svg',
   websiteUrl: 'https://swiftstream-portal.web.app',
   portalDomain: 'https://swiftstream-portal.web.app',
-  industry: 'Information Technology & Telecommunications',
+  industry: '',
   tin: '468975349000',
   representative: {
     firstName: 'Leonardo',
@@ -39,15 +41,15 @@ export const initialBusinessProfile: BusinessProfile = {
     email: 'swiftstream.telecom@gmail.com',
   },
   address: {
-    roomUnit: 'Unit 4',
-    building: 'Commercial Arcade Bldg.',
-    street: 'National Highway, Zone 3',
-    subdivision: 'Poblacion',
+    roomUnit: '',
+    building: '',
+    street: '',
+    subdivision: '',
     barangay: 'Binauahan',
     city: 'Lagonoy',
     province: 'Camarines Sur',
     zipCode: '4425',
-    landmark: 'Across Lagonoy Municipal Gymnasium',
+    landmark: '',
   },
   paymentGateways: {
     gcashNumber: '09638927819',

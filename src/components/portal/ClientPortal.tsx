@@ -45,6 +45,7 @@ import confetti from 'canvas-confetti';
 import { useApp } from '../../context/AppContext';
 import { Customer, Invoice, Payment, PaymentMethod, RepairOrder } from '../../types';
 import {
+  formatBusinessAddress,
   formatCurrency,
   formatDate,
   formatDateTime,
@@ -1278,7 +1279,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                   <div>
                     <span className="text-[10px] text-slate-500 uppercase font-bold block">Office Address</span>
                     <p className="text-slate-300 mt-0.5">
-                      {businessProfile.address.building}, Brgy. {businessProfile.address.barangay}, {businessProfile.address.city}, {businessProfile.address.province}
+                      {formatBusinessAddress(businessProfile.address)}
                     </p>
                   </div>
                   <div>
@@ -1392,11 +1393,11 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                             {inv.items.map((item, idx) => {
                               const isPlanItem = item.type === 'plan' || (!item.type && idx === 0);
                               const planDetails = resolveInvoicePlanDetails(inv, customer, plans);
-                              const displayDesc = isPlanItem
+                              const displayDesc = item.description || (isPlanItem
                                 ? (inv.isProrated && inv.proratedDays
-                                    ? `Internet Plan: ${planDetails.planName} (${planDetails.speedMbps} Mbps Pure Fiber) — Prorated (${inv.proratedDays} Days)`
-                                    : `Internet Plan: ${planDetails.planName} (${planDetails.speedMbps} Mbps Pure Fiber) — Monthly Subscription`)
-                                : item.description;
+                                    ? `Internet Plan: ${planDetails.planName} (${planDetails.speedMbps} Mbps) — Prorated (${inv.proratedDays} Days)`
+                                    : `Internet Plan: ${planDetails.planName} (${planDetails.speedMbps} Mbps) — Monthly Subscription`)
+                                : 'Service Item');
 
                               const unitPrice = isPlanItem && (item.unitPrice <= 0 || !inv.isProrated) ? planDetails.monthlyFee : item.unitPrice;
                               const itemAmount = isPlanItem && (item.amount <= 0 || !inv.isProrated) ? planDetails.monthlyFee : item.amount;
@@ -1809,7 +1810,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                         <span>Option 1: Visit Our Office</span>
                       </div>
                       <p className="text-slate-300 text-xs">
-                        {businessProfile.address.building}, Brgy. {businessProfile.address.barangay}, {businessProfile.address.city}, {businessProfile.address.province}
+                        {formatBusinessAddress(businessProfile.address)}
                       </p>
                       <div className="text-[11px] text-slate-500 space-y-0.5 pt-1 border-t border-slate-800">
                         <p>🕒 Cashier Hours: Mon – Sat: 8:00 AM – 5:00 PM</p>

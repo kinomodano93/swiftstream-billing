@@ -97,6 +97,10 @@ export const SettingsModal: React.FC = () => {
   // Business state
   const [businessName, setBusinessName] = useState(businessProfile.name);
   const [tradeName, setTradeName] = useState(businessProfile.tradeName);
+  const [heroTitle, setHeroTitle] = useState(businessProfile.heroTitle || '');
+  const [industry, setIndustry] = useState(
+    businessProfile.industry === 'Information Technology & Telecommunications' ? '' : (businessProfile.industry || '')
+  );
   const [logoUrl, setLogoUrl] = useState<string>(businessProfile.logoUrl || '');
   const [tin, setTin] = useState(businessProfile.tin);
   const [portalDomain, setPortalDomain] = useState<string>(businessProfile.portalDomain || businessProfile.websiteUrl || 'https://swiftstream-portal.web.app');
@@ -109,6 +113,8 @@ export const SettingsModal: React.FC = () => {
   useEffect(() => {
     setBusinessName(businessProfile.name);
     setTradeName(businessProfile.tradeName);
+    setHeroTitle(businessProfile.heroTitle || '');
+    setIndustry(businessProfile.industry === 'Information Technology & Telecommunications' ? '' : (businessProfile.industry || ''));
     setLogoUrl(businessProfile.logoUrl || '');
     setTin(businessProfile.tin);
     setPortalDomain(businessProfile.portalDomain || businessProfile.websiteUrl || 'https://swiftstream-portal.web.app');
@@ -117,13 +123,13 @@ export const SettingsModal: React.FC = () => {
     setLastName(businessProfile.representative.lastName);
     setMobile(businessProfile.representative.mobile);
     setEmail(businessProfile.representative.email);
-    setBuilding(businessProfile.address.building || '');
-    setStreet(businessProfile.address.street);
+    setBuilding(businessProfile.address.building === 'Commercial Arcade Bldg.' ? '' : (businessProfile.address.building || ''));
+    setStreet((businessProfile.address.street === 'National Highway, Zone 3' || businessProfile.address.street === 'Zone 5') ? '' : businessProfile.address.street);
     setBarangay(businessProfile.address.barangay);
     setCity(businessProfile.address.city);
     setProvince(businessProfile.address.province);
     setZipCode(businessProfile.address.zipCode);
-    setLandmark(businessProfile.address.landmark || '');
+    setLandmark(businessProfile.address.landmark?.includes('Across Lagonoy Municipal Gymnasium') ? '' : (businessProfile.address.landmark || ''));
     setGcashNumber(businessProfile.paymentGateways.gcashNumber || '');
     setGcashName(businessProfile.paymentGateways.gcashName || '');
     setGcashQrImage(businessProfile.paymentGateways.gcashQrImage || '');
@@ -136,13 +142,13 @@ export const SettingsModal: React.FC = () => {
   }, [businessProfile]);
 
   // Address
-  const [building, setBuilding] = useState(businessProfile.address.building || '');
-  const [street, setStreet] = useState(businessProfile.address.street);
+  const [building, setBuilding] = useState(businessProfile.address.building === 'Commercial Arcade Bldg.' ? '' : (businessProfile.address.building || ''));
+  const [street, setStreet] = useState((businessProfile.address.street === 'National Highway, Zone 3' || businessProfile.address.street === 'Zone 5') ? '' : businessProfile.address.street);
   const [barangay, setBarangay] = useState(businessProfile.address.barangay);
   const [city, setCity] = useState(businessProfile.address.city);
   const [province, setProvince] = useState(businessProfile.address.province);
   const [zipCode, setZipCode] = useState(businessProfile.address.zipCode);
-  const [landmark, setLandmark] = useState(businessProfile.address.landmark || '');
+  const [landmark, setLandmark] = useState(businessProfile.address.landmark?.includes('Across Lagonoy Municipal Gymnasium') ? '' : (businessProfile.address.landmark || ''));
 
   // Payment Gateways
   const [gcashNumber, setGcashNumber] = useState(businessProfile.paymentGateways.gcashNumber);
@@ -355,6 +361,8 @@ export const SettingsModal: React.FC = () => {
     updateBusinessProfile({
       name: businessName,
       tradeName,
+      heroTitle,
+      industry,
       logoUrl,
       tin,
       portalDomain,
@@ -369,13 +377,15 @@ export const SettingsModal: React.FC = () => {
       },
       address: {
         ...businessProfile.address,
-        building,
+        building: '',
+        roomUnit: '',
+        subdivision: '',
         street,
         barangay,
         city,
         province,
         zipCode,
-        landmark,
+        landmark: '',
       },
       paymentGateways: {
         gcashNumber,
@@ -610,11 +620,16 @@ export const SettingsModal: React.FC = () => {
               <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-3">
                 <div className="flex items-center justify-between">
                   <div>
-                    <label className="block text-slate-200 font-bold text-xs">
-                      Company Brand Logo
-                    </label>
+                    <div className="flex items-center gap-2">
+                      <label className="block text-slate-200 font-bold text-xs">
+                        Company Brand Logo & Browser Favicon
+                      </label>
+                      <span className="px-2 py-0.5 rounded-full bg-cyan-950/60 text-cyan-400 border border-cyan-800/60 text-[9px] font-bold uppercase tracking-wider">
+                        Browser Tab Icon
+                      </span>
+                    </div>
                     <p className="text-[11px] text-slate-400">
-                      Upload your ISP company logo (PNG, JPG, WEBP, or SVG, max 2MB). This logo will dynamically reflect on the Home Page, Admin Sidebar, Invoices, and Subscriber Portal.
+                      Upload your ISP company logo (PNG, JPG, WEBP, or SVG, max 2MB). This logo dynamically updates the <strong>Browser Tab Icon (Favicon)</strong>, Home Page, Admin Sidebar, Invoices, and Subscriber Portal.
                     </p>
                   </div>
                 </div>
@@ -622,18 +637,11 @@ export const SettingsModal: React.FC = () => {
                 <div className="flex flex-col sm:flex-row items-center gap-4 pt-1">
                   {/* Logo Preview Box */}
                   <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-slate-900 border border-slate-700/80 flex items-center justify-center p-2 shrink-0 shadow-md relative overflow-hidden">
-                    {logoUrl ? (
-                      <img
-                        src={logoUrl}
-                        alt="Company Logo Preview"
-                        className="w-full h-full object-contain rounded-xl"
-                      />
-                    ) : (
-                      <div className="flex flex-col items-center justify-center text-slate-500 text-center">
-                        <ImageIcon className="w-6 h-6 mb-1 text-slate-600" />
-                        <span className="text-[9px] font-mono">No Logo</span>
-                      </div>
-                    )}
+                    <img
+                      src={logoUrl || '/favicon.svg'}
+                      alt="Company Logo Preview"
+                      className="w-full h-full object-contain rounded-xl"
+                    />
                   </div>
 
                   {/* Actions & File Input */}
@@ -641,7 +649,7 @@ export const SettingsModal: React.FC = () => {
                     <div className="flex flex-wrap items-center gap-2">
                       <label className="flex items-center gap-2 px-3.5 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl text-xs font-semibold cursor-pointer transition-all shadow-md shadow-cyan-600/20 active:scale-95">
                         <Upload className="w-4 h-4" />
-                        <span>{logoUrl ? 'Change Company Logo' : 'Upload Company Logo'}</span>
+                        <span>{logoUrl && logoUrl !== '/favicon.svg' ? 'Change Company Logo' : 'Upload Company Logo'}</span>
                         <input
                           type="file"
                           accept="image/png, image/jpeg, image/webp, image/svg+xml"
@@ -663,20 +671,21 @@ export const SettingsModal: React.FC = () => {
                         />
                       </label>
 
-                      {logoUrl && (
+                      {logoUrl && logoUrl !== '/favicon.svg' && (
                         <button
                           type="button"
-                          onClick={() => setLogoUrl('')}
+                          onClick={() => setLogoUrl('/favicon.svg')}
                           className="flex items-center gap-1.5 px-3 py-2 bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/40 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                          title="Reset to default SwiftStream brand emblem"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
-                          <span>Remove Logo</span>
+                          <span>Reset to Default</span>
                         </button>
                       )}
                     </div>
 
                     <p className="text-[10px] text-slate-500 font-mono">
-                      Recommended: Transparent PNG or SVG (square or horizontal ratio).
+                      Square ratio (PNG/SVG) recommended for optimal browser tab rendering.
                     </p>
                   </div>
                 </div>
@@ -705,7 +714,32 @@ export const SettingsModal: React.FC = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-slate-400 mb-1 font-medium">Hero Title / Marketing Headline</label>
+                <input
+                  type="text"
+                  value={heroTitle}
+                  onChange={(e) => setHeroTitle(e.target.value)}
+                  placeholder="e.g. Ultra-Fast Fiber. Zero Lag. Pure Reliability."
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:border-cyan-500 focus:outline-none"
+                />
+                <p className="text-xs text-slate-500 mt-1">
+                  Prominently featured across your public Home Page hero banner and Official Invoice / Billing Statement headers.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-slate-400 mb-1 font-medium">Industry / Business Nature</label>
+                  <input
+                    type="text"
+                    value={industry}
+                    onChange={(e) => setIndustry(e.target.value)}
+                    placeholder="e.g. Telecom & ISP"
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:border-cyan-500 focus:outline-none"
+                  />
+                </div>
+
                 <div>
                   <label className="block text-slate-400 mb-1 font-medium">BIR TIN Number *</label>
                   <input
@@ -719,7 +753,7 @@ export const SettingsModal: React.FC = () => {
 
                 <div>
                   <label className="block text-slate-400 mb-1 font-medium flex items-center justify-between">
-                    <span>Portal Public Domain / Dynamic DNS (DDNS)</span>
+                    <span>Portal Public Domain</span>
                     <span className="text-[10px] text-cyan-400 font-mono">Dynamic DNS</span>
                   </label>
                   <input
@@ -729,9 +763,6 @@ export const SettingsModal: React.FC = () => {
                     placeholder="https://swiftstream-portal.web.app"
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-mono focus:border-cyan-500 focus:outline-none"
                   />
-                  <p className="text-[10px] text-slate-500 mt-1">
-                    Public domain, Cloudflare hostname, or MikroTik Cloud DDNS used for subscriber credentials and portal links.
-                  </p>
                 </div>
               </div>
             </div>
@@ -807,13 +838,13 @@ export const SettingsModal: React.FC = () => {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-slate-400 mb-1 font-medium">Street / Building / Highway *</label>
+                  <label className="block text-slate-400 mb-1 font-medium">Street / Zone (Optional)</label>
                   <input
                     type="text"
                     value={street}
                     onChange={(e) => setStreet(e.target.value)}
+                    placeholder="e.g. Zone 1, Main Road (Optional)"
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:border-cyan-500 focus:outline-none"
-                    required
                   />
                 </div>
 
@@ -925,7 +956,7 @@ export const SettingsModal: React.FC = () => {
                     )}
                     <div className="min-w-0">
                       <h3 className="font-bold text-sm text-slate-100 truncate">{businessName || 'Business Name'}</h3>
-                      <p className="text-[11px] text-cyan-400 font-medium truncate">{tradeName || 'Trade / Brand Name'}</p>
+                      <p className="text-[11px] text-cyan-400 font-medium truncate">{heroTitle || tradeName || 'Trade / Brand Name'}</p>
                     </div>
                   </div>
                   <span className="text-[10px] font-mono bg-cyan-950 text-cyan-300 px-1.5 py-0.5 rounded border border-cyan-800 shrink-0">
@@ -935,7 +966,7 @@ export const SettingsModal: React.FC = () => {
 
                 <div className="space-y-1 text-[11px] text-slate-400 border-t border-slate-800/60 pt-2 font-mono">
                   <div><span className="text-slate-500">TIN:</span> {tin || '000-000-000-000'}</div>
-                  <div><span className="text-slate-500">Node:</span> {street}, Brgy. {barangay}, {city}, {province} {zipCode}</div>
+                  <div><span className="text-slate-500">Node:</span> {street ? `${street}, ` : ''}Brgy. {barangay}, {city}, {province} {zipCode}</div>
                   <div><span className="text-slate-500">Tel/SMS:</span> {mobile}</div>
                   <div><span className="text-slate-500">Email:</span> {email}</div>
                 </div>
