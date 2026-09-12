@@ -59,6 +59,7 @@ import { FirebaseSettingsCard } from './FirebaseSettingsCard';
 import { SsoWhitelistSettingsCard } from './SsoWhitelistSettingsCard';
 import { StaffUserManager } from '../users/StaffUserManager';
 import { LAGONOY_BARANGAYS, PRESENTACION_BARANGAYS } from '../network/CoverageAreaManager';
+import { fetchPublicIp, getPublicIp, isLocalOrMockIp } from '../../services/ipService';
 
 export const SettingsModal: React.FC = () => {
   const {
@@ -93,6 +94,13 @@ export const SettingsModal: React.FC = () => {
   }, [staffUsers, customers]);
 
   const [activeTab, setActiveTab] = useState<'profile' | 'payments' | 'staff' | 'firebase' | 'sso' | 'api' | 'audit' | 'backup'>('profile');
+  const [publicIp, setPublicIp] = useState<string | null>(getPublicIp());
+
+  useEffect(() => {
+    fetchPublicIp().then((ip) => {
+      if (ip) setPublicIp(ip);
+    });
+  }, []);
 
   // Business state
   const [businessName, setBusinessName] = useState(businessProfile.name);
@@ -486,7 +494,7 @@ export const SettingsModal: React.FC = () => {
       `"${log.category.toUpperCase()}"`,
       `"${log.severity.toUpperCase()}"`,
       `"${log.action}"`,
-      `"${log.ipAddress || '127.0.0.1'}"`,
+      `"${!isLocalOrMockIp(log.ipAddress) ? log.ipAddress : (publicIp || 'Public WAN')}"`,
       `"${log.status.toUpperCase()}"`,
       `"${log.details.replace(/"/g, '""')}"`,
     ]);
@@ -2182,7 +2190,9 @@ export const SettingsModal: React.FC = () => {
                             {log.severity}
                           </span>
                         </td>
-                        <td className="px-4 py-2.5 text-slate-400 whitespace-nowrap">{log.ipAddress || '192.168.88.10'}</td>
+                        <td className="px-4 py-2.5 text-slate-400 whitespace-nowrap">
+                          {!isLocalOrMockIp(log.ipAddress) ? log.ipAddress : (publicIp || 'Public WAN')}
+                        </td>
                         <td className="px-4 py-2.5 text-slate-300 font-sans max-w-xs truncate" title={log.details}>
                           {log.details}
                         </td>

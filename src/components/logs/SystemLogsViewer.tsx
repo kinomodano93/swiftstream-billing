@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Shield,
   ShieldAlert,
@@ -22,12 +22,21 @@ import {
   Check,
   Radio,
   SlidersHorizontal,
+  Globe,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { AuditLog, AuditLogCategory, AuditLogSeverity } from '../../types';
+import { fetchPublicIp, getPublicIp, isLocalOrMockIp } from '../../services/ipService';
 
 export const SystemLogsViewer: React.FC = () => {
   const { auditLogs, clearAuditLogs, staffUsers, showToast } = useApp();
+  const [publicIp, setPublicIp] = useState<string | null>(getPublicIp());
+
+  useEffect(() => {
+    fetchPublicIp().then((ip) => {
+      if (ip) setPublicIp(ip);
+    });
+  }, []);
 
   // Filter states
   const [searchTerm, setSearchTerm] = useState<string>('');
@@ -147,7 +156,7 @@ export const SystemLogsViewer: React.FC = () => {
       log.category,
       log.action,
       log.severity.toUpperCase(),
-      log.ipAddress || 'Internal',
+      !isLocalOrMockIp(log.ipAddress) ? log.ipAddress : (publicIp || 'Public WAN'),
       log.status.toUpperCase(),
       `"${(log.details || '').replace(/"/g, '""')}"`,
     ]);
@@ -172,10 +181,10 @@ export const SystemLogsViewer: React.FC = () => {
 
   return (
     <div className="w-full px-3 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-6 animate-in fade-in">
-      {/* Header Title & Action Bar */}
+      {/* Page Title & Controls */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="p-2 rounded-xl bg-purple-500/10 border border-purple-500/30 text-purple-400">
               <Terminal className="w-5 h-5" />
             </span>
@@ -186,6 +195,12 @@ export const SystemLogsViewer: React.FC = () => {
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
               Live Sync
             </span>
+            {publicIp && (
+              <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-cyan-500/10 border border-cyan-500/30 text-cyan-300">
+                <Globe className="w-3 h-3 text-cyan-400" />
+                <span>WAN: {publicIp}</span>
+              </span>
+            )}
           </div>
           <p className="text-xs sm:text-sm text-slate-400 mt-1">
             Real-time forensic audit ledger tracking operator actions, authentication, network changes, and security events.
@@ -472,7 +487,7 @@ export const SystemLogsViewer: React.FC = () => {
 
                       {/* IP Address */}
                       <td className="px-4 py-3 text-slate-400 whitespace-nowrap text-[11px]">
-                        {log.ipAddress || '192.168.18.1'}
+                        {!isLocalOrMockIp(log.ipAddress) ? log.ipAddress : (publicIp || 'Public WAN')}
                       </td>
 
                       {/* Details */}
@@ -586,7 +601,9 @@ export const SystemLogsViewer: React.FC = () => {
               </div>
               <div className="p-3 rounded-xl bg-slate-950 border border-slate-800">
                 <span className="text-[10px] text-slate-500 uppercase font-semibold block">Source IP</span>
-                <span className="font-mono text-slate-300 mt-0.5 block">{selectedLog.ipAddress || 'Internal Network'}</span>
+                <span className="font-mono text-slate-300 mt-0.5 block">
+                  {!isLocalOrMockIp(selectedLog.ipAddress) ? selectedLog.ipAddress : (publicIp || 'Public WAN')}
+                </span>
               </div>
             </div>
 

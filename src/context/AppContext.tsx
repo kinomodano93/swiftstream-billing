@@ -82,6 +82,7 @@ import {
   PaymentWebhookEvent,
   PaymentWebhookResult,
 } from '../services/paymentWebhookService';
+import { fetchPublicIp, getPublicIp, isLocalOrMockIp } from '../services/ipService';
 
 export interface ToastNotification {
   id: string;
@@ -883,7 +884,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
     const unsubAuditLogs = subscribeToCollection<AuditLog>(COLLECTIONS.AUDIT_LOGS, (data) => {
       if (data && data.length > 0) {
-        const sorted = [...data].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+        const cachedIp = getPublicIp();
+        const cleaned = data.map((item) => {
+          if (isLocalOrMockIp(item.ipAddress) && cachedIp) {
+            return { ...item, ipAddress: cachedIp };
+          }
+          return item;
+        });
+        const sorted = [...cleaned].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
         setAuditLogs(sorted);
       }
     });
@@ -981,14 +989,58 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, []);
 
+  // Resolve client's real public WAN IP on mount & clean historical mock IPs in audit trail
+  useEffect(() => {
+    fetchPublicIp().then((pubIp) => {
+      if (pubIp) {
+        setAuditLogs((prev) => {
+          let hasMock = false;
+          const cleaned = prev.map((log) => {
+            if (isLocalOrMockIp(log.ipAddress)) {
+              hasMock = true;
+              const updated = { ...log, ipAddress: pubIp };
+              saveFirestoreDoc(COLLECTIONS.AUDIT_LOGS, updated);
+              return updated;
+            }
+            return log;
+          });
+          if (hasMock) {
+            saveToStorage(STORAGE_KEYS.AUDIT_LOGS, cleaned);
+            return cleaned;
+          }
+          return prev;
+        });
+      }
+    });
+  }, []);
+
   const logAuditEvent = (event: Omit<AuditLog, 'id' | 'timestamp'>) => {
+    const rawIp = event.ipAddress;
+    const detectedIp = getPublicIp();
+    const effectiveIp = rawIp && !isLocalOrMockIp(rawIp)
+      ? rawIp
+      : (detectedIp || undefined);
+
     const newLog: AuditLog = {
       ...event,
+      ipAddress: effectiveIp,
       id: generateId('AUD'),
       timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19),
     };
     setAuditLogs((prev) => [newLog, ...prev.filter((l) => l.id !== newLog.id).slice(0, 499)]);
     saveFirestoreDoc(COLLECTIONS.AUDIT_LOGS, newLog);
+
+    // If public IP was not yet available synchronously, resolve it and patch record
+    if (!newLog.ipAddress || isLocalOrMockIp(newLog.ipAddress)) {
+      fetchPublicIp().then((resolvedIp) => {
+        if (resolvedIp) {
+          setAuditLogs((prev) =>
+            prev.map((l) => (l.id === newLog.id ? { ...l, ipAddress: resolvedIp } : l))
+          );
+          saveFirestoreDoc(COLLECTIONS.AUDIT_LOGS, { ...newLog, ipAddress: resolvedIp });
+        }
+      });
+    }
   };
 
   const clearAuditLogs = () => {

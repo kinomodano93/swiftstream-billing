@@ -140,20 +140,20 @@ export const generateInvoicePDF = (
     doc.text(`TOTAL AMOUNT DUE: ${formatCurrencyPdf(computedBalanceDue)}`, 192, ribbonY + 6, { align: 'right' });
   }
 
-  // 4. Two Info Cards: Subscriber Info (Left) & Subscription Details (Right)
+  // 4. Subscriber Billing Details Card (Full Width)
   const infoY = 54;
-  const infoH = 27;
+  const infoH = 21;
 
-  // Left Card: Subscriber
   doc.setFillColor(248, 250, 252);
   doc.setDrawColor(226, 232, 240);
-  doc.roundedRect(14, infoY, 90, infoH, 1.5, 1.5, 'FD');
+  doc.roundedRect(14, infoY, 182, infoH, 1.5, 1.5, 'FD');
 
   doc.setFontSize(7.5);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(100, 116, 139);
   doc.text('SUBSCRIBER BILLING DETAILS', 18, infoY + 5);
 
+  // Left: Customer Name & Account Number
   doc.setFontSize(9.5);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(15, 23, 42);
@@ -162,45 +162,19 @@ export const generateInvoicePDF = (
   doc.setFontSize(7.5);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(71, 85, 105);
-  doc.text(`Account No: `, 18, infoY + 15);
+  doc.text('Account No: ', 18, infoY + 15.5);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(2, 132, 199);
-  doc.text(invoice.accountNo, 36, infoY + 15);
+  doc.text(invoice.accountNo, 36, infoY + 15.5);
 
+  // Right: Service Address & Mobile
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(71, 85, 105);
-  const truncatedAddress = invoice.customerAddress.length > 52
-    ? invoice.customerAddress.slice(0, 52) + '...'
+  const truncatedAddress = invoice.customerAddress.length > 70
+    ? invoice.customerAddress.slice(0, 68) + '...'
     : invoice.customerAddress;
-  doc.text(`Service Address: ${truncatedAddress}`, 18, infoY + 19.5);
-  doc.text(`Mobile: ${invoice.customerMobile}`, 18, infoY + 24);
-
-  // Right Card: Billing Period & Statement Info
-  doc.setFillColor(248, 250, 252);
-  doc.setDrawColor(226, 232, 240);
-  doc.roundedRect(108, infoY, 88, infoH, 1.5, 1.5, 'FD');
-
-  doc.setFontSize(7.5);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(100, 116, 139);
-  doc.text('BILLING PERIOD & STATEMENT INFO', 112, infoY + 5);
-
-  doc.setFontSize(7.5);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(71, 85, 105);
-  doc.text('Coverage Period:', 112, infoY + 11);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(15, 23, 42);
-  doc.text(
-    `${formatDate(invoice.billingPeriodStart)} to ${formatDate(invoice.billingPeriodEnd)}`,
-    112,
-    infoY + 15.5
-  );
-
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(71, 85, 105);
-  doc.text(`Statement Date: ${formatDate(invoice.issueDate)}`, 112, infoY + 20);
-  doc.text(`Payment Due: ${formatDate(invoice.dueDate)}`, 112, infoY + 24);
+  doc.text(`Service Address: ${truncatedAddress}`, 100, infoY + 10.5);
+  doc.text(`Mobile: ${invoice.customerMobile}`, 100, infoY + 15.5);
 
   // 5. Itemized Table
   const cleanPlanName = planDetails.planName.replace(/\s*\|\s*\d+\s*mbps/i, '').trim();
@@ -230,7 +204,7 @@ export const generateInvoicePDF = (
   });
 
   autoTable(doc, {
-    startY: 84,
+    startY: 79,
     head: [['#', 'Description of Services & Charges', 'Qty', 'Unit Rate (PHP)', 'Amount (PHP)']],
     body: tableData,
     theme: 'grid',

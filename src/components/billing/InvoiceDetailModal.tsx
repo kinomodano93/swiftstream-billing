@@ -275,52 +275,26 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
             </div>
           </div>
 
-          {/* 3. Two Information Boxes: Subscriber Details & Billing Period */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-            {/* Subscriber Box */}
-            <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 print:border-slate-300 print:bg-slate-50 space-y-1.5">
-              <span className="text-[10px] font-bold text-slate-500 print:text-slate-600 uppercase tracking-wider block">
-                Billed To Subscriber
-              </span>
-              <p className="text-sm font-bold text-slate-100 print:text-black">{invoice.customerName}</p>
-              <div className="flex items-center gap-2 text-slate-300 print:text-slate-700">
-                <span className="text-slate-500">Account No:</span>
-                <span className="font-mono font-bold text-cyan-400 print:text-cyan-800">{invoice.accountNo}</span>
-              </div>
-              <p className="text-slate-400 print:text-slate-600 leading-relaxed">
-                <strong className="text-slate-500 font-normal">Service Address: </strong>
-                {invoice.customerAddress}
-              </p>
-              <div className="text-[11px] text-slate-400 print:text-slate-600 pt-0.5">
-                <span>Mobile: <strong className="text-slate-200 print:text-black font-mono">{invoice.customerMobile}</strong></span>
-              </div>
-            </div>
-
-            {/* Billing Period & Statement Dates Box */}
-            <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 print:border-slate-300 print:bg-slate-50 space-y-2.5">
-              <span className="text-[10px] font-bold text-slate-400 print:text-slate-600 uppercase tracking-wider block pb-1 border-b border-slate-800/80 print:border-slate-200">
-                Billing Period & Statement Info
-              </span>
-
-              <div>
-                <span className="text-[10px] text-slate-500 print:text-slate-600 block">Coverage Period:</span>
-                <p className="text-xs font-bold text-cyan-300 print:text-cyan-900 pt-0.5">
-                  {formatDate(invoice.billingPeriodStart)} to {formatDate(invoice.billingPeriodEnd)}
-                </p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2 text-xs pt-1 border-t border-slate-800/60 print:border-slate-200">
-                <div>
-                  <span className="text-[10px] text-slate-500 print:text-slate-600 block">Statement Date:</span>
-                  <span className="font-semibold text-slate-200 print:text-black">
-                    {formatDate(invoice.issueDate)}
-                  </span>
+          {/* 3. Subscriber Billing Details Card */}
+          <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 print:border-slate-300 print:bg-slate-50 text-xs">
+            <span className="text-[10px] font-bold text-slate-500 print:text-slate-600 uppercase tracking-wider block mb-2">
+              Billed To Subscriber
+            </span>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <p className="text-sm font-bold text-slate-100 print:text-black">{invoice.customerName}</p>
+                <div className="flex items-center gap-2 text-slate-300 print:text-slate-700">
+                  <span className="text-slate-500">Account No:</span>
+                  <span className="font-mono font-bold text-cyan-400 print:text-cyan-800">{invoice.accountNo}</span>
                 </div>
-                <div>
-                  <span className="text-[10px] text-slate-500 print:text-slate-600 block">Payment Due:</span>
-                  <span className="font-semibold text-rose-400 print:text-rose-800">
-                    {formatDate(invoice.dueDate)}
-                  </span>
+              </div>
+              <div className="space-y-1.5">
+                <p className="text-slate-400 print:text-slate-600 leading-relaxed">
+                  <strong className="text-slate-500 font-normal">Service Address: </strong>
+                  {invoice.customerAddress}
+                </p>
+                <div className="text-[11px] text-slate-400 print:text-slate-600">
+                  <span>Mobile: <strong className="text-slate-200 print:text-black font-mono">{invoice.customerMobile}</strong></span>
                 </div>
               </div>
             </div>
