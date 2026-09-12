@@ -46,6 +46,7 @@ import {
 } from '../data/storage';
 import { initialPlans, initialBusinessProfile, initialCoverageAreas, initialStaffUsers, initialOperationalBills } from '../data/initialData';
 import { generateId } from '../utils/formatters';
+import { findCustomerInvoiceForMonth, hasCustomerInvoiceForMonth } from '../utils/billingRules';
 import { generateReminderMessage, sendMockNotification } from '../utils/smsSender';
 import {
   fetchFullRouterTelemetry,
@@ -72,6 +73,7 @@ import {
   subscribeToAuth,
   signOutUser,
   syncCustomerApprovalToUser,
+  deleteCustomerAccountFromFirestore,
   getAuthorizedAdminEmails,
   saveAuthorizedAdminEmails,
 } from '../services/authService';
@@ -143,7 +145,7 @@ interface AppContextType {
   // Customer Actions
   addCustomer: (customer: Omit<Customer, 'id' | 'createdAt' | 'updatedAt'>, options?: { skipMikrotikSync?: boolean }) => Customer;
   updateCustomer: (id: string, updates: Partial<Customer>, options?: { skipMikrotikSync?: boolean }) => void;
-  deleteCustomer: (id: string) => void;
+  deleteCustomer: (id: string) => Promise<void> | void;
   toggleCustomerStatus: (id: string, newStatus: CustomerStatus) => void;
   addCustomerWalletCredit: (customerId: string, amount: number, notes?: string) => void;
   syncCustomerMikrotik: (id: string) => void;
@@ -176,6 +178,8 @@ interface AppContextType {
     billingCycleDay?: number;
     applyWalletCredits?: boolean;
     enableProration?: boolean;
+    customerIds?: string[];
+    billingType?: string;
   }) => { count: number; totalAmount: number };
   applyInvoiceDiscount: (invoiceId: string, discountAmount: number) => void;
   runDailyGraceAudit: () => { isolatedCount: number; reactivatedCount: number; graceCount: number };
@@ -705,6 +709,69 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [customers, staffUsers.length]);
 
+  // --- Customer Balance Integrity & Self-Healing Sentinel ---
+  // Guarantees customer.balance strictly reflects actual unpaid invoices in the system.
+  // Instantly heals and clears phantom/ghost balances when invoices are deleted or paid.
+  useEffect(() => {
+    if (!customers || customers.length === 0) return;
+
+    let hasChanges = false;
+    const reconciled = customers.map((c) => {
+      const openInvoices = invoices.filter(
+        (inv) =>
+          (inv.customerId === c.id ||
+            inv.accountNo === c.accountNo ||
+            inv.customerId === c.accountNo ||
+            inv.accountNo === c.id) &&
+          inv.status !== 'paid' &&
+          (inv.balanceDue || 0) > 0
+      );
+
+      // If customer has NO open unpaid invoices, balance MUST be 0
+      if (openInvoices.length === 0 && (c.balance || 0) > 0) {
+        hasChanges = true;
+        const shouldReactivate = c.status === 'overdue' || c.status === 'suspended';
+        const updated = {
+          ...c,
+          balance: 0,
+          status: shouldReactivate ? ('active' as const) : c.status,
+          updatedAt: new Date().toISOString(),
+        };
+        saveFirestoreDoc(COLLECTIONS.CUSTOMERS, updated);
+        return updated;
+      }
+
+      // If customer has open invoices, ensure balance matches actual cumulative open balance
+      if (openInvoices.length > 0) {
+        const sorted = [...openInvoices].sort(
+          (a, b) => new Date(a.issueDate || a.createdAt).getTime() - new Date(b.issueDate || b.createdAt).getTime()
+        );
+        const latest = sorted[sorted.length - 1];
+        const expectedBalance =
+          latest.previousBalance && latest.previousBalance > 0
+            ? latest.balanceDue
+            : sorted.reduce((sum, inv) => sum + (Number(inv.balanceDue) || 0), 0);
+
+        if (c.balance !== expectedBalance && expectedBalance >= 0) {
+          hasChanges = true;
+          const updated = {
+            ...c,
+            balance: expectedBalance,
+            updatedAt: new Date().toISOString(),
+          };
+          saveFirestoreDoc(COLLECTIONS.CUSTOMERS, updated);
+          return updated;
+        }
+      }
+
+      return c;
+    });
+
+    if (hasChanges) {
+      setCustomers(reconciled);
+    }
+  }, [invoices, customers.length]);
+
   // --- Real-time Cloud Firestore Subscriptions ---
   useEffect(() => {
     const unsubCustomers = subscribeToCollection<Customer>(COLLECTIONS.CUSTOMERS, (data) => {
@@ -1097,24 +1164,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
-  const deleteCustomer = (id: string) => {
+  const deleteCustomer = async (id: string) => {
     if (!hasPermission('canDeleteCustomer')) {
       showToast('error', 'Access Denied', 'You do not have permission to delete subscriber accounts.');
       return;
     }
-    const target = customers.find((c) => c.id === id);
+    const target = customers.find((c) => c.id === id || c.accountNo === id);
     if (!target) return;
 
+    // 1. Permanently delete customer profile, portal account in system_users, and credentials from Cloud Firestore & Firebase Auth
+    const delRes = await deleteCustomerAccountFromFirestore(target);
 
-    deleteFirestoreDoc(COLLECTIONS.CUSTOMERS, id);
-
-    // Release NAP port
-    if (target.network.napBoxId) {
+    // 2. Release NAP port if connected
+    if (target.network?.napBoxId) {
       setNapBoxes((prev) =>
         prev.map((box) => {
           if (box.id === target.network.napBoxId) {
             const updatedPorts = box.ports.map((p) =>
-              p.customerId === id ? { portNumber: p.portNumber, status: 'available' as const } : p
+              p.customerId === id || p.customerId === target.accountNo
+                ? { portNumber: p.portNumber, status: 'available' as const }
+                : p
             );
             const updatedBox = { ...box, ports: updatedPorts };
             saveFirestoreDoc(COLLECTIONS.NAP_BOXES, updatedBox);
@@ -1125,14 +1194,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       );
     }
 
-    setCustomers((prev) => prev.filter((c) => c.id !== id));
-    showToast('warning', 'Customer Removed', `Account ${target.accountNo} has been deleted.`);
+    // 3. Remove customer from memory and local storage
+    setCustomers((prev) => prev.filter((c) => c.id !== id && c.accountNo !== target.accountNo));
+
+    showToast(
+      'warning',
+      delRes.authDeleted ? 'Subscriber & Firebase Auth Removed' : 'Customer & Firestore Account Removed',
+      delRes.authDeleted
+        ? `Subscriber ${target.fullName} (${target.accountNo}) has been deleted from the database and permanently removed from Firebase Authentication.`
+        : `Subscriber ${target.fullName} (${target.accountNo}) and their portal credentials have been permanently deleted from Cloud Firestore.`
+    );
+
     logAuditEvent({
       userName: 'Admin Leonardo Flojo',
       action: 'CUSTOMER_DELETED',
       category: 'customer',
       severity: 'warning',
-      details: `Decommissioned subscriber account ${target.fullName} (${target.accountNo}).`,
+      details: `Decommissioned and deleted subscriber account ${target.fullName} (${target.accountNo}) from active database, Firestore customers, and Firestore system_users.`,
       status: 'success',
     });
   };
@@ -1375,17 +1453,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ? invoiceData.issueDate.slice(0, 7)
       : new Date().toISOString().slice(0, 7);
 
-    const existingInvoice = invoices.find(
-      (inv) =>
-        inv.customerId === invoiceData.customerId &&
-        (inv.billingPeriodStart?.startsWith(billingMonth) || inv.issueDate?.startsWith(billingMonth))
+    const existingInvoice = findCustomerInvoiceForMonth(
+      { id: invoiceData.customerId, accountNo: invoiceData.accountNo },
+      billingMonth,
+      invoices
     );
 
     if (existingInvoice && !invoiceData.allowDuplicate) {
       showToast(
         'warning',
-        'Duplicate Invoice Blocked',
-        `Subscriber already has an invoice (${existingInvoice.invoiceNumber} • ${existingInvoice.status.toUpperCase()}) for ${billingMonth}.`
+        'Duplicate Invoice Skipped',
+        `Subscriber ${invoiceData.customerName || invoiceData.accountNo} already has an invoice (${existingInvoice.invoiceNumber} • ${existingInvoice.status.toUpperCase()}) for ${billingMonth}. Creation skipped.`
       );
       return existingInvoice;
     }
@@ -1402,9 +1480,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // Recalculate customer balance
     setCustomers((prev) =>
       prev.map((c) => {
-        if (c.id === newInvoice.customerId) {
-          const newBalance = c.balance + newInvoice.balanceDue;
-          const updatedCust = { ...c, balance: newBalance, updatedAt: new Date().toISOString() };
+        if (
+          c.id === newInvoice.customerId ||
+          c.accountNo === newInvoice.accountNo ||
+          c.accountNo === newInvoice.customerId ||
+          c.id === newInvoice.accountNo
+        ) {
+          // If newInvoice already rolled in previousBalance, customer's new balance is newInvoice.balanceDue.
+          // Do NOT add c.balance to newInvoice.balanceDue (which double-counts previous arrears).
+          const newBalance =
+            newInvoice.previousBalance && newInvoice.previousBalance > 0
+              ? newInvoice.balanceDue
+              : c.balance + newInvoice.balanceDue;
+          const updatedCust = { ...c, balance: Math.max(0, newBalance), updatedAt: new Date().toISOString() };
           saveFirestoreDoc(COLLECTIONS.CUSTOMERS, updatedCust);
           return updatedCust;
         }
@@ -1480,21 +1568,54 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
 
     deleteFirestoreDoc(COLLECTIONS.INVOICES, id);
-    setInvoices((prev) => prev.filter((inv) => inv.id !== id));
+    const remainingInvoices = invoices.filter((inv) => inv.id !== id);
+    setInvoices(remainingInvoices);
 
-    // Deduct from customer balance if unpaid
-    if (target.status !== 'paid' && target.balanceDue > 0) {
-      setCustomers((prev) =>
-        prev.map((c) => {
-          if (c.id === target.customerId) {
-            const updated = { ...c, balance: Math.max(0, c.balance - target.balanceDue) };
-            saveFirestoreDoc(COLLECTIONS.CUSTOMERS, updated);
-            return updated;
+    // Reconcile and synchronize customer balance from remaining invoices
+    setCustomers((prev) =>
+      prev.map((c) => {
+        const isTargetCustomer =
+          c.id === target.customerId ||
+          c.accountNo === target.accountNo ||
+          c.accountNo === target.customerId ||
+          c.id === target.accountNo;
+
+        if (isTargetCustomer) {
+          const remainingOpen = remainingInvoices.filter(
+            (inv) =>
+              (inv.customerId === c.id ||
+                inv.accountNo === c.accountNo ||
+                inv.customerId === c.accountNo ||
+                inv.accountNo === target.accountNo) &&
+              inv.status !== 'paid' &&
+              (inv.balanceDue || 0) > 0
+          );
+
+          let newBalance = 0;
+          if (remainingOpen.length > 0) {
+            const sorted = [...remainingOpen].sort(
+              (a, b) => new Date(a.issueDate || a.createdAt).getTime() - new Date(b.issueDate || b.createdAt).getTime()
+            );
+            const latest = sorted[sorted.length - 1];
+            newBalance =
+              latest.previousBalance && latest.previousBalance > 0
+                ? latest.balanceDue
+                : sorted.reduce((sum, inv) => sum + (Number(inv.balanceDue) || 0), 0);
           }
-          return c;
-        })
-      );
-    }
+
+          const shouldReactivate = (c.status === 'overdue' || c.status === 'suspended') && newBalance === 0;
+          const updated = {
+            ...c,
+            balance: newBalance,
+            status: shouldReactivate ? ('active' as const) : c.status,
+            updatedAt: new Date().toISOString(),
+          };
+          saveFirestoreDoc(COLLECTIONS.CUSTOMERS, updated);
+          return updated;
+        }
+        return c;
+      })
+    );
 
     logAuditEvent({
       userName: 'Admin Leonardo Flojo',
@@ -1515,16 +1636,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     billingCycleDay?: number;
     applyWalletCredits?: boolean;
     enableProration?: boolean;
+    customerIds?: string[];
+    billingType?: string;
   }): { count: number; totalAmount: number } => {
     if (!hasPermission('canBulkGenerateInvoices')) {
       showToast('error', 'Access Restricted', 'Only administrators have permission to run bulk billing generation.');
       return { count: 0, totalAmount: 0 };
     }
 
-    const activeSubscribers = customers.filter(
-      (c) => c.status === 'active' || c.status === 'overdue'
-    );
-
+    let targetSubscribers = customers;
+    if (options.customerIds && options.customerIds.length > 0) {
+      targetSubscribers = customers.filter((c) => options.customerIds!.includes(c.id));
+    } else if (options.billingType && options.billingType !== 'all') {
+      targetSubscribers = customers.filter((c) => {
+        if (options.billingType === 'active') return c.status === 'active';
+        if (options.billingType === 'overdue') return c.status === 'overdue';
+        if (options.billingType === 'pending_install') return c.status === 'pending_install';
+        if (options.billingType === 'residential') {
+          return !c.planName?.toLowerCase().includes('biz') || c.planName?.toLowerCase().includes('home');
+        }
+        if (options.billingType === 'business') {
+          return (
+            c.planName?.toLowerCase().includes('biz') ||
+            c.planName?.toLowerCase().includes('commercial') ||
+            c.planName?.toLowerCase().includes('peak')
+          );
+        }
+        if (options.billingType === 'piso_wifi') {
+          return c.planName?.toLowerCase().includes('wifi') || c.planName?.toLowerCase().includes('vendo');
+        }
+        return true;
+      });
+    } else {
+      targetSubscribers = customers.filter(
+        (c) => c.status === 'active' || c.status === 'overdue'
+      );
+    }
 
     let generatedCount = 0;
     let totalGeneratedAmount = 0;
@@ -1536,24 +1683,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const lastDayOfMonth = new Date(parseInt(year), parseInt(month), 0).getDate();
     const endDate = `${year}-${month}-${lastDayOfMonth}`;
 
-    activeSubscribers.forEach((customer, index) => {
+    targetSubscribers.forEach((customer, index) => {
       // If billing cycle day filter is specified and does not match, skip
       if (options.billingCycleDay && customer.billingDay !== options.billingCycleDay) {
         return;
       }
 
-      // Check if invoice already exists for this customer & billing period
-      const alreadyInvoiced = invoices.some(
-        (inv) =>
-          inv.customerId === customer.id &&
-          (inv.billingPeriodStart?.startsWith(options.billingMonth) ||
-            inv.issueDate?.startsWith(options.billingMonth))
-      );
+      // CRITICAL GUARD: If the customer already has an invoice this month, SKIP!
+      // Evaluates both existing invoices AND newly created invoices in this current batch run
+      const alreadyInvoiced = hasCustomerInvoiceForMonth(customer, options.billingMonth, [
+        ...invoices,
+        ...newInvoices,
+      ]);
 
       if (alreadyInvoiced) return;
 
       const invoiceNumStr = `INV-${year.slice(2)}${month}-${String(invoices.length + index + 1).padStart(4, '0')}`;
-      const previousBal = customer.balance > 0 ? customer.balance : 0;
+      const openInvoices = invoices.filter(
+        (inv) =>
+          (inv.customerId === customer.id || inv.accountNo === customer.accountNo) &&
+          inv.status !== 'paid' &&
+          (inv.balanceDue || 0) > 0
+      );
+      const previousBal = openInvoices.length > 0 ? (customer.balance > 0 ? customer.balance : 0) : 0;
 
       // Authoritative Plan Resolution from Plans & Packages
       const plan =
@@ -3352,9 +3504,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setStoredStaffUsers(updated);
 
     try {
+      await deleteCustomerAccountFromFirestore({ id: target.id, email: target.email });
       await deleteFirestoreDoc('system_users', id);
     } catch (err) {
-      console.warn('Could not delete staff user from Firestore:', err);
+      console.warn('Could not delete staff user from Firestore/Auth:', err);
     }
 
     logAuditEvent({

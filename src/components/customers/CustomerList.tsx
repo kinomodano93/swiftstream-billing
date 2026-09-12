@@ -471,7 +471,7 @@ export const CustomerList: React.FC<CustomerListProps> = ({
         isOpen={!!customerToDelete}
         title="Delete Subscriber Account"
         itemName={customerToDelete ? `${customerToDelete.fullName} (${customerToDelete.accountNo}) - Plan: ${customerToDelete.planName}` : undefined}
-        description="Are you sure you want to permanently delete this subscriber? This will remove all associated billing records, network allocations, and customer credentials from your active database and Cloud Firestore."
+        description="Are you sure you want to permanently delete this subscriber? This will remove all associated billing records, network allocations, portal credentials from Cloud Firestore, and permanently delete their login identity from Firebase Authentication."
         confirmLabel="Yes, Delete Subscriber"
         onConfirm={() => {
           if (customerToDelete) {

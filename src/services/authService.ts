@@ -9,7 +9,7 @@ import {
   onAuthStateChanged,
   User,
 } from 'firebase/auth';
-import { doc, setDoc, getDoc, query, where, getDocs, collection } from 'firebase/firestore';
+import { doc, setDoc, getDoc, query, where, getDocs, collection, deleteDoc } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
 import { getStoredStaffUsers, setStoredStaffUsers } from '../data/storage';
 
@@ -530,6 +530,220 @@ export const syncCustomerApprovalToUser = async (
   } catch (err) {
     console.warn('Could not sync customer approval to system_users:', err);
   }
+};
+
+/**
+ * Permanently deletes a subscriber's account and profile from Cloud Firestore
+ * and deletes their identity from Firebase Authentication
+ */
+export const deleteCustomerAccountFromFirestore = async (customer: {
+  id: string;
+  accountNo?: string;
+  email?: string;
+}): Promise<{ success: boolean; deletedCount: number; authDeleted?: boolean }> => {
+  if (!customer) return { success: false, deletedCount: 0 };
+
+  let deletedCount = 0;
+  let resolvedEmail = (customer.email || '').trim();
+  let resolvedUid = customer.id || '';
+
+  // 1. Pre-lookup email/UID from Firestore before deletion if not provided
+  try {
+    if (!resolvedEmail && customer.id) {
+      const custDoc = await getDoc(doc(db, 'customers', customer.id));
+      if (custDoc.exists()) {
+        const d = custDoc.data();
+        if (d?.email) resolvedEmail = d.email;
+        if (!customer.accountNo && d?.accountNo) customer.accountNo = d.accountNo;
+      }
+    }
+    if (!resolvedEmail && customer.accountNo) {
+      const qCust = query(collection(db, 'customers'), where('accountNo', '==', customer.accountNo));
+      const snap = await getDocs(qCust);
+      if (!snap.empty) {
+        const d = snap.docs[0].data();
+        if (d?.email) resolvedEmail = d.email;
+      }
+    }
+    if (!resolvedEmail && customer.accountNo) {
+      const qSys = query(collection(db, 'system_users'), where('accountNo', '==', customer.accountNo));
+      const snapSys = await getDocs(qSys);
+      if (!snapSys.empty) {
+        const d = snapSys.docs[0].data();
+        if (d?.email) resolvedEmail = d.email;
+        if (d?.uid) resolvedUid = d.uid;
+      }
+    }
+  } catch (lookupErr) {
+    console.warn('Pre-lookup warning before deletion:', lookupErr);
+  }
+
+  // 2. Request backend Firebase Auth user deletion (Cloud Function)
+  let authDeleted = false;
+  try {
+    const cloudFunctionUrl = 'https://asia-southeast1-swiftstream-portal.cloudfunctions.net/deleteUserAccount';
+    const resp = await fetch(cloudFunctionUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        customerId: customer.id,
+        accountNo: customer.accountNo,
+        email: resolvedEmail || undefined,
+        uid: resolvedUid || undefined,
+      }),
+    });
+    if (resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      authDeleted = !!data.authDeleted;
+      if (Array.isArray(data.firestoreDocsDeleted)) {
+        deletedCount += data.firestoreDocsDeleted.length;
+      }
+    }
+  } catch (fnErr) {
+    console.warn('Backend deleteUserAccount call warning:', fnErr);
+  }
+
+  // 3. Fallback/Direct cleanup from 'customers' collection
+  try {
+    if (customer.id) {
+      await deleteDoc(doc(db, 'customers', customer.id));
+      deletedCount++;
+    }
+    if (customer.accountNo && customer.accountNo !== customer.id) {
+      await deleteDoc(doc(db, 'customers', customer.accountNo));
+      deletedCount++;
+    }
+    if (customer.accountNo) {
+      const qCust = query(collection(db, 'customers'), where('accountNo', '==', customer.accountNo));
+      const snap = await getDocs(qCust);
+      for (const d of snap.docs) {
+        if (d.id !== customer.id && d.id !== customer.accountNo) {
+          await deleteDoc(doc(db, 'customers', d.id));
+          deletedCount++;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Error deleting customer document from Firestore:', err);
+  }
+
+  // 4. Fallback/Direct cleanup from 'system_users' collection
+  try {
+    if (customer.id) {
+      await deleteDoc(doc(db, 'system_users', customer.id));
+      deletedCount++;
+    }
+    if (resolvedUid && resolvedUid !== customer.id) {
+      await deleteDoc(doc(db, 'system_users', resolvedUid));
+      deletedCount++;
+    }
+    if (customer.accountNo && customer.accountNo !== customer.id) {
+      await deleteDoc(doc(db, 'system_users', customer.accountNo));
+      deletedCount++;
+    }
+    if (customer.accountNo) {
+      const qAcc = query(collection(db, 'system_users'), where('accountNo', '==', customer.accountNo));
+      const snapAcc = await getDocs(qAcc);
+      for (const d of snapAcc.docs) {
+        await deleteDoc(doc(db, 'system_users', d.id));
+        deletedCount++;
+      }
+    }
+    if (resolvedEmail && resolvedEmail.includes('@')) {
+      const cleanEmail = resolvedEmail.toLowerCase().trim();
+      const qEmail = query(collection(db, 'system_users'), where('email', '==', cleanEmail));
+      const snapEmail = await getDocs(qEmail);
+      for (const d of snapEmail.docs) {
+        await deleteDoc(doc(db, 'system_users', d.id));
+        deletedCount++;
+      }
+    }
+  } catch (err) {
+    console.warn('Error deleting user account from system_users in Firestore:', err);
+  }
+
+  // 5. Clean up matching pending online applications if any exist
+  try {
+    if (resolvedEmail && resolvedEmail.includes('@')) {
+      const cleanEmail = resolvedEmail.toLowerCase().trim();
+      const qApp = query(collection(db, 'online_applications'), where('email', '==', cleanEmail));
+      const snapApp = await getDocs(qApp);
+      for (const d of snapApp.docs) {
+        await deleteDoc(doc(db, 'online_applications', d.id));
+      }
+    }
+  } catch (err) {
+    console.warn('Error cleaning up online_applications:', err);
+  }
+
+  return { success: true, deletedCount, authDeleted };
+};
+
+export interface FirebaseAuthUserRecord {
+  uid: string;
+  email: string;
+  displayName: string;
+  photoURL?: string;
+  disabled: boolean;
+  creationTime?: string;
+  lastSignInTime?: string;
+}
+
+/**
+ * Lists all registered users in Firebase Authentication via backend Cloud Function
+ */
+export const fetchFirebaseAuthUsers = async (): Promise<FirebaseAuthUserRecord[]> => {
+  const cloudFunctionUrl = 'https://asia-southeast1-swiftstream-portal.cloudfunctions.net/deleteUserAccount';
+  const resp = await fetch(cloudFunctionUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'list' }),
+  });
+  if (!resp.ok) {
+    throw new Error(`Failed to fetch Firebase Auth users: HTTP ${resp.status}`);
+  }
+  const data = await resp.json();
+  return data.users || [];
+};
+
+/**
+ * Direct deletion of an account from Firebase Auth and Firestore by UID or Email
+ */
+export const deleteAuthUserDirect = async (identifier: {
+  uid?: string;
+  email?: string;
+  accountNo?: string;
+  customerId?: string;
+}): Promise<{ success: boolean; authDeleted: boolean }> => {
+  const cloudFunctionUrl = 'https://asia-southeast1-swiftstream-portal.cloudfunctions.net/deleteUserAccount';
+  const resp = await fetch(cloudFunctionUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(identifier),
+  });
+  if (!resp.ok) {
+    throw new Error(`Failed to delete Firebase Auth user: HTTP ${resp.status}`);
+  }
+  const data = await resp.json();
+  return { success: !!data.success, authDeleted: !!data.authDeleted };
+};
+
+/**
+ * Cleans orphan users from Firebase Auth that have no matching active customer or staff in Firestore
+ */
+export const cleanOrphanAuthUsers = async (
+  dryRun = false
+): Promise<{ success: boolean; orphansCount: number; deletedCount: number; orphans: any[] }> => {
+  const cloudFunctionUrl = 'https://asia-southeast1-swiftstream-portal.cloudfunctions.net/deleteUserAccount';
+  const resp = await fetch(cloudFunctionUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'cleanOrphans', dryRun }),
+  });
+  if (!resp.ok) {
+    throw new Error(`Failed to clean orphan auth users: HTTP ${resp.status}`);
+  }
+  return await resp.json();
 };
 
 /**

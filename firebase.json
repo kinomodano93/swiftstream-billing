@@ -106,6 +106,13 @@
         }
       },
       {
+        "source": "/api/deleteUserAccount",
+        "function": {
+          "functionId": "deleteUserAccount",
+          "region": "asia-southeast1"
+        }
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }

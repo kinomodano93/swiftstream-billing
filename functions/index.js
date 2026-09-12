@@ -1820,3 +1820,294 @@ exports.mikrotikProxy = onRequest(
   }
 );
 
+/**
+ * Delete User Account from Firebase Auth and Firestore
+ * Allows admin to decommission and completely delete customer credentials & profiles
+ */
+exports.deleteUserAccount = onRequest(
+  { region: "asia-southeast1", cors: true },
+  async (req, res) => {
+    res.set("Access-Control-Allow-Origin", "*");
+    res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+    if (req.method === "OPTIONS") return res.status(204).send("");
+
+    const body = req.body || {};
+    const action = body.action || (req.method === "GET" ? "list" : "delete");
+
+    // Action 1: List all users in Firebase Authentication
+    if (action === "list") {
+      try {
+        const listUsersResult = await admin.auth().listUsers(1000);
+        const users = (listUsersResult.users || []).map((u) => ({
+          uid: u.uid,
+          email: u.email || "",
+          displayName: u.displayName || "",
+          photoURL: u.photoURL || "",
+          disabled: u.disabled || false,
+          creationTime: u.metadata?.creationTime || "",
+          lastSignInTime: u.metadata?.lastSignInTime || "",
+        }));
+        return res.status(200).json({ success: true, count: users.length, users });
+      } catch (err) {
+        console.error("[deleteUserAccount:list] Error:", err.message);
+        return res.status(500).json({ error: err.message });
+      }
+    }
+
+    // Action 2: Clean orphan accounts in Firebase Authentication
+    // (Purges Firebase Auth accounts that have no matching active customer or staff in Firestore)
+    if (action === "cleanOrphans") {
+      try {
+        const listUsersResult = await admin.auth().listUsers(1000);
+        const authUsers = listUsersResult.users || [];
+
+        // Fetch all active Firestore customers and system_users
+        const [custSnap, sysSnap] = await Promise.all([
+          db.collection("customers").get(),
+          db.collection("system_users").get(),
+        ]);
+
+        const activeEmails = new Set();
+        const activeUids = new Set();
+
+        // Always protect superadmin email
+        activeEmails.add("swiftstream.telecom@gmail.com");
+
+        custSnap.forEach((doc) => {
+          activeUids.add(doc.id);
+          const d = doc.data();
+          if (d.email) activeEmails.add(d.email.toLowerCase().trim());
+          if (d.accountNo) activeEmails.add(d.accountNo.toLowerCase().trim());
+        });
+
+        sysSnap.forEach((doc) => {
+          activeUids.add(doc.id);
+          const d = doc.data();
+          if (d.email) activeEmails.add(d.email.toLowerCase().trim());
+          if (d.uid) activeUids.add(d.uid);
+          if (d.accountNo) activeEmails.add(d.accountNo.toLowerCase().trim());
+        });
+
+        const orphans = [];
+        const deletedUids = [];
+
+        for (const user of authUsers) {
+          const userEmail = (user.email || "").toLowerCase().trim();
+          const isProtected = userEmail === "swiftstream.telecom@gmail.com";
+          const isRecognized = activeUids.has(user.uid) || (userEmail && activeEmails.has(userEmail));
+
+          if (!isProtected && !isRecognized) {
+            orphans.push({
+              uid: user.uid,
+              email: user.email,
+              displayName: user.displayName,
+              creationTime: user.metadata?.creationTime,
+            });
+
+            if (!body.dryRun) {
+              try {
+                await admin.auth().deleteUser(user.uid);
+                deletedUids.push(user.uid);
+              } catch (delErr) {
+                console.warn(`[deleteUserAccount:cleanOrphans] Failed to delete UID ${user.uid}:`, delErr.message);
+              }
+            }
+          }
+        }
+
+        return res.status(200).json({
+          success: true,
+          dryRun: !!body.dryRun,
+          orphansCount: orphans.length,
+          deletedCount: deletedUids.length,
+          orphans,
+          deletedUids,
+        });
+      } catch (err) {
+        console.error("[deleteUserAccount:cleanOrphans] Error:", err.message);
+        return res.status(500).json({ error: err.message });
+      }
+    }
+
+    // Action 3: Targeted Deletion (Single customer or staff)
+    const { uid, email, accountNo, customerId } = body;
+    if (!uid && !email && !accountNo && !customerId) {
+      return res.status(400).json({ error: "Missing identifier (uid, email, accountNo, or customerId)" });
+    }
+
+    const candidateEmails = new Set();
+    const targetUids = new Set();
+    const results = { authDeleted: false, deletedUids: [], firestoreDocsDeleted: [] };
+
+    if (email && typeof email === "string" && email.trim()) {
+      candidateEmails.add(email.toLowerCase().trim());
+    }
+    if (uid && typeof uid === "string" && uid.trim()) {
+      targetUids.add(uid.trim());
+    }
+
+    try {
+      // Discover UIDs and Emails from system_users
+      if (customerId) {
+        try {
+          const docSnap = await db.collection("system_users").doc(customerId).get();
+          if (docSnap.exists) {
+            const data = docSnap.data() || {};
+            if (data.email) candidateEmails.add(data.email.toLowerCase().trim());
+            if (data.uid) targetUids.add(data.uid);
+          }
+        } catch (_) {}
+      }
+
+      if (accountNo) {
+        try {
+          const snap = await db.collection("system_users").where("accountNo", "==", accountNo).get();
+          snap.forEach((d) => {
+            const data = d.data() || {};
+            if (data.email) candidateEmails.add(data.email.toLowerCase().trim());
+            if (data.uid) targetUids.add(data.uid);
+            targetUids.add(d.id);
+          });
+        } catch (_) {}
+      }
+
+      // Discover Emails from customers collection
+      if (customerId) {
+        try {
+          const docSnap = await db.collection("customers").doc(customerId).get();
+          if (docSnap.exists) {
+            const data = docSnap.data() || {};
+            if (data.email) candidateEmails.add(data.email.toLowerCase().trim());
+            if (data.portalEmail) candidateEmails.add(data.portalEmail.toLowerCase().trim());
+          }
+        } catch (_) {}
+      }
+
+      if (accountNo) {
+        try {
+          const snap = await db.collection("customers").where("accountNo", "==", accountNo).get();
+          snap.forEach((d) => {
+            const data = d.data() || {};
+            if (data.email) candidateEmails.add(data.email.toLowerCase().trim());
+            if (data.portalEmail) candidateEmails.add(data.portalEmail.toLowerCase().trim());
+          });
+        } catch (_) {}
+      }
+
+      // Resolve UIDs from candidate emails in Firebase Auth
+      for (const mail of candidateEmails) {
+        if (!mail) continue;
+        try {
+          const userRec = await admin.auth().getUserByEmail(mail);
+          if (userRec && userRec.uid) {
+            targetUids.add(userRec.uid);
+          }
+        } catch (_) {}
+      }
+
+      // If still no UID found, scan listUsers for matching email
+      if (targetUids.size === 0 && candidateEmails.size > 0) {
+        try {
+          const listRes = await admin.auth().listUsers(1000);
+          for (const u of listRes.users) {
+            const uMail = (u.email || "").toLowerCase().trim();
+            if (uMail && candidateEmails.has(uMail)) {
+              targetUids.add(u.uid);
+            }
+          }
+        } catch (_) {}
+      }
+
+      // 1. Delete all resolved UIDs from Firebase Auth
+      for (const tUid of targetUids) {
+        try {
+          await admin.auth().deleteUser(tUid);
+          results.authDeleted = true;
+          results.deletedUids.push(tUid);
+        } catch (authErr) {
+          console.warn(`[deleteUserAccount] Auth delete warning for UID ${tUid}:`, authErr.message);
+        }
+      }
+
+      // 2. Delete from Firestore system_users collection
+      const deleteSystemUserDoc = async (docId) => {
+        if (!docId) return;
+        try {
+          await db.collection("system_users").doc(docId).delete();
+          results.firestoreDocsDeleted.push(`system_users/${docId}`);
+        } catch (_) {}
+      };
+
+      for (const tUid of targetUids) await deleteSystemUserDoc(tUid);
+      if (customerId) await deleteSystemUserDoc(customerId);
+      if (accountNo) await deleteSystemUserDoc(accountNo);
+
+      for (const mail of candidateEmails) {
+        try {
+          const snap = await db.collection("system_users").where("email", "==", mail).get();
+          for (const d of snap.docs) {
+            await d.ref.delete();
+            results.firestoreDocsDeleted.push(`system_users/${d.id}`);
+          }
+        } catch (_) {}
+      }
+
+      if (accountNo) {
+        try {
+          const snap = await db.collection("system_users").where("accountNo", "==", accountNo).get();
+          for (const d of snap.docs) {
+            await d.ref.delete();
+            results.firestoreDocsDeleted.push(`system_users/${d.id}`);
+          }
+        } catch (_) {}
+      }
+
+      // 3. Delete from Firestore customers collection
+      const deleteCustomerDoc = async (docId) => {
+        if (!docId) return;
+        try {
+          await db.collection("customers").doc(docId).delete();
+          results.firestoreDocsDeleted.push(`customers/${docId}`);
+        } catch (_) {}
+      };
+
+      if (customerId) await deleteCustomerDoc(customerId);
+      if (accountNo) await deleteCustomerDoc(accountNo);
+
+      if (accountNo) {
+        try {
+          const snap = await db.collection("customers").where("accountNo", "==", accountNo).get();
+          for (const d of snap.docs) {
+            await d.ref.delete();
+            results.firestoreDocsDeleted.push(`customers/${d.id}`);
+          }
+        } catch (_) {}
+      }
+
+      // 4. Delete from Firestore online_applications collection
+      for (const mail of candidateEmails) {
+        try {
+          const snap = await db.collection("online_applications").where("email", "==", mail).get();
+          for (const d of snap.docs) {
+            await d.ref.delete();
+            results.firestoreDocsDeleted.push(`online_applications/${d.id}`);
+          }
+        } catch (_) {}
+      }
+
+      return res.status(200).json({
+        success: true,
+        candidateEmails: Array.from(candidateEmails),
+        targetUids: Array.from(targetUids),
+        ...results,
+      });
+    } catch (err) {
+      console.error("[deleteUserAccount] Error:", err.message);
+      return res.status(500).json({ error: err.message });
+    }
+  }
+);
+
+

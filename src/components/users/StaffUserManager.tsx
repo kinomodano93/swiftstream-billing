@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Users,
   UserPlus,
@@ -24,9 +24,20 @@ import {
   ShieldAlert,
   HelpCircle,
   Check,
+  Copy,
+  UserX,
+  Database,
+  Layers,
+  ExternalLink,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { StaffUser, SystemRole, SYSTEM_ROLES_CONFIG } from '../../types';
+import {
+  fetchFirebaseAuthUsers,
+  cleanOrphanAuthUsers,
+  deleteAuthUserDirect,
+  FirebaseAuthUserRecord,
+} from '../../services/authService';
 
 export const StaffUserManager: React.FC = () => {
   const {
@@ -39,6 +50,7 @@ export const StaffUserManager: React.FC = () => {
     systemRole,
     currentAuthUser,
     hasPermission,
+    showToast,
   } = useApp();
 
   const canManageStaff = hasPermission('canManageStaff');
@@ -166,6 +178,76 @@ export const StaffUserManager: React.FC = () => {
     setIsFormModalOpen(false);
   };
 
+  // Tab State
+  const [activeTab, setActiveTab] = useState<'staff' | 'firebase_auth'>('staff');
+
+  // Firebase Auth State
+  const [authUsers, setAuthUsers] = useState<FirebaseAuthUserRecord[]>([]);
+  const [isLoadingAuthUsers, setIsLoadingAuthUsers] = useState(false);
+  const [isCleaningOrphans, setIsCleaningOrphans] = useState(false);
+  const [authSearchTerm, setAuthSearchTerm] = useState('');
+  const [authUserToDelete, setAuthUserToDelete] = useState<FirebaseAuthUserRecord | null>(null);
+  const [isDeletingAuthUser, setIsDeletingAuthUser] = useState(false);
+  const [copiedUid, setCopiedUid] = useState<string | null>(null);
+  const [hasLoadedAuthUsers, setHasLoadedAuthUsers] = useState(false);
+
+  const handleCopyUid = (uid: string) => {
+    navigator.clipboard.writeText(uid);
+    setCopiedUid(uid);
+    setTimeout(() => setCopiedUid(null), 2000);
+  };
+
+  const loadAuthUsers = async () => {
+    setIsLoadingAuthUsers(true);
+    try {
+      const list = await fetchFirebaseAuthUsers();
+      setAuthUsers(list);
+      setHasLoadedAuthUsers(true);
+    } catch (err: any) {
+      showToast('error', 'Fetch Failed', err?.message || 'Failed to fetch Firebase Auth users.');
+    } finally {
+      setIsLoadingAuthUsers(false);
+    }
+  };
+
+  const handleCleanOrphans = async () => {
+    setIsCleaningOrphans(true);
+    try {
+      const res = await cleanOrphanAuthUsers(false);
+      showToast(
+        'success',
+        'Orphan Accounts Cleaned',
+        res.deletedCount > 0
+          ? `Successfully deleted ${res.deletedCount} orphaned user credential(s) from Firebase Authentication.`
+          : 'No orphaned user credentials found. Firebase Authentication is completely clean.'
+      );
+      await loadAuthUsers();
+    } catch (err: any) {
+      showToast('error', 'Cleanup Failed', err?.message || 'Failed to purge orphan auth users.');
+    } finally {
+      setIsCleaningOrphans(false);
+    }
+  };
+
+  const handleConfirmDeleteAuthUser = async () => {
+    if (!authUserToDelete) return;
+    setIsDeletingAuthUser(true);
+    try {
+      await deleteAuthUserDirect({ uid: authUserToDelete.uid, email: authUserToDelete.email });
+      showToast(
+        'success',
+        'User Deleted from Firebase Auth',
+        `Account ${authUserToDelete.email || authUserToDelete.uid} has been permanently deleted from Firebase Authentication.`
+      );
+      setAuthUserToDelete(null);
+      await loadAuthUsers();
+    } catch (err: any) {
+      showToast('error', 'Delete Failed', err?.message || 'Failed to delete user from Firebase Auth.');
+    } finally {
+      setIsDeletingAuthUser(false);
+    }
+  };
+
   // Confirm Delete
   const handleConfirmDelete = async () => {
     if (staffToDelete) {
@@ -213,6 +295,79 @@ export const StaffUserManager: React.FC = () => {
   const cashierCount = genuineStaffUsers.filter((u) => u.role === 'cashier').length;
   const techCount = genuineStaffUsers.filter((u) => u.role === 'technician').length;
 
+  // Map of active customer emails and accountNos
+  const customerEmailMap = useMemo(() => {
+    const map = new Map<string, any>();
+    customers.forEach((c) => {
+      if (c.email) map.set(c.email.toLowerCase().trim(), c);
+    });
+    return map;
+  }, [customers]);
+
+  const staffEmailMap = useMemo(() => {
+    const map = new Map<string, StaffUser>();
+    staffUsers.forEach((s) => {
+      if (s.email) map.set(s.email.toLowerCase().trim(), s);
+    });
+    return map;
+  }, [staffUsers]);
+
+  const getAuthUserStatus = (u: FirebaseAuthUserRecord) => {
+    const email = (u.email || '').toLowerCase().trim();
+    if (email === 'swiftstream.telecom@gmail.com') {
+      return {
+        type: 'superadmin' as const,
+        label: 'Super Admin (System Owner)',
+        color: 'text-purple-400 bg-purple-500/10 border-purple-500/30',
+        details: 'System Owner Account',
+      };
+    }
+    const staff = staffEmailMap.get(email);
+    if (staff) {
+      return {
+        type: 'staff' as const,
+        label: `Staff (${staff.role.toUpperCase()})`,
+        color:
+          staff.role === 'admin'
+            ? 'text-purple-400 bg-purple-500/10 border-purple-500/30'
+            : staff.role === 'cashier'
+            ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30'
+            : 'text-amber-400 bg-amber-500/10 border-amber-500/30',
+        details: staff.fullName,
+      };
+    }
+    const customer = customerEmailMap.get(email);
+    if (customer) {
+      return {
+        type: 'customer' as const,
+        label: `Subscriber (${customer.accountNo})`,
+        color: 'text-cyan-400 bg-cyan-500/10 border-cyan-500/30',
+        details: customer.fullName,
+      };
+    }
+    return {
+      type: 'orphan' as const,
+      label: 'Orphaned / Deleted Customer',
+      color: 'text-rose-400 bg-rose-500/10 border-rose-500/30',
+      details: 'Unlinked from customer records. Safe to purge.',
+    };
+  };
+
+  const orphanAuthUsers = useMemo(() => {
+    return authUsers.filter((u) => getAuthUserStatus(u).type === 'orphan');
+  }, [authUsers, customerEmailMap, staffEmailMap]);
+
+  const filteredAuthUsers = useMemo(() => {
+    const s = authSearchTerm.toLowerCase().trim();
+    if (!s) return authUsers;
+    return authUsers.filter((u) => {
+      const email = (u.email || '').toLowerCase();
+      const displayName = (u.displayName || '').toLowerCase();
+      const uid = u.uid.toLowerCase();
+      return email.includes(s) || displayName.includes(s) || uid.includes(s);
+    });
+  }, [authUsers, authSearchTerm]);
+
   return (
     <div className="w-full px-3 sm:px-6 lg:px-8 py-6 space-y-6 animate-in fade-in">
       {/* Top Header */}
@@ -250,7 +405,46 @@ export const StaffUserManager: React.FC = () => {
         </div>
       </div>
 
-      {/* Metric Cards */}
+      {/* Subtab Switcher */}
+      <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
+        <button
+          type="button"
+          onClick={() => setActiveTab('staff')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+            activeTab === 'staff'
+              ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm'
+              : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+          }`}
+        >
+          <Users className="w-4 h-4" />
+          <span>Staff Directory ({totalStaff})</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTab('firebase_auth');
+            if (!hasLoadedAuthUsers) loadAuthUsers();
+          }}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+            activeTab === 'firebase_auth'
+              ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
+              : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+          }`}
+        >
+          <KeyRound className="w-4 h-4" />
+          <span>Firebase Authentication {hasLoadedAuthUsers ? `(${authUsers.length})` : ''}</span>
+          {orphanAuthUsers.length > 0 && (
+            <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
+              {orphanAuthUsers.length} Orphan{orphanAuthUsers.length > 1 ? 's' : ''}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {activeTab === 'staff' ? (
+        <>
+          {/* Metric Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 flex items-center gap-3 shadow-card">
           <div className="p-3 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-400">
@@ -507,6 +701,256 @@ export const StaffUserManager: React.FC = () => {
           </table>
         </div>
       </div>
+        </>
+      ) : (
+        <div className="space-y-6 animate-in fade-in">
+          {/* Auth Metric Cards */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+            <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 flex items-center gap-3 shadow-card">
+              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400">
+                <KeyRound className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-[10px] uppercase font-mono tracking-wider text-slate-400">Auth Accounts</p>
+                <p className="text-xl font-bold text-white">{authUsers.length}</p>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-900/80 border border-purple-500/20 flex items-center gap-3 shadow-card">
+              <div className="p-3 rounded-xl bg-purple-500/10 border border-purple-500/30 text-purple-400">
+                <ShieldCheck className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-[10px] uppercase font-mono tracking-wider text-purple-300">Staff Credentials</p>
+                <p className="text-xl font-bold text-white">
+                  {authUsers.filter((u) => getAuthUserStatus(u).type === 'staff' || getAuthUserStatus(u).type === 'superadmin').length}
+                </p>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-900/80 border border-cyan-500/20 flex items-center gap-3 shadow-card">
+              <div className="p-3 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-400">
+                <Users className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-[10px] uppercase font-mono tracking-wider text-cyan-300">Subscribers</p>
+                <p className="text-xl font-bold text-white">
+                  {authUsers.filter((u) => getAuthUserStatus(u).type === 'customer').length}
+                </p>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-900/80 border border-rose-500/20 flex items-center gap-3 shadow-card">
+              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400">
+                <UserX className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-[10px] uppercase font-mono tracking-wider text-rose-300">Orphan Users</p>
+                <p className="text-xl font-bold text-white">{orphanAuthUsers.length}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Orphan Cleanup Banner if orphans exist */}
+          {orphanAuthUsers.length > 0 && (
+            <div className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <div className="p-2 rounded-xl bg-rose-500/20 text-rose-400 mt-0.5">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-white">
+                    {orphanAuthUsers.length} Unlinked / Deleted Customer Account{orphanAuthUsers.length > 1 ? 's' : ''} Found
+                  </h4>
+                  <p className="text-xs text-rose-200/80 mt-0.5">
+                    These accounts exist in Firebase Authentication but their customer records have been deleted from the database. Click Purge to clean them up.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleCleanOrphans}
+                disabled={isCleaningOrphans}
+                className="px-4 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-rose-600/30 flex items-center gap-2 cursor-pointer flex-shrink-0"
+              >
+                {isCleaningOrphans ? (
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Trash2 className="w-4 h-4" />
+                )}
+                <span>{isCleaningOrphans ? 'Purging Orphans...' : 'Purge All Orphan Accounts'}</span>
+              </button>
+            </div>
+          )}
+
+          {/* Search & Actions Bar */}
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+            <div className="relative w-full sm:w-96 text-xs">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={authSearchTerm}
+                onChange={(e) => setAuthSearchTerm(e.target.value)}
+                placeholder="Search Auth users by email, name, UID..."
+                className="w-full pl-10 pr-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-500/60 focus:ring-1 focus:ring-amber-500/40"
+              />
+              {authSearchTerm && (
+                <button
+                  onClick={() => setAuthSearchTerm('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 cursor-pointer"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+              <button
+                type="button"
+                onClick={loadAuthUsers}
+                disabled={isLoadingAuthUsers}
+                className="flex items-center gap-2 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold border border-slate-700 transition-all cursor-pointer"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isLoadingAuthUsers ? 'animate-spin' : ''}`} />
+                <span>Refresh List</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Auth Users Table */}
+          <div className="rounded-2xl bg-slate-900/90 border border-slate-800 overflow-hidden shadow-card">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs text-slate-300">
+                <thead className="bg-slate-950/80 border-b border-slate-800 text-[11px] uppercase tracking-wider text-slate-400 font-mono">
+                  <tr>
+                    <th className="px-4 py-3.5">User Account / Email</th>
+                    <th className="px-4 py-3.5">Firebase Auth UID</th>
+                    <th className="px-4 py-3.5">Link Status</th>
+                    <th className="px-4 py-3.5">Created & Last Active</th>
+                    <th className="px-4 py-3.5 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60">
+                  {isLoadingAuthUsers ? (
+                    <tr>
+                      <td colSpan={5} className="px-6 py-12 text-center text-slate-400">
+                        <RefreshCw className="w-8 h-8 text-amber-400 animate-spin mx-auto mb-2" />
+                        <p className="text-sm font-semibold">Loading Firebase Authentication accounts...</p>
+                      </td>
+                    </tr>
+                  ) : filteredAuthUsers.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="px-6 py-12 text-center text-slate-500">
+                        <KeyRound className="w-10 h-10 text-slate-600 mx-auto mb-2 opacity-50" />
+                        <p className="text-sm font-semibold text-slate-300">No Firebase Auth users found</p>
+                        <p className="text-xs text-slate-500 mt-1">
+                          {authSearchTerm ? 'Try adjusting your search criteria.' : 'Click "Refresh List" to load.'}
+                        </p>
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredAuthUsers.map((u) => {
+                      const status = getAuthUserStatus(u);
+                      return (
+                        <tr key={u.uid} className="hover:bg-slate-800/40 transition-colors">
+                          {/* User Account / Email */}
+                          <td className="px-4 py-3.5">
+                            <div className="flex items-center gap-2.5">
+                              {u.photoURL ? (
+                                <img
+                                  src={u.photoURL}
+                                  alt={u.displayName || u.email}
+                                  className="w-8 h-8 rounded-full border border-slate-700 object-cover"
+                                />
+                              ) : (
+                                <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 text-slate-300 font-bold flex items-center justify-center text-xs">
+                                  {(u.displayName || u.email || 'U')[0].toUpperCase()}
+                                </div>
+                              )}
+                              <div>
+                                <p className="font-semibold text-white">{u.displayName || 'No Name'}</p>
+                                <p className="text-[11px] text-slate-400 font-mono">{u.email || 'No email'}</p>
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* Firebase Auth UID */}
+                          <td className="px-4 py-3.5">
+                            <div className="flex items-center gap-1.5 font-mono text-[11px] text-slate-400">
+                              <span className="truncate max-w-[140px] sm:max-w-[180px]">{u.uid}</span>
+                              <button
+                                type="button"
+                                onClick={() => handleCopyUid(u.uid)}
+                                className="p-1 hover:bg-slate-800 text-slate-500 hover:text-slate-300 rounded transition-colors cursor-pointer"
+                                title="Copy UID"
+                              >
+                                {copiedUid === u.uid ? (
+                                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                                ) : (
+                                  <Copy className="w-3.5 h-3.5" />
+                                )}
+                              </button>
+                            </div>
+                          </td>
+
+                          {/* Link Status */}
+                          <td className="px-4 py-3.5">
+                            <div>
+                              <span
+                                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold border ${status.color}`}
+                              >
+                                {status.type === 'orphan' && <AlertTriangle className="w-3 h-3" />}
+                                {status.label}
+                              </span>
+                              {status.details && (
+                                <p className="text-[10px] text-slate-400 mt-1 max-w-[200px] truncate">
+                                  {status.details}
+                                </p>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Created & Last Active */}
+                          <td className="px-4 py-3.5 text-[11px] text-slate-400 font-mono">
+                            <div>
+                              <span className="text-slate-300">
+                                {u.creationTime ? new Date(u.creationTime).toLocaleDateString() : 'N/A'}
+                              </span>
+                              {u.lastSignInTime && (
+                                <p className="text-[10px] text-slate-500">
+                                  Active: {new Date(u.lastSignInTime).toLocaleDateString()}
+                                </p>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Actions */}
+                          <td className="px-4 py-3.5 text-right">
+                            {status.type === 'superadmin' ? (
+                              <span className="text-[10px] text-slate-500 font-mono italic">Protected</span>
+                            ) : canManageStaff ? (
+                              <button
+                                type="button"
+                                onClick={() => setAuthUserToDelete(u)}
+                                className="p-1.5 bg-slate-800 hover:bg-rose-950/60 text-slate-400 hover:text-rose-400 border border-slate-700 hover:border-rose-800/50 rounded-lg transition-colors cursor-pointer"
+                                title="Delete from Firebase Authentication"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            ) : (
+                              <span className="text-[11px] text-slate-500 font-mono italic">View Only</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Add / Edit Staff Modal */}
       {isFormModalOpen && (
@@ -747,6 +1191,44 @@ export const StaffUserManager: React.FC = () => {
                 className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl font-bold transition-colors cursor-pointer text-xs shadow-lg shadow-rose-600/30"
               >
                 Delete Account
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Auth User Confirmation Modal */}
+      {authUserToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-slate-900 border border-rose-500/30 rounded-3xl w-full max-w-md p-6 shadow-2xl animate-in zoom-in-95 text-center">
+            <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-400 flex items-center justify-center mx-auto mb-4">
+              <KeyRound className="w-6 h-6" />
+            </div>
+            <h3 className="text-lg font-bold text-white mb-1">Delete Firebase Auth User?</h3>
+            <p className="text-xs text-slate-400 mb-6 leading-relaxed">
+              Are you sure you want to permanently delete <strong className="text-slate-200">{authUserToDelete.email || authUserToDelete.displayName || authUserToDelete.uid}</strong> from Firebase Authentication? This credentials record will be permanently destroyed.
+            </p>
+            <div className="flex items-center justify-center gap-3">
+              <button
+                type="button"
+                onClick={() => setAuthUserToDelete(null)}
+                disabled={isDeletingAuthUser}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-semibold transition-colors cursor-pointer text-xs"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteAuthUser}
+                disabled={isDeletingAuthUser}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl font-bold transition-colors cursor-pointer text-xs shadow-lg shadow-rose-600/30 flex items-center gap-2"
+              >
+                {isDeletingAuthUser ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Trash2 className="w-3.5 h-3.5" />
+                )}
+                <span>{isDeletingAuthUser ? 'Deleting...' : 'Delete from Auth'}</span>
               </button>
             </div>
           </div>

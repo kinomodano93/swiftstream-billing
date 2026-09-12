@@ -15,6 +15,7 @@ import {
 import { useApp } from '../../context/AppContext';
 import { Customer, Invoice, InvoiceItem } from '../../types';
 import { formatCurrency, generateId } from '../../utils/formatters';
+import { findCustomerInvoiceForMonth } from '../../utils/billingRules';
 
 interface CreateManualInvoiceModalProps {
   onClose: () => void;
@@ -113,10 +114,40 @@ export const CreateManualInvoiceModal: React.FC<CreateManualInvoiceModalProps> =
 
   const installationFee = invoiceType === 'installation' ? 1500 : 0;
   const subtotal = planCharge + installationFee;
-  const previousBal = selectedCustomer && selectedCustomer.balance > 0 ? selectedCustomer.balance : 0;
+
+  // Verify whether customer actually has open unpaid invoices in the system
+  const customerUnpaidInvoices = useMemo(() => {
+    if (!selectedCustomer) return [];
+    return invoices.filter(
+      (inv) =>
+        (inv.customerId === selectedCustomer.id ||
+          inv.accountNo === selectedCustomer.accountNo ||
+          inv.customerId === selectedCustomer.accountNo ||
+          inv.accountNo === selectedCustomer.id) &&
+        inv.status !== 'paid' &&
+        (inv.balanceDue || 0) > 0
+    );
+  }, [selectedCustomer, invoices]);
+
+  // Arrears/previous balance is strictly 0 if no active unpaid invoices exist
+  const previousBal = useMemo(() => {
+    if (!selectedCustomer || customerUnpaidInvoices.length === 0) return 0;
+    return selectedCustomer.balance > 0 ? selectedCustomer.balance : 0;
+  }, [selectedCustomer, customerUnpaidInvoices]);
+
   const totalAmount = subtotal + previousBal;
   const balanceDue = initialStatus === 'paid' ? 0 : totalAmount;
   const amountPaid = initialStatus === 'paid' ? totalAmount : 0;
+
+  // Detect whether this customer already has an invoice for the selected billing month
+  const existingInvoiceForMonth = useMemo(() => {
+    if (!selectedCustomer) return undefined;
+    return findCustomerInvoiceForMonth(
+      selectedCustomer,
+      `${billingYear}-${billingMonth}`,
+      invoices
+    );
+  }, [selectedCustomer, billingYear, billingMonth, invoices]);
 
   // Default Due Date calculation
   const computedDueDate = useMemo(() => {
@@ -136,6 +167,16 @@ export const CreateManualInvoiceModal: React.FC<CreateManualInvoiceModalProps> =
     e.preventDefault();
     if (!selectedCustomer || !authoritativePlan) {
       showToast('error', 'Customer Required', 'Please search and select a customer first.');
+      return;
+    }
+
+    // CRITICAL: If customer already has an invoice this month, skip & block duplicate!
+    if (existingInvoiceForMonth) {
+      showToast(
+        'warning',
+        'Duplicate Invoice Skipped',
+        `${selectedCustomer.fullName} already has an invoice (${existingInvoiceForMonth.invoiceNumber} • ${existingInvoiceForMonth.status.toUpperCase()}) for ${billingYear}-${billingMonth}. Generation was skipped.`
+      );
       return;
     }
 
@@ -160,20 +201,6 @@ export const CreateManualInvoiceModal: React.FC<CreateManualInvoiceModalProps> =
       const startDate = `${billingYear}-${billingMonth}-01`;
       const endDate = `${billingYear}-${billingMonth}-${String(daysInSelectedMonth).padStart(2, '0')}`;
       const invoiceNumber = `INV-${billingYear.slice(2)}${billingMonth}-${String(Date.now()).slice(-4)}`;
-
-      // Warning check: Duplicate invoice detection for same billing period
-      const existingInv = invoices.find(
-        (inv) =>
-          inv.customerId === selectedCustomer.id &&
-          (inv.billingPeriodStart?.startsWith(`${billingYear}-${billingMonth}`) || inv.issueDate?.startsWith(`${billingYear}-${billingMonth}`))
-      );
-      if (existingInv) {
-        showToast(
-          'warning',
-          'Notice: Existing Invoice Found',
-          `Customer already has an invoice (${existingInv.invoiceNumber} - ${existingInv.status.toUpperCase()}) for ${billingYear}-${billingMonth}. Creating an additional invoice.`
-        );
-      }
 
       const items: InvoiceItem[] = [];
 
@@ -540,6 +567,24 @@ export const CreateManualInvoiceModal: React.FC<CreateManualInvoiceModalProps> =
             </div>
           </div>
 
+          {/* Notice Banner: Already Invoiced for Selected Month */}
+          {existingInvoiceForMonth && (
+            <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs space-y-1 animate-in fade-in">
+              <div className="flex items-center gap-2 font-semibold text-amber-400">
+                <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>Subscriber Already Invoiced for This Month</span>
+              </div>
+              <p className="text-[11px] text-slate-300">
+                {selectedCustomer?.fullName} already has invoice{' '}
+                <strong className="text-white font-mono">{existingInvoiceForMonth.invoiceNumber}</strong> (
+                {existingInvoiceForMonth.status.toUpperCase()} • {formatCurrency(existingInvoiceForMonth.totalAmount)}) for {billingYear}-{billingMonth}.
+              </p>
+              <p className="text-[11px] text-amber-400 font-medium">
+                Generation is skipped to prevent duplicate billing and double charging.
+              </p>
+            </div>
+          )}
+
           {/* Charges Summary Box */}
           <div className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800 space-y-1.5">
             <div className="flex items-center justify-between text-xs text-slate-400">
@@ -581,11 +626,18 @@ export const CreateManualInvoiceModal: React.FC<CreateManualInvoiceModalProps> =
 
             <button
               type="submit"
-              disabled={isSubmitting || !selectedCustomerId}
+              disabled={isSubmitting || !selectedCustomerId || Boolean(existingInvoiceForMonth)}
+              title={existingInvoiceForMonth ? 'Subscriber is already invoiced for this period' : undefined}
               className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold rounded-lg text-xs flex items-center gap-1.5 shadow-md shadow-blue-600/20 transition-all hover:scale-105 cursor-pointer"
             >
               <Save className="w-3.5 h-3.5" />
-              <span>{isSubmitting ? 'Saving...' : 'Save Changes'}</span>
+              <span>
+                {isSubmitting
+                  ? 'Saving...'
+                  : existingInvoiceForMonth
+                  ? 'Already Invoiced (Skipped)'
+                  : 'Save Changes'}
+              </span>
             </button>
           </div>
         </form>

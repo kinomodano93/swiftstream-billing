@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Zap, X, CheckCircle2, Users, AlertTriangle, Calendar } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { formatCurrency } from '../../utils/formatters';
+import { hasCustomerInvoiceForMonth } from '../../utils/billingRules';
 
 interface BatchBillingModalProps {
   onClose: () => void;
@@ -71,37 +72,52 @@ export const BatchBillingModal: React.FC<BatchBillingModalProps> = ({ onClose })
   }, [dueDateMode, customDueDate, billingYear, billingMonth, daysInSelectedMonth]);
 
   // Filter eligible subscribers based on Billing Type
+  // Filter eligible subscribers based on Billing Type & exclude any already invoiced this month
   const eligibleSubscribers = useMemo(() => {
     return customers.filter((c) => {
       // Category / Status filter
       if (billingType === 'active' && c.status !== 'active') return false;
       if (billingType === 'overdue' && c.status !== 'overdue') return false;
       if (billingType === 'pending_install' && c.status !== 'pending_install') return false;
-      if (billingType === 'residential' && c.planName.toLowerCase().includes('biz') && !c.planName.toLowerCase().includes('home')) return false;
-      if (billingType === 'business' && !c.planName.toLowerCase().includes('biz') && !c.planName.toLowerCase().includes('commercial') && !c.planName.toLowerCase().includes('peak')) return false;
-      if (billingType === 'piso_wifi' && !c.planName.toLowerCase().includes('wifi') && !c.planName.toLowerCase().includes('vendo')) return false;
+      if (billingType === 'residential' && c.planName?.toLowerCase().includes('biz') && !c.planName?.toLowerCase().includes('home')) return false;
+      if (billingType === 'business' && !c.planName?.toLowerCase().includes('biz') && !c.planName?.toLowerCase().includes('commercial') && !c.planName?.toLowerCase().includes('peak')) return false;
+      if (billingType === 'piso_wifi' && !c.planName?.toLowerCase().includes('wifi') && !c.planName?.toLowerCase().includes('vendo')) return false;
 
-      // Check if already invoiced for this month
-      const hasInvoice = invoices.some(
-        (inv) =>
-          inv.customerId === c.id &&
-          (inv.billingPeriodStart?.startsWith(billingPeriodMonthStr) || inv.issueDate?.startsWith(billingPeriodMonthStr))
-      );
-      return !hasInvoice;
+      // CRITICAL: If customer already has an invoice this month, SKIP!
+      const alreadyInvoiced = hasCustomerInvoiceForMonth(c, billingPeriodMonthStr, invoices);
+      return !alreadyInvoiced;
     });
   }, [customers, invoices, billingType, billingPeriodMonthStr]);
 
   const previewTotalAmount = useMemo(() => {
-    return eligibleSubscribers.reduce(
-      (sum, c) => sum + (c.monthlyFee || 0) + (c.balance > 0 ? c.balance : 0),
-      0
-    );
-  }, [eligibleSubscribers]);
+    return eligibleSubscribers.reduce((sum, c) => {
+      const hasUnpaid = invoices.some(
+        (inv) =>
+          (inv.customerId === c.id ||
+            inv.accountNo === c.accountNo ||
+            inv.customerId === c.accountNo ||
+            inv.accountNo === c.id) &&
+          inv.status !== 'paid' &&
+          (inv.balanceDue || 0) > 0
+      );
+      const prevBal = hasUnpaid && c.balance > 0 ? c.balance : 0;
+      return sum + (c.monthlyFee || 0) + prevBal;
+    }, 0);
+  }, [eligibleSubscribers, invoices]);
 
+  // Count how many subscribers in the selected category are skipped because they are already invoiced this month
   const skippedCount = useMemo(() => {
-    return customers.length - eligibleSubscribers.length;
-  }, [customers.length, eligibleSubscribers.length]);
+    return customers.filter((c) => {
+      if (billingType === 'active' && c.status !== 'active') return false;
+      if (billingType === 'overdue' && c.status !== 'overdue') return false;
+      if (billingType === 'pending_install' && c.status !== 'pending_install') return false;
+      if (billingType === 'residential' && c.planName?.toLowerCase().includes('biz') && !c.planName?.toLowerCase().includes('home')) return false;
+      if (billingType === 'business' && !c.planName?.toLowerCase().includes('biz') && !c.planName?.toLowerCase().includes('commercial') && !c.planName?.toLowerCase().includes('peak')) return false;
+      if (billingType === 'piso_wifi' && !c.planName?.toLowerCase().includes('wifi') && !c.planName?.toLowerCase().includes('vendo')) return false;
 
+      return hasCustomerInvoiceForMonth(c, billingPeriodMonthStr, invoices);
+    }).length;
+  }, [customers, invoices, billingType, billingPeriodMonthStr]);
 
   const handleRunBatch = () => {
     if (eligibleSubscribers.length === 0) {
@@ -116,6 +132,8 @@ export const BatchBillingModal: React.FC<BatchBillingModalProps> = ({ onClose })
         dueDate: effectiveDueDate,
         applyWalletCredits,
         enableProration,
+        customerIds: eligibleSubscribers.map((c) => c.id),
+        billingType,
       });
 
       setResultCount(res.count);
@@ -297,7 +315,13 @@ export const BatchBillingModal: React.FC<BatchBillingModalProps> = ({ onClose })
                   className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold rounded-lg text-sm flex items-center justify-center gap-2 shadow-md shadow-blue-600/20 transition-all hover:scale-[1.01] cursor-pointer"
                 >
                   <Zap className="w-4 h-4" />
-                  <span>{isGenerating ? 'Generating Invoices...' : 'Generate Invoices'}</span>
+                  <span>
+                    {isGenerating
+                      ? 'Generating Invoices...'
+                      : eligibleSubscribers.length === 0
+                      ? 'All Subscribers Invoiced (Skipped)'
+                      : `Generate ${eligibleSubscribers.length} Invoices`}
+                  </span>
                 </button>
 
                 <button
