@@ -2474,7 +2474,8 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({
               <div className="relative">
                 <pre className="p-4 bg-slate-950 rounded-2xl border border-slate-800 font-mono text-xs text-cyan-300 overflow-x-auto max-h-64 scrollbar-thin">
                   {scriptModalTab === 'pppoe' && generatePppoeBatchScript(customers, plans, businessProfile)}
-                  {scriptModalTab === 'isolation' && generateIsolationScript(customers)}
+                  {scriptModalTab === 'isolation' &&
+                    generateIsolationScript(customers, businessProfile?.portalDomain || businessProfile?.websiteUrl)}
                   {scriptModalTab === 'bootstrap' && generateFullRouterConfigScript(businessProfile, plans)}
                 </pre>
                 <button
@@ -2483,7 +2484,7 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({
                       scriptModalTab === 'pppoe'
                         ? generatePppoeBatchScript(customers, plans, businessProfile)
                         : scriptModalTab === 'isolation'
-                        ? generateIsolationScript(customers)
+                        ? generateIsolationScript(customers, businessProfile?.portalDomain || businessProfile?.websiteUrl)
                         : generateFullRouterConfigScript(businessProfile, plans);
                     handleCopy(txt, 'RouterOS Script');
                   }}

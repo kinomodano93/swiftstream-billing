@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Users,
   Plus,
@@ -18,6 +18,7 @@ import {
   KeyRound,
   PauseCircle,
   PlayCircle,
+  Activity,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { Customer, CustomerStatus } from '../../types';
@@ -26,7 +27,11 @@ import { ProvisionModal } from './ProvisionModal';
 import { ConfirmDeleteModal } from '../common/ConfirmDeleteModal';
 import { ConfirmActionModal } from '../common/ConfirmActionModal';
 import { ResetCustomerPasswordModal } from './ResetCustomerPasswordModal';
-
+import {
+  fetchPppoeActiveSessions,
+  MikrotikCredentials,
+  PppoeActiveSessionItem,
+} from '../../services/mikrotikApiService';
 
 interface CustomerListProps {
   onOpenCustomerModal: (customer?: Customer) => void;
@@ -48,6 +53,7 @@ export const CustomerList: React.FC<CustomerListProps> = ({
     napBoxes,
     setActiveTab,
     hasPermission,
+    mikrotikDevices,
   } = useApp();
 
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -57,6 +63,41 @@ export const CustomerList: React.FC<CustomerListProps> = ({
   const [customerToDelete, setCustomerToDelete] = useState<Customer | null>(null);
   const [customerForPasswordReset, setCustomerForPasswordReset] = useState<Customer | null>(null);
   const [statusActionCustomer, setStatusActionCustomer] = useState<{ customer: Customer; targetStatus: CustomerStatus } | null>(null);
+
+  // Live PPPoE active sessions tracking
+  const [activeSessionUsernames, setActiveSessionUsernames] = useState<Set<string>>(new Set());
+  const [activeSessionMap, setActiveSessionMap] = useState<Map<string, PppoeActiveSessionItem>>(new Map());
+
+  useEffect(() => {
+    const primaryRouter = mikrotikDevices?.find((d) => d.role === 'core_pppoe') || mikrotikDevices?.[0];
+    if (!primaryRouter) return;
+    const creds: MikrotikCredentials = {
+      id: primaryRouter.id,
+      name: primaryRouter.name,
+      ipAddress: primaryRouter.remoteAddress || primaryRouter.ipAddress || 'remote.oxapsph.com',
+      port: primaryRouter.port || primaryRouter.webfigPort || 10988,
+      username: primaryRouter.username || 'admin',
+      password: primaryRouter.password || '',
+      useHttps: primaryRouter.useSsl || false,
+    };
+    fetchPppoeActiveSessions(creds)
+      .then((res) => {
+        if (res.success && Array.isArray(res.data)) {
+          const set = new Set<string>();
+          const map = new Map<string, PppoeActiveSessionItem>();
+          res.data.forEach((s) => {
+            const u = (s.username || (s as any).name)?.toLowerCase();
+            if (u) {
+              set.add(u);
+              map.set(u, s);
+            }
+          });
+          setActiveSessionUsernames(set);
+          setActiveSessionMap(map);
+        }
+      })
+      .catch(() => {});
+  }, [mikrotikDevices]);
 
 
   // Extract unique barangays
@@ -224,11 +265,19 @@ export const CustomerList: React.FC<CustomerListProps> = ({
               className="w-full px-3 py-1.5 bg-slate-950/70 border border-slate-800 rounded-lg text-xs text-slate-200 focus:outline-none focus:border-cyan-500"
             >
               <option value="all">All Bandwidth Plans</option>
-              {plans.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name} (₱{p.monthlyFee.toLocaleString()})
-                </option>
-              ))}
+              {plans
+                .filter(
+                  (p) =>
+                    p.category !== 'internal' &&
+                    !p.name?.toLowerCase().includes('router profile') &&
+                    !p.description?.toLowerCase().includes('imported from mikrotik') &&
+                    !p.features?.some((f) => f.toLowerCase().includes('routeros profile'))
+                )
+                .map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} (₱{p.monthlyFee.toLocaleString()})
+                  </option>
+                ))}
             </select>
           </div>
         </div>
@@ -305,19 +354,30 @@ export const CustomerList: React.FC<CustomerListProps> = ({
 
                       {/* Network & NAP */}
                       <td className="py-3 px-4">
-                        <div className="flex items-center gap-1.5">
-                          <span
-                            className={`w-2 h-2 rounded-full ${
-                              customer.network.isMikrotikSynced ? 'bg-emerald-400' : 'bg-slate-600'
-                            }`}
-                            title={customer.network.isMikrotikSynced ? 'Mikrotik Active' : 'Offline / Unsynced'}
-                          />
-                          <span className="font-mono text-[11px] text-slate-300">
+                        <div className="flex items-center gap-2">
+                          {activeSessionUsernames.has(customer.network.pppoeUsername.toLowerCase()) ? (
+                            <span
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-950/80 text-emerald-400 border border-emerald-800/60 shadow-sm"
+                              title={`PPPoE Tunnel Online • Uptime: ${activeSessionMap.get(customer.network.pppoeUsername.toLowerCase())?.uptime || 'Active'}`}
+                            >
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+                              ONLINE
+                            </span>
+                          ) : (
+                            <span
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-medium bg-slate-800/80 text-slate-400 border border-slate-700/60"
+                              title={customer.network.isMikrotikSynced ? 'Provisioned in Router (Offline / Idle)' : 'Not Synced to Router'}
+                            >
+                              <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
+                              OFFLINE
+                            </span>
+                          )}
+                          <span className="font-mono text-[11px] font-semibold text-slate-200">
                             {customer.network.pppoeUsername}
                           </span>
                         </div>
-                        <div className="text-[10px] text-slate-500 font-mono mt-0.5">
-                          IP: {customer.network.ipAddress} • NAP: {assignedNap?.code || customer.network.napBoxId} (Port #{customer.network.napPortNumber})
+                        <div className="text-[10px] text-slate-400 font-mono mt-0.5">
+                          IP: {activeSessionMap.get(customer.network.pppoeUsername.toLowerCase())?.assignedIp || customer.network.ipAddress} • NAP: {assignedNap?.code || customer.network.napBoxId} (Port #{customer.network.napPortNumber})
                         </div>
                       </td>
 

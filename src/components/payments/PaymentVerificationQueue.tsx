@@ -19,7 +19,6 @@ import {
   Check,
   X,
   Smartphone,
-  Plus,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { PaymentSubmission, PaymentMethod } from '../../types';
@@ -36,7 +35,6 @@ export const PaymentVerificationQueue: React.FC<PaymentVerificationQueueProps> =
     paymentSubmissions,
     approvePaymentSubmission,
     rejectPaymentSubmission,
-    submitPaymentProof,
     customers,
     invoices,
     businessProfile,
@@ -94,22 +92,6 @@ export const PaymentVerificationQueue: React.FC<PaymentVerificationQueueProps> =
     rejectPaymentSubmission(activeSubmission.id, finalReason);
     setShowRejectModal(false);
     setActiveSubmission(null);
-  };
-
-  const handleSimulateSubmission = () => {
-    const cust = customers[Math.floor(Math.random() * customers.length)] || customers[0];
-    const inv = invoices.find((i) => i.customerId === cust.id && i.status !== 'paid') || invoices[0];
-    const randomRef = `GCASH-${Math.floor(1000000000 + Math.random() * 9000000000)}`;
-
-    submitPaymentProof({
-      customerId: cust.id,
-      invoiceId: inv?.id,
-      amount: inv ? inv.balanceDue : 1299,
-      paymentMethod: 'gcash',
-      referenceNumber: randomRef,
-      receiptImageUrl: 'https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?auto=format&fit=crop&w=600&q=80',
-      notes: `Simulated portal submission for ${cust.fullName}.`,
-    });
   };
 
   return (
@@ -197,14 +179,6 @@ export const PaymentVerificationQueue: React.FC<PaymentVerificationQueueProps> =
             ))}
           </div>
         </div>
-
-        <button
-          onClick={handleSimulateSubmission}
-          className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-cyan-500/30 rounded-xl text-xs font-semibold transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Simulate Client Submission</span>
-        </button>
       </div>
 
       {/* Submissions Table / Cards */}

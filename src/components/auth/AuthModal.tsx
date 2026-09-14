@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   X,
   Lock,
@@ -39,7 +39,7 @@ import {
 } from '../../services/authService';
 import { formatCurrency } from '../../utils/formatters';
 import { LAGONOY_BARANGAYS, PRESENTACION_BARANGAYS } from '../network/CoverageAreaManager';
-import { OnlineApplication } from '../../types';
+import { OnlineApplication, Plan } from '../../types';
 import { saveFirestoreDoc, COLLECTIONS } from '../../services/firestoreService';
 
 interface AuthModalProps {
@@ -78,7 +78,24 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [confirmPassword, setConfirmPassword] = useState('');
   const [fullName, setFullName] = useState('');
   const [mobile, setMobile] = useState('09');
-  const [selectedPlanId, setSelectedPlanId] = useState<string>(plans[0]?.id || 'plan-50m');
+  const isExcludedFromPublic = (p: Plan) => {
+    if (p.isPublic === false) return true;
+    if (p.category === 'internal') return true;
+    if (p.name?.toLowerCase().includes('router profile')) return true;
+    if (p.description?.toLowerCase().includes('imported from mikrotik')) return true;
+    if (p.features?.some((f) => f.toLowerCase().includes('routeros profile'))) return true;
+    return false;
+  };
+
+  const publicPlans: Plan[] = useMemo(() => {
+    return plans.filter((p: Plan) => p.isActive !== false && !isExcludedFromPublic(p));
+  }, [plans]);
+
+  const [selectedPlanId, setSelectedPlanId] = useState<string>(
+    initialPlanId ||
+      plans.find((p) => p.isActive !== false && !isExcludedFromPublic(p))?.id ||
+      'plan-home-turbo-50'
+  );
   const [installationDate, setInstallationDate] = useState<string>(
     new Date().toISOString().slice(0, 10)
   );
@@ -117,8 +134,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       }
       if (initialPlanId) {
         setSelectedPlanId(initialPlanId);
-      } else if (plans.length > 0 && !selectedPlanId) {
-        setSelectedPlanId(plans[0].id);
+      } else if (publicPlans.length > 0 && !selectedPlanId) {
+        setSelectedPlanId(publicPlans[0].id);
       }
       if (initialMunicipality === 'Presentacion' || initialMunicipality === 'Lagonoy') {
         setMunicipality(initialMunicipality);
@@ -132,7 +149,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         setBarangay(initialBarangay);
       }
     }
-  }, [isOpen, initialMode, initialEmail, initialPlanId, initialBarangay, initialMunicipality, plans]);
+  }, [isOpen, initialMode, initialEmail, initialPlanId, initialBarangay, initialMunicipality, publicPlans]);
 
   if (!isOpen) return null;
 
@@ -233,7 +250,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
     setLoading(true);
     try {
-      const selectedPlan = plans.find((p) => p.id === selectedPlanId) || plans[0];
+      const selectedPlan = publicPlans.find((p) => p.id === selectedPlanId) || publicPlans[0] || plans[0];
       const generatedAccountNo = `SWIFT-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`;
 
       const isPresentacion = municipality === 'Presentacion' || PRESENTACION_BARANGAYS.some(
@@ -266,9 +283,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         advanceDeposit: 0,
         network: {
           pppoeUsername: cleanEmail.split('@')[0].replace(/[^a-z0-9]/g, '_'),
-          ipAddress: `192.168.10.${Math.floor(20 + Math.random() * 200)}`,
-          napBoxId: 'nap-01-binauahan',
-          napPortNumber: 1,
+          ipAddress: '',
+          napBoxId: '',
+          napPortNumber: 0,
           isMikrotikSynced: false,
         },
         notes: `Online Registration via Portal Sign Up (${targetCity}). Landmark: ${landmark || 'N/A'}. Preferred Install Date: ${installationDate || 'ASAP'}`,
@@ -414,7 +431,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
   };
 
-  const selectedPlan = plans.find((p) => p.id === selectedPlanId) || plans[0];
+  const selectedPlan = publicPlans.find((p) => p.id === selectedPlanId) || publicPlans[0] || plans[0];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/85 backdrop-blur-md animate-in fade-in duration-200">
@@ -758,7 +775,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                      {plans.map((p) => {
+                      {publicPlans.map((p) => {
                         const isSelected = selectedPlanId === p.id;
                         return (
                           <button

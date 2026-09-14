@@ -45,7 +45,7 @@ import {
   STORAGE_KEYS,
 } from '../data/storage';
 import { initialPlans, initialBusinessProfile, initialCoverageAreas, initialStaffUsers, initialOperationalBills } from '../data/initialData';
-import { generateId } from '../utils/formatters';
+import { generateId, formatCurrency } from '../utils/formatters';
 import { findCustomerInvoiceForMonth, hasCustomerInvoiceForMonth } from '../utils/billingRules';
 import { generateReminderMessage, sendMockNotification } from '../utils/smsSender';
 import {
@@ -192,6 +192,14 @@ interface AppContextType {
   }) => { count: number; totalAmount: number };
   applyInvoiceDiscount: (invoiceId: string, discountAmount: number) => void;
   runDailyGraceAudit: () => { isolatedCount: number; reactivatedCount: number; graceCount: number };
+  triggerServerGraceAudit: () => Promise<{
+    success: boolean;
+    isolatedCount: number;
+    graceCount: number;
+    reactivatedCount: number;
+    smsSentCount: number;
+    message?: string;
+  }>;
 
   // Daily Remittance & Cashier Actions
   addDailyRemittance: (remittance: Omit<DailyRemittanceRecord, 'id'>) => DailyRemittanceRecord;
@@ -265,8 +273,34 @@ interface AppContextType {
   convertRepairToInvoice: (repairId: string) => Invoice;
 
   // Reminders Actions
-  sendReminder: (customerId: string, type: ReminderType, channel: 'sms' | 'email' | 'both', invoiceId?: string) => Promise<void>;
+  sendReminder: (
+    customerId: string,
+    type: ReminderType,
+    channel: 'sms' | 'email' | 'both',
+    invoiceId?: string,
+    customMessageText?: string,
+    options?: {
+      maintenanceWindow?: string;
+      maintenanceScope?: string;
+      restoredTime?: string;
+      customNote?: string;
+      silent?: boolean;
+    }
+  ) => Promise<void>;
   sendBatchReminders: (target: 'overdue' | 'upcoming', channel: 'sms' | 'email' | 'both') => Promise<number>;
+  sendAdvisoryBroadcast: (params: {
+    scope: 'all' | 'coverage' | 'user';
+    targetValue: string;
+    type: ReminderType;
+    channel: 'sms' | 'email' | 'both';
+    customMessage?: string;
+    options?: {
+      maintenanceWindow?: string;
+      maintenanceScope?: string;
+      restoredTime?: string;
+      customNote?: string;
+    };
+  }) => Promise<{ sentCount: number; targetCount: number }>;
 
   // Expense Actions
   addExpense: (expense: Omit<Expense, 'id'>) => Expense;
@@ -851,7 +885,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     });
     const unsubPlans = subscribeToCollection<Plan>(COLLECTIONS.PLANS, (data) => {
-      if (data && data.length > 0) setPlans(data);
+      if (data && data.length > 0) {
+        // Automatically purge any technical router profile plans previously imported into Firestore
+        const isImportedRouterProfile = (p: Plan) =>
+          Boolean(
+            p.category === 'internal' ||
+            p.name?.toLowerCase().includes('router profile') ||
+            p.description?.toLowerCase().includes('imported from mikrotik') ||
+            p.features?.some((f) => f.toLowerCase().includes('routeros profile'))
+          );
+
+        const routerProfiles = data.filter(isImportedRouterProfile);
+        if (routerProfiles.length > 0) {
+          routerProfiles.forEach((rp) => {
+            deleteFirestoreDoc(COLLECTIONS.PLANS, rp.id);
+          });
+        }
+
+        const legitimatePlans = data.filter((p) => !isImportedRouterProfile(p));
+        setPlans(legitimatePlans.length > 0 ? legitimatePlans : initialPlans);
+      }
     });
     const unsubCoverage = subscribeToCollection<CoverageArea>(COLLECTIONS.COVERAGE_AREAS, (data) => {
       if (data && data.length > 0) setCoverageAreas(data);
@@ -2036,8 +2089,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     const today = new Date();
-    const graceDays = businessProfile.invoiceGracePeriodDays || 5;
-
+    const graceDays = Number(businessProfile.invoiceGracePeriodDays) || 5;
+    const cutoffTime = businessProfile.gracePeriodCutoffTime || '23:59';
+    const [cutoffH, cutoffM] = cutoffTime.split(':').map((v) => parseInt(v, 10) || 0);
 
     let isolatedCount = 0;
     let reactivatedCount = 0;
@@ -2067,17 +2121,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         };
       }
 
-      // Check if any invoice is past the grace period
+      // Check if any invoice is past the grace period with cutoff time
       let isPastGrace = false;
       let isInGrace = false;
 
       openInvoices.forEach((inv) => {
-        const dueDate = new Date(inv.dueDate);
-        const daysPastDue = Math.floor((today.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24));
+        const parts = (inv.dueDate || '').split('-').map((v) => parseInt(v, 10));
+        const dueDateObj =
+          parts.length === 3 && !isNaN(parts[0]) && !isNaN(parts[1]) && !isNaN(parts[2])
+            ? new Date(parts[0], parts[1] - 1, parts[2], cutoffH, cutoffM, 59)
+            : new Date(inv.dueDate);
 
-        if (daysPastDue > graceDays) {
+        const graceExpiryTime = new Date(dueDateObj.getTime() + graceDays * 24 * 60 * 60 * 1000);
+
+        if (today.getTime() > graceExpiryTime.getTime()) {
           isPastGrace = true;
-        } else if (daysPastDue > 0) {
+        } else if (today.getTime() > dueDateObj.getTime()) {
           isInGrace = true;
         }
       });
@@ -2126,6 +2185,70 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
 
     return { isolatedCount, reactivatedCount, graceCount };
+  };
+
+  const triggerServerGraceAudit = async (): Promise<{
+    success: boolean;
+    isolatedCount: number;
+    graceCount: number;
+    reactivatedCount: number;
+    smsSentCount: number;
+    message?: string;
+  }> => {
+    if (!hasPermission('canRunGraceAudit')) {
+      showToast('error', 'Access Restricted', 'Only administrators can initiate automated network isolation and grace audits.');
+      return { success: false, isolatedCount: 0, graceCount: 0, reactivatedCount: 0, smsSentCount: 0, message: 'Unauthorized' };
+    }
+
+    try {
+      showToast('info', 'Cloud Scheduler Audit', 'Executing server-side grace period audit & RouterOS isolation...');
+      const response = await fetch('/api/triggerGraceAudit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          triggeredBy: `${currentAuthUser?.displayName || 'Admin'} (Manual Web Trigger)`,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        // Also run local reconciliation
+        const local = runDailyGraceAudit();
+        const iso = data.isolatedCount !== undefined ? data.isolatedCount : local.isolatedCount;
+        const grace = data.graceCount !== undefined ? data.graceCount : local.graceCount;
+        const react = data.reactivatedCount !== undefined ? data.reactivatedCount : local.reactivatedCount;
+        const sms = data.smsSentCount || 0;
+
+        showToast(
+          'success',
+          'Server Audit Executed',
+          `Server completed audit: ${iso} isolated, ${react} reactivated, ${grace} in grace, ${sms} SMS sent.`
+        );
+
+        return {
+          success: true,
+          isolatedCount: iso,
+          graceCount: grace,
+          reactivatedCount: react,
+          smsSentCount: sms,
+          message: data.message,
+        };
+      } else {
+        throw new Error(`Server returned HTTP ${response.status}`);
+      }
+    } catch (err: any) {
+      console.warn('[Server Audit Fallback]', err);
+      // Fallback to local execution
+      const local = runDailyGraceAudit();
+      return {
+        success: true,
+        isolatedCount: local.isolatedCount,
+        graceCount: local.graceCount,
+        reactivatedCount: local.reactivatedCount,
+        smsSentCount: 0,
+        message: 'Executed via local bridge (Server endpoint fallback).',
+      };
+    }
   };
 
   // --- Payment Operations ---
@@ -2901,13 +3024,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     customerId: string,
     type: ReminderType,
     channel: 'sms' | 'email' | 'both',
-    invoiceId?: string
+    invoiceId?: string,
+    customMessageText?: string,
+    options?: {
+      maintenanceWindow?: string;
+      maintenanceScope?: string;
+      restoredTime?: string;
+      customNote?: string;
+      silent?: boolean;
+    }
   ) => {
     const customer = customers.find((c) => c.id === customerId);
     if (!customer) return;
 
     const invoice = invoiceId ? invoices.find((inv) => inv.id === invoiceId) : undefined;
-    const message = generateReminderMessage(type, customer, businessProfile, invoice);
+    const message = customMessageText || generateReminderMessage(type, customer, businessProfile, invoice, options);
 
     // Handle Email via SMTP
     if (channel === 'email' || channel === 'both') {
@@ -2918,6 +3049,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           to: customer.email || `${customer.accountNo.toLowerCase()}@swiftstream.ph`,
           subject: `Statement of Account - Invoice #${invoice.invoiceNumber} (${businessProfile.name})`,
           htmlBody,
+          textBody: message,
+        });
+      } else {
+        const subject =
+          type === 'maintenance_advisory'
+            ? `[ADVISORY] Scheduled Network Maintenance - ${businessProfile.name}`
+            : type === 'restored_advisory'
+            ? `[NOTICE] Service Restoration Complete - ${businessProfile.name}`
+            : `Notice from ${businessProfile.name}`;
+        await sendSmtpEmail({
+          smtpConfig: businessProfile.smtp,
+          to: customer.email || `${customer.accountNo.toLowerCase()}@swiftstream.ph`,
+          subject,
+          htmlBody: `<div style="font-family: sans-serif; padding: 20px; color: #1e293b;"><h2 style="color: #0284c7;">${businessProfile.name}</h2><p style="font-size: 15px; line-height: 1.6;">${message.replace(/\n/g, '<br/>')}</p><hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 20px 0;"/><p style="font-size: 12px; color: #64748b;">SwiftStream Fiber Internet • Helpline: ${businessProfile.representative?.mobile}</p></div>`,
           textBody: message,
         });
       }
@@ -2958,7 +3103,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     logAuditEvent({
-      userName: 'SwiftStream Auto-Dispatcher',
+      userName: currentAuthUser?.displayName || 'SwiftStream Auto-Dispatcher',
       action: channel === 'email' ? 'EMAIL_INVOICE_SENT' : channel === 'both' ? 'SMS_AND_EMAIL_SENT' : 'SMS_REMINDER_SENT',
       category: 'smtp',
       severity: 'info',
@@ -2966,7 +3111,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       status: 'success',
     });
 
-    showToast('success', 'Advisory Dispatched', `Reminder sent to ${customer.fullName} via ${channel.toUpperCase()}.`);
+    if (!options?.silent) {
+      showToast('success', 'Advisory Dispatched', `Reminder sent to ${customer.fullName} via ${channel.toUpperCase()}.`);
+    }
   };
 
   const sendBatchReminders = async (target: 'overdue' | 'upcoming', channel: 'sms' | 'email' | 'both'): Promise<number> => {
@@ -2985,6 +3132,115 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     showToast('success', 'Batch Broadcast Done', `Dispatched ${count} reminder notifications.`);
     return count;
+  };
+
+  const sendAdvisoryBroadcast = async (params: {
+    scope: 'all' | 'coverage' | 'user';
+    targetValue: string;
+    type: ReminderType;
+    channel: 'sms' | 'email' | 'both';
+    customMessage?: string;
+    options?: {
+      maintenanceWindow?: string;
+      maintenanceScope?: string;
+      restoredTime?: string;
+      customNote?: string;
+    };
+  }): Promise<{ sentCount: number; targetCount: number }> => {
+    let targets: Customer[] = [];
+
+    if (params.scope === 'all') {
+      targets = customers.filter((c) => c.status !== 'disconnected');
+    } else if (params.scope === 'coverage') {
+      targets = customers.filter(
+        (c) =>
+          c.status !== 'disconnected' &&
+          (c.address?.barangay?.toLowerCase() === params.targetValue.toLowerCase() ||
+           c.network?.napBoxId === params.targetValue)
+      );
+    } else {
+      targets = customers.filter((c) => c.id === params.targetValue);
+    }
+
+    if (targets.length === 0) {
+      showToast('error', 'No Recipients Found', 'No subscribers match the chosen broadcast scope.');
+      return { sentCount: 0, targetCount: 0 };
+    }
+
+    let sent = 0;
+    for (const cust of targets) {
+      let msg = params.customMessage;
+      if (msg) {
+        msg = msg
+          .replace(/{name}/g, cust.fullName)
+          .replace(/{accountNo}/g, cust.accountNo)
+          .replace(/{barangay}/g, cust.address?.barangay || 'your area')
+          .replace(/{hotline}/g, businessProfile.representative?.mobile || 'our office')
+          .replace(/{balance}/g, formatCurrency(cust.balance));
+      }
+      await sendReminder(cust.id, params.type, params.channel, undefined, msg, { ...params.options, silent: true });
+      sent++;
+    }
+
+    const typeLabel =
+      params.type === 'maintenance_advisory'
+        ? 'Scheduled Maintenance Notice'
+        : params.type === 'restored_advisory'
+        ? 'Service Restoration Notice'
+        : params.type.replace(/_/g, ' ').toUpperCase();
+
+    const scopeLabel =
+      params.scope === 'all'
+        ? 'All Network Subscribers'
+        : params.scope === 'coverage'
+        ? `Coverage: Brgy. ${params.targetValue}`
+        : targets[0]?.fullName || 'Individual Account';
+
+    // Broadcast to Telegram Staff NOC Bot if connected
+    if (businessProfile.staffWebhooks?.telegramEnabled) {
+      await sendTelegramStaffAlert(
+        `📢 *ADVISORY BLAST DISPATCHED*\n` +
+        `• *Type*: ${typeLabel}\n` +
+        `• *Scope*: ${scopeLabel}\n` +
+        `• *Channel*: ${params.channel.toUpperCase()}\n` +
+        `• *Recipients*: ${sent} Subscribers\n` +
+        `• *Timestamp*: ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+        businessProfile.staffWebhooks
+      );
+    }
+
+    // Broadcast to Discord Staff NOC Channel if connected
+    if (businessProfile.staffWebhooks?.discordEnabled) {
+      await sendDiscordStaffAlert(
+        '📢 Advisory Blast Dispatched',
+        `Dispatched **${typeLabel}** to **${sent}** subscribers across **${scopeLabel}**.`,
+        [
+          { name: 'Advisory Type', value: typeLabel, inline: true },
+          { name: 'Target Scope', value: scopeLabel, inline: true },
+          { name: 'Channel', value: params.channel.toUpperCase(), inline: true },
+          { name: 'Recipients', value: `${sent} subscribers`, inline: true },
+        ],
+        0x06b6d4,
+        businessProfile.staffWebhooks
+      );
+    }
+
+    logAuditEvent({
+      userName: currentAuthUser?.displayName || 'Admin Dispatcher',
+      action: 'ADVISORY_BROADCAST_DISPATCHED',
+      category: 'smtp',
+      severity: 'info',
+      details: `Dispatched ${typeLabel} to ${sent} subscribers across ${scopeLabel} via ${params.channel.toUpperCase()}.`,
+      status: 'success',
+    });
+
+    showToast(
+      'success',
+      'Advisory Broadcast Complete',
+      `Dispatched ${typeLabel} to ${sent} subscribers (${scopeLabel}).`
+    );
+
+    return { sentCount: sent, targetCount: targets.length };
   };
 
   // --- MikroTik Router Fleet Operations ---
@@ -3819,6 +4075,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         generateBatchInvoices,
         applyInvoiceDiscount,
         runDailyGraceAudit,
+        triggerServerGraceAudit,
         addDailyRemittance,
         closeDailyRemittance,
         recordPayment,
@@ -3858,6 +4115,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         convertRepairToInvoice,
         sendReminder,
         sendBatchReminders,
+        sendAdvisoryBroadcast,
         addExpense,
         updateExpense,
         deleteExpense,

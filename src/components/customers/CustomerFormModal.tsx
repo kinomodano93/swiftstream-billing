@@ -823,11 +823,19 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
                   onChange={(e) => setSelectedPlanId(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500"
                 >
-                  {plans.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} — ₱{p.monthlyFee.toLocaleString()}/mo ({p.speedMbps} Mbps)
-                    </option>
-                  ))}
+                  {plans
+                    .filter(
+                      (p) =>
+                        p.category !== 'internal' &&
+                        !p.name?.toLowerCase().includes('router profile') &&
+                        !p.description?.toLowerCase().includes('imported from mikrotik') &&
+                        !p.features?.some((f) => f.toLowerCase().includes('routeros profile'))
+                    )
+                    .map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} — ₱{p.monthlyFee.toLocaleString()}/mo ({p.speedMbps} Mbps)
+                      </option>
+                    ))}
                 </select>
               </div>
 

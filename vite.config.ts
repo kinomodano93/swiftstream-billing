@@ -2232,6 +2232,36 @@ function xenditProxyPlugin(): Plugin {
         res.setHeader('Content-Type', 'application/json');
         res.end(JSON.stringify({ success: true, message: 'Webhook acknowledged' }));
       });
+
+      // 5. Server-side Grace Audit Trigger Endpoint
+      server.middlewares.use('/api/triggerGraceAudit', async (req, res) => {
+        setCors(res);
+        if (req.method === 'OPTIONS') {
+          res.statusCode = 204;
+          res.end();
+          return;
+        }
+
+        const body = await readBody(req);
+        const triggeredBy = body?.triggeredBy || 'Admin Web Console';
+        console.log('[Dev Proxy] Triggering server grace audit:', triggeredBy);
+
+        res.statusCode = 200;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(
+          JSON.stringify({
+            success: true,
+            message: `Server grace audit executed successfully by ${triggeredBy}.`,
+            triggeredBy,
+            isolatedCount: 0,
+            graceCount: 0,
+            reactivatedCount: 0,
+            smsSentCount: 0,
+            timestamp: new Date().toISOString(),
+            details: ['Dev environment simulated server audit execution'],
+          })
+        );
+      });
     },
   };
 }

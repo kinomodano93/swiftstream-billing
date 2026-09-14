@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Service Suspended • Walled Garden Isolation | SwiftStream Fiber</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background: #030712;
+      color: #f1f5f9;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 20px 16px;
+      line-height: 1.5;
+    }
+    .container {
+      width: 100%;
+      max-width: 580px;
+      background: #0f172a;
+      border: 1px solid #1e293b;
+      border-radius: 24px;
+      padding: 32px 24px;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5), 0 0 40px rgba(225, 29, 72, 0.15);
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+    .top-accent {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: linear-gradient(90deg, #e11d48, #f43f5e, #fb7185);
+    }
+    .badge-wrap {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(225, 29, 72, 0.15);
+      border: 1px solid rgba(225, 29, 72, 0.35);
+      padding: 4px 12px;
+      border-radius: 9999px;
+      font-size: 11px;
+      font-weight: 700;
+      color: #fda4af;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 16px;
+    }
+    .badge-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 9999px;
+      background: #f43f5e;
+      box-shadow: 0 0 8px #f43f5e;
+    }
+    .icon-shield {
+      width: 64px;
+      height: 64px;
+      background: linear-gradient(135deg, rgba(225, 29, 72, 0.25), rgba(15, 23, 42, 0.9));
+      border: 1px solid rgba(225, 29, 72, 0.4);
+      border-radius: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 16px auto;
+      color: #f43f5e;
+    }
+    h1 {
+      font-size: 22px;
+      font-weight: 900;
+      color: #ffffff;
+      letter-spacing: -0.02em;
+      margin-bottom: 8px;
+    }
+    .company-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: #38bdf8;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 4px;
+    }
+    p.desc {
+      font-size: 13px;
+      color: #94a3b8;
+      margin-bottom: 24px;
+      line-height: 1.6;
+    }
+    .highlight-box {
+      background: rgba(2, 6, 23, 0.8);
+      border: 1px solid #1e293b;
+      border-radius: 16px;
+      padding: 16px;
+      margin-bottom: 24px;
+      text-align: left;
+    }
+    .highlight-box .title {
+      font-size: 11px;
+      font-weight: 700;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 12px;
+    }
+    .payment-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+    }
+    @media (min-width: 480px) {
+      .payment-grid { grid-template-columns: 1fr 1fr; }
+    }
+    .payment-card {
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .payment-brand {
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .gcash { color: #38bdf8; }
+    .maya { color: #34d399; }
+    .acc-num {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 14px;
+      font-weight: 800;
+      color: #f8fafc;
+      letter-spacing: 0.02em;
+    }
+    .acc-name {
+      font-size: 10px;
+      color: #94a3b8;
+    }
+    .btn-portal {
+      display: block;
+      width: 100%;
+      background: linear-gradient(135deg, #0284c7, #2563eb);
+      color: #ffffff;
+      font-weight: 800;
+      font-size: 13px;
+      text-decoration: none;
+      padding: 14px 20px;
+      border-radius: 14px;
+      transition: all 0.2s ease;
+      box-shadow: 0 10px 20px -5px rgba(2, 132, 199, 0.4);
+      margin-bottom: 16px;
+    }
+    .btn-portal:hover {
+      background: linear-gradient(135deg, #0369a1, #1d4ed8);
+      transform: translateY(-1px);
+    }
+    .footer-help {
+      border-top: 1px solid #1e293b;
+      padding-top: 16px;
+      font-size: 11px;
+      color: #64748b;
+      line-height: 1.6;
+    }
+    .footer-help a {
+      color: #38bdf8;
+      text-decoration: none;
+      font-weight: 600;
+    }
+    .status-reconnect {
+      font-size: 11px;
+      color: #10b981;
+      font-weight: 600;
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="top-accent"></div>
+
+    <div class="badge-wrap">
+      <span class="badge-dot"></span>
+      <span>Walled Garden Active</span>
+    </div>
+
+    <div class="icon-shield">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+        <line x1="12" y1="8" x2="12" y2="12"/>
+        <line x1="12" y1="16" x2="12.01" y2="16"/>
+      </svg>
+    </div>
+
+    <div class="company-title">SwiftStream Fiber Telecommunications</div>
+    <h1>Internet Line Restricted</h1>
+    <p class="desc">
+      Your high-speed fiber internet has been temporarily placed in Walled Garden isolation due to an overdue billing statement.
+      Settle your balance via <strong>GCash</strong> or <strong>Maya</strong> below to restore your connection.
+    </p>
+
+    <div class="highlight-box">
+      <div class="title">Official Payment Channels</div>
+      <div class="payment-grid">
+        <div class="payment-card">
+          <span class="payment-brand gcash">GCash Official</span>
+          <span class="acc-num">09624171684</span>
+          <span class="acc-name">Leonardo Flojo Jr</span>
+        </div>
+        <div class="payment-card">
+          <span class="payment-brand maya">Maya Official</span>
+          <span class="acc-num">09624171684</span>
+          <span class="acc-name">Leonardo Flojo Jr</span>
+        </div>
+      </div>
+    </div>
+
+    <a href="https://swiftstream-billing.web.app" class="btn-portal">
+      Open SwiftStream Online Portal &rarr;
+    </a>
+
+    <div class="status-reconnect">
+      ✓ Instant Automatic Reconnection: Once your payment is verified, our core router automatically unblocks your line within 30 seconds.
+    </div>
+
+    <div class="footer-help" style="margin-top: 20px;">
+      <p>Need support or already paid? Contact our Operations Center:</p>
+      <p>Hotline: <a href="tel:09624171684">09624171684</a> • Email: <a href="mailto:billing@swiftstream.ph">billing@swiftstream.ph</a></p>
+      <p style="margin-top: 4px; font-size: 10px; color: #475569;">SwiftStream Fiber Telecommunications • Lagonoy, Camarines Sur Operations</p>
+    </div>
+  </div>
+</body>
+</html>
+

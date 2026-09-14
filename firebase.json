@@ -113,6 +113,13 @@
         }
       },
       {
+        "source": "/api/triggerGraceAudit",
+        "function": {
+          "functionId": "triggerGraceAudit",
+          "region": "asia-southeast1"
+        }
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }

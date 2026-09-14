@@ -18,6 +18,7 @@ import {
   MapPin,
   Calendar,
   ShieldCheck,
+  ShieldAlert,
   Activity,
   ArrowRight,
   LogOut,
@@ -69,6 +70,8 @@ import {
 import { generateDynamicQrPhPayload } from '../../utils/qrPhGenerator';
 import { createMockPaymentWebhookEvent } from '../../services/paymentWebhookService';
 import { GeminiAiAssistant } from '../ai/GeminiAiAssistant';
+import { compressImageFile } from '../../utils/imageCompressor';
+import { isStaffUser } from '../../services/authService';
 
 interface ClientPortalProps {
   initialCustomerId?: string | null;
@@ -94,11 +97,6 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
     updateRepairOrder,
     logout,
     currentAuthUser,
-    staffUsers,
-    openAuthModal,
-    setActiveTab,
-    setSystemRole,
-    showToast,
   } = useApp();
 
   // Selected Subscriber State (Session)
@@ -231,7 +229,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
     setLoginError('');
     const cleanInput = loginInput.trim().toLowerCase();
 
-    // 1. Check registered subscribers
+    // Check registered subscribers
     const matched = customers.find(
       (c) =>
         c.accountNo.toLowerCase() === cleanInput ||
@@ -242,31 +240,6 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
     if (matched) {
       setCurrentCustomerId(matched.id);
       setLoginInput('');
-      return;
-    }
-
-    // 2. Check staff directory (Cashier, Technician, Admin)
-    const staffMatch = staffUsers.find(
-      (s) =>
-        s.email.toLowerCase().trim() === cleanInput ||
-        s.fullName.toLowerCase().includes(cleanInput) ||
-        (s.mobile && s.mobile.replace(/[^0-9]/g, '') === cleanInput.replace(/[^0-9]/g, ''))
-    );
-
-    if (staffMatch) {
-      if (staffMatch.status === 'suspended') {
-        setLoginError(`Staff account for ${staffMatch.fullName} is suspended. Please contact the Administrator.`);
-        return;
-      }
-
-      setLoginError('');
-      setLoginInput('');
-      showToast(
-        'info',
-        'Staff Account Detected',
-        `Recognized ${staffMatch.fullName} (${staffMatch.role.toUpperCase()}). Please enter your password to sign in.`
-      );
-      openAuthModal('signin', staffMatch.email);
       return;
     }
 
@@ -704,16 +677,6 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => openAuthModal('signin')}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-950/80 hover:bg-cyan-900/90 text-cyan-300 hover:text-cyan-100 rounded-xl text-xs font-semibold border border-cyan-800/70 transition-colors cursor-pointer shadow-sm"
-                title="Cashier, Technician & Admin Sign In"
-              >
-                <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />
-                <span>Staff & Cashier Sign In</span>
-              </button>
-
-              <button
-                type="button"
                 onClick={onExitToHome}
                 className="flex items-center gap-1.5 px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-semibold border border-slate-700 transition-colors cursor-pointer"
               >
@@ -723,30 +686,6 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
             </div>
           </div>
         </header>
-
-        {/* Active Staff Session Banner */}
-        {currentAuthUser && (currentAuthUser.role === 'cashier' || currentAuthUser.role === 'admin' || currentAuthUser.role === 'technician' || currentAuthUser.role === 'tech') && (
-          <div className="bg-gradient-to-r from-cyan-950 via-slate-900 to-blue-950 border-b border-cyan-800/60 py-2.5 px-4 sm:px-6 text-xs flex items-center justify-between text-cyan-200">
-            <div className="flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-cyan-400 shrink-0" />
-              <span>
-                Logged in as <strong className="text-white">{currentAuthUser.displayName || currentAuthUser.email}</strong> ({currentAuthUser.role.toUpperCase()}).
-              </span>
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                const sysRole = currentAuthUser.role === 'tech' ? 'technician' : currentAuthUser.role;
-                setSystemRole(sysRole as any);
-                setActiveTab('dashboard');
-              }}
-              className="flex items-center gap-1.5 px-3 py-1 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-xs font-bold transition-all shadow-md shadow-cyan-600/25 cursor-pointer"
-            >
-              <span>Go to {currentAuthUser.role === 'cashier' ? 'Cashier Operations' : 'Admin Console'}</span>
-              <ArrowRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        )}
 
         {/* Login Hero Section */}
         <div className="flex-1 flex flex-col items-center justify-center p-6 max-w-xl mx-auto w-full space-y-8 text-center">
@@ -797,19 +736,6 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                 <span>Access My Subscriber Portal</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
-
-              {/* Staff & Cashier Link */}
-              <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs">
-                <span className="text-slate-400">Employee or Cashier?</span>
-                <button
-                  type="button"
-                  onClick={() => openAuthModal('signin')}
-                  className="text-cyan-400 hover:text-cyan-300 font-semibold flex items-center gap-1 cursor-pointer transition-colors"
-                >
-                  <span>Sign In to Staff Console</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </button>
-              </div>
             </form>
           </div>
 
@@ -910,6 +836,37 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
               className="px-3 py-1 bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/40 rounded-xl text-xs font-bold transition-all cursor-pointer"
             >
               Track Review Status &rarr;
+            </button>
+          </div>
+        </div>
+      ) : customer.status === 'suspended' ? (
+        <div className="bg-gradient-to-r from-rose-950 via-red-950 to-rose-950 border-b-2 border-rose-600 px-4 sm:px-6 py-3.5 shadow-xl">
+          <div className="max-w-5xl mx-auto flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+            <div className="flex items-start sm:items-center gap-3 text-white">
+              <div className="p-2 rounded-xl bg-rose-600 text-white flex-shrink-0 animate-pulse shadow-lg shadow-rose-600/40">
+                <ShieldAlert className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="font-black text-sm text-rose-100 flex items-center gap-2">
+                  <span>LINE RESTRICTED • WALLED GARDEN ISOLATION</span>
+                  <span className="px-2 py-0.5 rounded-full bg-rose-500/30 text-rose-200 text-[10px] font-mono border border-rose-400/40 uppercase font-bold tracking-wide">
+                    Action Required
+                  </span>
+                </div>
+                <p className="text-rose-200/90 text-xs mt-0.5">
+                  Your fiber line is temporarily isolated due to an overdue balance of{' '}
+                  <strong className="font-mono font-bold text-white text-sm underline decoration-rose-400">
+                    {formatCurrency(customer.balance)}
+                  </strong>
+                  . Settle via GCash or Maya below. Once paid, our MikroTik Core Router will automatically reconnect your high-speed internet.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setPortalTab('pay')}
+              className="flex-shrink-0 px-4 py-2 bg-gradient-to-r from-white to-rose-100 hover:from-white hover:to-white text-rose-900 rounded-xl text-xs font-black shadow-lg transition-all hover:scale-105 cursor-pointer flex items-center gap-1.5"
+            >
+              <span>Pay Overdue Balance &rarr;</span>
             </button>
           </div>
         </div>
@@ -1766,15 +1723,17 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                             <span>Check Status Now</span>
                           </button>
 
-                          <button
-                            type="button"
-                            onClick={() => handleSettlePaidXenditSession(activeXenditSession)}
-                            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-600/30 transition-all hover:scale-105 flex items-center gap-1.5 cursor-pointer"
-                            title="Simulate instant webhook settlement for testing without paying real money"
-                          >
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            <span>Simulate Instant Payment (Test)</span>
-                          </button>
+                          {isStaffUser(currentAuthUser) && (
+                            <button
+                              type="button"
+                              onClick={() => handleSettlePaidXenditSession(activeXenditSession)}
+                              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-600/30 transition-all hover:scale-105 flex items-center gap-1.5 cursor-pointer"
+                              title="Staff testing: Settle instant payment simulation"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>Staff Test Settlement</span>
+                            </button>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -2092,18 +2051,24 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                             type="file"
                             accept="image/png, image/jpeg, image/webp"
                             className="hidden"
-                            onChange={(e) => {
+                            onChange={async (e) => {
                               const file = e.target.files?.[0];
                               if (file) {
-                                if (file.size > 5 * 1024 * 1024) {
-                                  alert('Image file size must be less than 5MB.');
+                                if (file.size > 10 * 1024 * 1024) {
+                                  alert('Image file size must be less than 10MB.');
                                   return;
                                 }
-                                const reader = new FileReader();
-                                reader.onload = () => {
-                                  setReceiptImageBase64(reader.result as string);
-                                };
-                                reader.readAsDataURL(file);
+                                try {
+                                  const compressed = await compressImageFile(file, 1200, 0.82);
+                                  setReceiptImageBase64(compressed);
+                                } catch (err) {
+                                  console.warn('Failed to compress receipt image, falling back to raw:', err);
+                                  const reader = new FileReader();
+                                  reader.onload = () => {
+                                    setReceiptImageBase64(reader.result as string);
+                                  };
+                                  reader.readAsDataURL(file);
+                                }
                               }
                             }}
                           />

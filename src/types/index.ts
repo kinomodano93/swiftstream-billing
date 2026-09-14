@@ -185,7 +185,15 @@ export type RepairStatus =
   | 'completed'
   | 'cancelled';
 
-export type ReminderType = 'upcoming_due' | 'due_today' | 'overdue_warning' | 'disconnection_notice' | 'payment_confirmation';
+export type ReminderType =
+  | 'upcoming_due'
+  | 'due_today'
+  | 'overdue_warning'
+  | 'disconnection_notice'
+  | 'payment_confirmation'
+  | 'maintenance_advisory'
+  | 'restored_advisory'
+  | 'general_advisory';
 
 export interface XenditConfig {
   enabled: boolean;
@@ -272,6 +280,8 @@ export interface BusinessProfile {
   currencySymbol: string;
   currencyCode: string;
   invoiceGracePeriodDays: number;
+  gracePeriodCutoffTime?: string;
+  dailyAuditScheduleTime?: string;
   lateFeeAmount: number;
 }
 
@@ -281,10 +291,13 @@ export interface Plan {
   speedMbps: number;
   monthlyFee: number;
   installationFee: number;
-  category: 'residential' | 'business' | 'enterprise' | 'piso_wifi';
+  category: 'residential' | 'business' | 'enterprise' | 'piso_wifi' | 'internal';
   description: string;
   features: string[];
   isActive: boolean;
+  mikrotikProfile?: string;
+  mikrotikDeviceId?: string;
+  isPublic?: boolean;
 }
 
 export interface CustomerNetwork {
@@ -681,6 +694,59 @@ export interface SimpleQueueTelemetryItem {
   comment?: string;
 }
 
+export interface SimpleQueueConfig {
+  id?: string;
+  name: string;
+  target: string;
+  maxLimit: string;
+  burstLimit?: string;
+  burstThreshold?: string;
+  burstTime?: string;
+  comment?: string;
+  disabled?: boolean;
+}
+
+export interface PingResultItem {
+  seq: number;
+  host: string;
+  size: number;
+  ttl: number;
+  timeMs: number;
+  status: 'ok' | 'timeout' | 'error';
+}
+
+export interface PingSummary {
+  host: string;
+  packetsTransmitted: number;
+  packetsReceived: number;
+  packetLossPercent: number;
+  minRttMs: number;
+  avgRttMs: number;
+  maxRttMs: number;
+  jitterMs: number;
+  results: PingResultItem[];
+  timestamp: string;
+  source: string;
+}
+
+export interface TracerouteHop {
+  hop: number;
+  address: string;
+  lossPercent: number;
+  sent: number;
+  lastMs: number;
+  avgMs: number;
+  bestMs: number;
+  worstMs: number;
+  status: string;
+}
+
+export interface TracerouteSummary {
+  target: string;
+  hops: TracerouteHop[];
+  timestamp: string;
+}
+
 export interface MikrotikDevice {
   id: string;
   name: string;
@@ -1009,7 +1075,7 @@ export interface OutageBroadcastRecord {
   type: OutageType;
   title: string;
   description: string;
-  targetScope: 'all' | 'nap_box' | 'olt_pon' | 'barangay';
+  targetScope: 'all' | 'nap_box' | 'olt_pon' | 'barangay' | 'user';
   targetEntityId?: string;
   targetEntityName?: string;
   impactedSubscribersCount: number;
@@ -1020,6 +1086,8 @@ export interface OutageBroadcastRecord {
   declaredBy: string;
   declaredAt: string;
   resolvedAt?: string;
+  resolvedBy?: string;
+  restorationMessage?: string;
 }
 
 export interface PaymentSubmission {

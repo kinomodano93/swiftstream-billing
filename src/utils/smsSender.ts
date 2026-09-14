@@ -18,29 +18,51 @@ export const generateReminderMessage = (
   type: ReminderType,
   customer: Customer,
   business: BusinessProfile,
-  invoice?: Invoice
+  invoice?: Invoice,
+  options?: {
+    maintenanceWindow?: string;
+    maintenanceScope?: string;
+    restoredTime?: string;
+    customNote?: string;
+  }
 ): string => {
   const amountStr = invoice ? formatCurrency(invoice.balanceDue) : formatCurrency(customer.balance);
   const dueDateStr = invoice ? formatDate(invoice.dueDate) : 'Immediately';
+  const brandName = business.tradeName || business.name || 'SWIFTSTREAM';
+  const areaName = customer.address?.barangay ? `Brgy. ${customer.address.barangay}` : 'your area';
 
   switch (type) {
     case 'upcoming_due':
-      return `SWIFTSTREAM BILL ADVISORY: Hi ${customer.fullName}, your Fiber Internet bill (${invoice?.invoiceNumber || 'Monthly Bill'}) for ${amountStr} is due on ${dueDateStr}. Pay conveniently via GCash ${business.paymentGateways.gcashNumber} (${business.paymentGateways.gcashName}) or at our ${business.address.city || 'local'} office. Thank you!`;
+      return `${brandName} BILL ADVISORY: Hi ${customer.fullName}, your Fiber Internet bill (${invoice?.invoiceNumber || 'Monthly Bill'}) for ${amountStr} is due on ${dueDateStr}. Pay conveniently via GCash ${business.paymentGateways.gcashNumber} (${business.paymentGateways.gcashName}) or at our ${business.address.city || 'local'} office. Thank you!`;
 
     case 'due_today':
-      return `SWIFTSTREAM REMINDER: Hi ${customer.fullName}, your internet bill ${invoice?.invoiceNumber || ''} of ${amountStr} is DUE TODAY (${dueDateStr}). Please settle promptly via GCash ${business.paymentGateways.gcashNumber} to avoid service disruption.`;
+      return `${brandName} REMINDER: Hi ${customer.fullName}, your internet bill ${invoice?.invoiceNumber || ''} of ${amountStr} is DUE TODAY (${dueDateStr}). Please settle promptly via GCash ${business.paymentGateways.gcashNumber} to avoid service disruption.`;
 
     case 'overdue_warning':
-      return `SWIFTSTREAM OVERDUE NOTICE: Hi ${customer.fullName}, your account ${customer.accountNo} has an overdue balance of ${amountStr} (Due: ${dueDateStr}). Please settle today via GCash ${business.paymentGateways.gcashNumber} (${business.paymentGateways.gcashName}) or visit ${business.name} Office in ${business.address.barangay || business.address.city || 'our branch'}.`;
+      return `${brandName} OVERDUE NOTICE: Hi ${customer.fullName}, your account ${customer.accountNo} has an overdue balance of ${amountStr} (Due: ${dueDateStr}). Please settle today via GCash ${business.paymentGateways.gcashNumber} (${business.paymentGateways.gcashName}) or visit ${business.name} Office in ${business.address.barangay || business.address.city || 'our branch'}.`;
 
     case 'disconnection_notice':
-      return `SWIFTSTREAM FINAL NOTICE: Dear ${customer.fullName}, account ${customer.accountNo} is scheduled for temporary disconnection due to unpaid balance of ${amountStr}. Please settle via GCash ${business.paymentGateways.gcashNumber} or contact ${business.representative.mobile} for reconnection.`;
+      return `${brandName} FINAL NOTICE: Dear ${customer.fullName}, account ${customer.accountNo} is scheduled for temporary disconnection due to unpaid balance of ${amountStr}. Please settle via GCash ${business.paymentGateways.gcashNumber} or contact ${business.representative.mobile} for reconnection.`;
 
     case 'payment_confirmation':
-      return `SWIFTSTREAM RECEIPT: Thank you ${customer.fullName}! We have received your payment of ${amountStr} for account ${customer.accountNo}. Your internet connection is active. Hotline: ${business.representative.mobile}.`;
+      return `${brandName} RECEIPT: Thank you ${customer.fullName}! We have received your payment of ${amountStr} for account ${customer.accountNo}. Your internet connection is active. Hotline: ${business.representative.mobile}.`;
+
+    case 'maintenance_advisory': {
+      const windowStr = options?.maintenanceWindow || 'tonight from 1:00 AM to 5:00 AM';
+      const scopeStr = options?.maintenanceScope ? ` (${options.maintenanceScope})` : '';
+      return `${brandName} MAINTENANCE ADVISORY: Please be advised that scheduled network preventive maintenance${scopeStr} is scheduled for ${areaName} on ${windowStr}. You may experience temporary internet downtime. Lines will be restored immediately after completion. Hotlines: ${business.representative.mobile}. Thank you for your patience!`;
+    }
+
+    case 'restored_advisory': {
+      const timeStr = options?.restoredTime || 'just now';
+      return `${brandName} SERVICE RESTORATION NOTICE: Hi ${customer.fullName}! We are pleased to inform you that fiber internet services in ${areaName} have been FULLY RESTORED as of ${timeStr}. If your router still shows no internet, please restart/power-cycle your ONU/router for 10 seconds. Hotline: ${business.representative.mobile}. Thank you for your support!`;
+    }
+
+    case 'general_advisory':
+      return `${brandName} ADVISORY: Hi ${customer.fullName}, ${options?.customNote || `this is an important announcement regarding your fiber internet subscription.`} Hotlines: ${business.representative.mobile}.`;
 
     default:
-      return `SWIFTSTREAM: Hi ${customer.fullName}, this is regarding your internet subscription at ${business.name}. Contact ${business.representative.mobile} for any assistance.`;
+      return `${brandName}: Hi ${customer.fullName}, this is regarding your internet subscription at ${business.name}. Contact ${business.representative.mobile} for any assistance.`;
   }
 };
 
@@ -51,6 +73,7 @@ export const generateOutageAdvisoryMessage = (
   etr: string,
   business: BusinessProfile
 ): string => {
+  const brand = business.tradeName || business.name || 'SWIFTSTREAM';
   const outageTitles: Record<OutageType, string> = {
     fiber_cut: 'EMERGENCY FIBER CABLE CUT ADVISORY',
     olt_pon_failure: 'OLT DISTRIBUTION PORT SIGNAL DEGRADATION',
@@ -61,7 +84,21 @@ export const generateOutageAdvisoryMessage = (
 
   const title = outageTitles[outageType] || 'NETWORK SERVICE INTERRUPTION';
 
-  return `SWIFTSTREAM ${title}: Please be advised of a service interruption affecting ${targetScope.toUpperCase()}: ${targetName}. Field fiber splicers are actively restoring lines. Estimated Time of Restoration (ETR): ${etr}. Thank you for your patience! Hotlines: ${business.representative.mobile}.`;
+  return `[${brand} ${title}] Dear subscriber, please be advised of a service interruption affecting ${targetScope.toUpperCase()}: ${targetName}. Field fiber technicians & splicers are actively on site restoring connectivity. Estimated Time of Restoration (ETR): ${etr}. Support Hotlines: ${business.representative.mobile}. Thank you for your patience!`;
+};
+
+export const generateOutageRestorationMessage = (
+  targetScope: string,
+  targetName: string,
+  restoredTime: string,
+  business: BusinessProfile,
+  includeRebootGuide: boolean = true
+): string => {
+  const brand = business.tradeName || business.name || 'SWIFTSTREAM';
+  const rebootText = includeRebootGuide
+    ? ' If your connection remains offline, please power-cycle (restart) your fiber ONU/router for 10 seconds.'
+    : '';
+  return `[${brand} SERVICE RESTORATION] Good news! Fiber internet service affecting ${targetScope.toUpperCase()}: ${targetName} has been FULLY RESTORED as of ${restoredTime}.${rebootText} Support Hotline: ${business.representative.mobile}. Thank you for your understanding!`;
 };
 
 // Dispatch SMS using configured Gateway (Semaphore / PhilSMS / Twilio / Sandbox)

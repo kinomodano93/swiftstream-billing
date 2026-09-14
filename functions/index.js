@@ -1,4 +1,5 @@
 const { onRequest } = require("firebase-functions/v2/https");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
 const admin = require("firebase-admin");
 const axios = require("axios");
 const net = require("net");
@@ -2109,5 +2110,580 @@ exports.deleteUserAccount = onRequest(
     }
   }
 );
+
+// ─── Automated Server-Side Midnight Grace Period & Auto-Isolation Cron ───────
+
+/**
+ * Dispatches an automated SMS via configured provider (Semaphore or PhilSMS)
+ */
+const sendServerSms = async (mobile, message, smsConfig) => {
+  if (!mobile || !message || !smsConfig || !smsConfig.apiKey) {
+    return { success: false, skipped: true, reason: "No mobile number or SMS API key configured" };
+  }
+
+  let formatted = mobile.replace(/[^0-9]/g, "");
+  if (formatted.startsWith("09")) {
+    formatted = "63" + formatted.slice(1);
+  } else if (!formatted.startsWith("63") && formatted.length === 10) {
+    formatted = "63" + formatted;
+  }
+
+  const provider = (smsConfig.provider || "semaphore").toLowerCase();
+
+  if (provider === "semaphore") {
+    try {
+      const resp = await axios.post(
+        "https://api.semaphore.co/api/v4/messages",
+        {
+          apikey: smsConfig.apiKey,
+          number: formatted,
+          message: message,
+          sendername: smsConfig.senderName || "SWIFTSTREAM",
+        },
+        { timeout: 8000 }
+      );
+      return { success: true, provider: "semaphore", data: resp.data };
+    } catch (err) {
+      console.warn("[Server SMS] Semaphore error:", err.message);
+      return { success: false, provider: "semaphore", error: err.message };
+    }
+  }
+
+  if (provider === "philsms") {
+    try {
+      const resp = await axios.post(
+        "https://dashboard.philsms.com/api/v3/sms/send",
+        {
+          recipient: formatted,
+          sender_id: smsConfig.philsmsSenderId || "SWIFTSTREAM",
+          type: "plain",
+          message: message,
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${smsConfig.apiKey}`,
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          timeout: 8000,
+        }
+      );
+      return { success: true, provider: "philsms", data: resp.data };
+    } catch (err) {
+      console.warn("[Server SMS] PhilSMS error:", err.message);
+      return { success: false, provider: "philsms", error: err.message };
+    }
+  }
+
+  return { success: false, skipped: true, note: `Provider "${provider}" in sandbox or unsupported` };
+};
+
+/**
+ * Notifies staff channels (Telegram / Discord) of audit execution
+ */
+const sendStaffAlert = async (staffConfig, summary) => {
+  if (!staffConfig) return;
+
+  // Telegram alert
+  if (staffConfig.telegramEnabled && staffConfig.telegramBotToken && staffConfig.telegramChatId) {
+    try {
+      const phTime = new Date().toLocaleString("en-PH", { timeZone: "Asia/Manila" });
+      const text =
+        `🕒 <b>SWIFTSTREAM SERVER MIDNIGHT AUDIT COMPLETED</b>\n\n` +
+        `• <b>Triggered By:</b> ${summary.triggeredBy}\n` +
+        `• <b>Isolated (Cut):</b> <b>${summary.isolatedCount}</b> accounts\n` +
+        `• <b>In Grace Period:</b> ${summary.graceCount} accounts\n` +
+        `• <b>Reactivated:</b> ${summary.reactivatedCount} accounts\n` +
+        `• <b>SMS Notices Dispatched:</b> ${summary.smsSentCount}\n` +
+        `• <b>Execution Time:</b> ${phTime}\n\n` +
+        `<i>Firewall rules synchronized to MikroTik RouterOS.</i>`;
+
+      await axios.post(
+        `https://api.telegram.org/bot${staffConfig.telegramBotToken}/sendMessage`,
+        {
+          chat_id: staffConfig.telegramChatId,
+          text: text,
+          parse_mode: "HTML",
+        },
+        { timeout: 6000 }
+      );
+    } catch (err) {
+      console.warn("[GraceAudit] Telegram alert warning:", err.message);
+    }
+  }
+
+  // Discord alert
+  if (staffConfig.discordEnabled && staffConfig.discordWebhookUrl) {
+    try {
+      const content =
+        `**SWIFTSTREAM SERVER MIDNIGHT AUDIT COMPLETED**\n` +
+        `> **Triggered By:** ${summary.triggeredBy}\n` +
+        `> **Isolated (Cut):** ${summary.isolatedCount} accounts\n` +
+        `> **In Grace Period:** ${summary.graceCount} accounts\n` +
+        `> **Reactivated:** ${summary.reactivatedCount} accounts\n` +
+        `> **SMS Sent:** ${summary.smsSentCount}\n` +
+        `> **Timestamp:** ${new Date().toISOString()}`;
+
+      await axios.post(staffConfig.discordWebhookUrl, { content }, { timeout: 6000 });
+    } catch (err) {
+      console.warn("[GraceAudit] Discord alert warning:", err.message);
+    }
+  }
+};
+
+/**
+ * Executes the full server-side grace audit across Firestore and RouterOS
+ */
+const executeGraceAuditServerSide = async (triggeredBy = "Cloud Scheduler") => {
+  console.log(`[GraceAudit] Starting server-side grace audit (Trigger: ${triggeredBy})...`);
+  const now = new Date();
+  const timestamp = now.toISOString();
+
+  // 1. Fetch Business Profile configuration
+  let profile = {};
+  try {
+    const profileDoc = await db.collection("business_profile").doc("company_profile").get();
+    if (profileDoc.exists) {
+      profile = profileDoc.data() || {};
+    }
+  } catch (err) {
+    console.warn("[GraceAudit] Could not load company profile:", err.message);
+  }
+
+  const graceDays = Number(profile.invoiceGracePeriodDays) || 5;
+  const cutoffTime = profile.gracePeriodCutoffTime || "23:59";
+  const [cutoffH, cutoffM] = cutoffTime.split(":").map((v) => parseInt(v, 10) || 0);
+  const smsGateway = profile.smsGateway || {};
+  const staffWebhooks = profile.staffWebhooks || {};
+  const gcashNumber = profile.paymentGateways?.gcashNumber || "09638927819";
+  const gcashName = profile.paymentGateways?.gcashName || "SwiftStream Telecom";
+  const contactMobile = profile.representative?.mobile || profile.paymentGateways?.gcashNumber || "09638927819";
+
+  // 2. Resolve Active MikroTik Router Credentials
+  let routerCreds = {
+    host: "remote.oxapsph.com",
+    port: 10988,
+    username: "admin",
+    password: "",
+  };
+
+  try {
+    const devicesSnap = await db.collection("mikrotik_devices").get();
+    if (!devicesSnap.empty) {
+      const primaryDevice =
+        devicesSnap.docs.find((d) => d.data().isDefault) ||
+        devicesSnap.docs.find((d) => d.data().status === "connected" || d.data().status === "active") ||
+        devicesSnap.docs[0];
+
+      if (primaryDevice) {
+        const devData = primaryDevice.data();
+        routerCreds = {
+          host: (devData.remoteAddress || devData.ipAddress || routerCreds.host).replace(/^https?:\/\//, "").replace(/\/.*$/, ""),
+          port: devData.port || devData.webfigPort || devData.apiPort || 10988,
+          username: devData.username || routerCreds.username,
+          password: devData.password !== undefined ? devData.password : routerCreds.password,
+        };
+      }
+    } else if (profile.apiKeys?.mikrotikIp) {
+      routerCreds = {
+        host: profile.apiKeys.mikrotikIp.replace(/^https?:\/\//, "").replace(/\/.*$/, ""),
+        port: profile.apiKeys.mikrotikPort || 10988,
+        username: profile.apiKeys.mikrotikUser || "admin",
+        password: profile.apiKeys.mikrotikPassword || "",
+      };
+    }
+  } catch (err) {
+    console.warn("[GraceAudit] Router lookup warning:", err.message);
+  }
+
+  const isHttps = Number(routerCreds.port) === 443;
+  const routerProtocol = isHttps ? "https" : "http";
+  const routerBaseUrl = `${routerProtocol}://${routerCreds.host}:${routerCreds.port}/rest`;
+  const routerAuth = { username: routerCreds.username, password: routerCreds.password };
+  const routerHeaders = { Accept: "application/json", "Content-Type": "application/json" };
+
+  // 3. Load Customers and Invoices from Firestore
+  let customers = [];
+  try {
+    const custSnap = await db.collection("customers").get();
+    customers = custSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  } catch (err) {
+    console.error("[GraceAudit] Failed to load customers:", err.message);
+    throw err;
+  }
+
+  let invoices = [];
+  try {
+    const invSnap = await db.collection("invoices").get();
+    invoices = invSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  } catch (err) {
+    console.error("[GraceAudit] Failed to load invoices:", err.message);
+    throw err;
+  }
+
+  let plans = [];
+  try {
+    const planSnap = await db.collection("plans").get();
+    plans = planSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  } catch (_) {}
+
+  // Filter open (unpaid or overdue) invoices
+  const openInvoices = invoices.filter((inv) => inv.status === "unpaid" || inv.status === "overdue");
+
+  let isolatedCount = 0;
+  let graceCount = 0;
+  let reactivatedCount = 0;
+  let smsSentCount = 0;
+  const auditDetails = [];
+
+  // 4. Audit each customer
+  for (const cust of customers) {
+    const custOpenInvoices = openInvoices.filter(
+      (inv) =>
+        inv.customerId === cust.id ||
+        (inv.accountNo && cust.accountNo && inv.accountNo.toLowerCase() === cust.accountNo.toLowerCase())
+    );
+
+    const custIp = cust.network?.ipAddress || "";
+    const pppUser = cust.network?.pppoeUsername || (cust.accountNo ? cust.accountNo.toLowerCase().replace(/[^a-z0-9]/g, "_") : "");
+    const custPlan = plans.find((p) => p.id === cust.planId) || plans[0] || { speedMbps: 25 };
+
+    // ── Case A: Account is zero balance and no open invoices -> Auto-reactivate ──
+    if (
+      custOpenInvoices.length === 0 &&
+      (cust.status === "overdue" || cust.status === "suspended") &&
+      Number(cust.balance || 0) <= 0
+    ) {
+      reactivatedCount++;
+      auditDetails.push(`Reactivated account ${cust.fullName} (${cust.accountNo}) - Zero Balance`);
+
+      // Update Firestore
+      try {
+        await db.collection("customers").doc(cust.id).update({
+          status: "active",
+          "network.isMikrotikSynced": true,
+          updatedAt: timestamp,
+        });
+      } catch (err) {
+        console.warn(`[GraceAudit] Failed to update customer ${cust.id} to active:`, err.message);
+      }
+
+      // RouterOS: Remove from NON_PAYMENT_ISOLATION
+      if (custIp) {
+        try {
+          const listRes = await axios.get(
+            `${routerBaseUrl}/ip/firewall/address-list?list=NON_PAYMENT_ISOLATION&address=${encodeURIComponent(custIp)}`,
+            { auth: routerAuth, headers: routerHeaders, timeout: 5000 }
+          );
+          const entries = Array.isArray(listRes.data) ? listRes.data : (listRes.data ? [listRes.data] : []);
+          for (const entry of entries) {
+            const entryId = entry[".id"] || entry.id;
+            if (entryId) {
+              await axios.delete(`${routerBaseUrl}/ip/firewall/address-list/${encodeURIComponent(entryId)}`, {
+                auth: routerAuth,
+                headers: routerHeaders,
+                timeout: 5000,
+              });
+            }
+          }
+        } catch (err) {
+          console.warn(`[GraceAudit] Router address-list remove warning for ${custIp}:`, err.message);
+        }
+      }
+
+      // RouterOS: Restore PPPoE profile and drop session
+      if (pppUser) {
+        try {
+          const secretRes = await axios.get(
+            `${routerBaseUrl}/ppp/secret?name=${encodeURIComponent(pppUser)}`,
+            { auth: routerAuth, headers: routerHeaders, timeout: 5000 }
+          );
+          const secrets = Array.isArray(secretRes.data) ? secretRes.data : (secretRes.data ? [secretRes.data] : []);
+          if (secrets.length > 0) {
+            const secId = secrets[0][".id"] || secrets[0].id;
+            await axios.patch(
+              `${routerBaseUrl}/ppp/secret/${encodeURIComponent(secId)}`,
+              { profile: `Plan-${custPlan.speedMbps}M`, disabled: "no", comment: `${cust.fullName} - PAID ACTIVE` },
+              { auth: routerAuth, headers: routerHeaders, timeout: 5000 }
+            );
+          }
+
+          const activeRes = await axios.get(
+            `${routerBaseUrl}/ppp/active?name=${encodeURIComponent(pppUser)}`,
+            { auth: routerAuth, headers: routerHeaders, timeout: 5000 }
+          );
+          const actives = Array.isArray(activeRes.data) ? activeRes.data : (activeRes.data ? [activeRes.data] : []);
+          for (const act of actives) {
+            const actId = act[".id"] || act.id;
+            if (actId) {
+              await axios.delete(`${routerBaseUrl}/ppp/active/${encodeURIComponent(actId)}`, {
+                auth: routerAuth,
+                headers: routerHeaders,
+                timeout: 5000,
+              });
+            }
+          }
+        } catch (err) {
+          console.warn(`[GraceAudit] Router PPPoE reactivate warning for ${pppUser}:`, err.message);
+        }
+      }
+      continue;
+    }
+
+    // ── Case B: Account has open invoices ──
+    if (custOpenInvoices.length > 0) {
+      let isPastGrace = false;
+      let isInGrace = false;
+      let maxDaysPast = 0;
+      let targetInvoice = custOpenInvoices[0];
+
+      for (const inv of custOpenInvoices) {
+        if (!inv.dueDate) continue;
+        const parts = inv.dueDate.split("-").map((v) => parseInt(v, 10));
+        const dueDateObj =
+          parts.length === 3 && !isNaN(parts[0]) && !isNaN(parts[1]) && !isNaN(parts[2])
+            ? new Date(parts[0], parts[1] - 1, parts[2], cutoffH, cutoffM, 59)
+            : new Date(inv.dueDate);
+
+        const graceExpiryTime = new Date(dueDateObj.getTime() + graceDays * 24 * 60 * 60 * 1000);
+        const daysPast = Math.floor((now.getTime() - dueDateObj.getTime()) / (1000 * 60 * 60 * 24));
+
+        if (now.getTime() > graceExpiryTime.getTime()) {
+          isPastGrace = true;
+          if (daysPast > maxDaysPast) {
+            maxDaysPast = daysPast;
+            targetInvoice = inv;
+          }
+        } else if (now.getTime() > dueDateObj.getTime()) {
+          isInGrace = true;
+          if (!targetInvoice) targetInvoice = inv;
+        }
+      }
+
+      // Sub-case B1: Past Grace Period -> Suspend & Isolate
+      if (isPastGrace && cust.status !== "suspended") {
+        isolatedCount++;
+        auditDetails.push(`Isolated account ${cust.fullName} (${cust.accountNo}) - ${maxDaysPast} days past due`);
+
+        // Update customer in Firestore
+        try {
+          await db.collection("customers").doc(cust.id).update({
+            status: "suspended",
+            "network.isMikrotikSynced": false,
+            updatedAt: timestamp,
+          });
+        } catch (err) {
+          console.warn(`[GraceAudit] Failed to set suspended on customer ${cust.id}:`, err.message);
+        }
+
+        // RouterOS: Add to NON_PAYMENT_ISOLATION
+        if (custIp) {
+          try {
+            await axios.put(
+              `${routerBaseUrl}/ip/firewall/address-list`,
+              {
+                list: "NON_PAYMENT_ISOLATION",
+                address: custIp,
+                comment: `${cust.fullName} - Overdue P${cust.balance || targetInvoice.balanceDue || 0}`,
+              },
+              { auth: routerAuth, headers: routerHeaders, timeout: 5000 }
+            );
+          } catch (err) {
+            console.warn(`[GraceAudit] Router address-list add warning for ${custIp}:`, err.message);
+          }
+        }
+
+        // RouterOS: Switch PPPoE secret profile to 'isolated' and kick session
+        if (pppUser) {
+          try {
+            const secretRes = await axios.get(
+              `${routerBaseUrl}/ppp/secret?name=${encodeURIComponent(pppUser)}`,
+              { auth: routerAuth, headers: routerHeaders, timeout: 5000 }
+            );
+            const secrets = Array.isArray(secretRes.data) ? secretRes.data : (secretRes.data ? [secretRes.data] : []);
+            if (secrets.length > 0) {
+              const secId = secrets[0][".id"] || secrets[0].id;
+              await axios.patch(
+                `${routerBaseUrl}/ppp/secret/${encodeURIComponent(secId)}`,
+                { profile: "isolated", disabled: "no", comment: `${cust.fullName} - OVERDUE ISOLATED` },
+                { auth: routerAuth, headers: routerHeaders, timeout: 5000 }
+              );
+            }
+
+            const activeRes = await axios.get(
+              `${routerBaseUrl}/ppp/active?name=${encodeURIComponent(pppUser)}`,
+              { auth: routerAuth, headers: routerHeaders, timeout: 5000 }
+            );
+            const actives = Array.isArray(activeRes.data) ? activeRes.data : (activeRes.data ? [activeRes.data] : []);
+            for (const act of actives) {
+              const actId = act[".id"] || act.id;
+              if (actId) {
+                await axios.delete(`${routerBaseUrl}/ppp/active/${encodeURIComponent(actId)}`, {
+                  auth: routerAuth,
+                  headers: routerHeaders,
+                  timeout: 5000,
+                });
+              }
+            }
+          } catch (err) {
+            console.warn(`[GraceAudit] Router PPPoE isolate warning for ${pppUser}:`, err.message);
+          }
+        }
+
+        // SMS Disconnection Notice
+        if (cust.mobile) {
+          const balanceFormatted = Number(cust.balance || targetInvoice.balanceDue || 0).toLocaleString();
+          const smsText =
+            `SWIFTSTREAM FINAL NOTICE: Dear ${cust.fullName}, account ${cust.accountNo} has been temporarily isolated due to unpaid balance of ₱${balanceFormatted}. Please settle via GCash ${gcashNumber} (${gcashName}) or contact ${contactMobile} for immediate reconnection.`;
+
+          const smsResult = await sendServerSms(cust.mobile, smsText, smsGateway);
+          if (smsResult.success) {
+            smsSentCount++;
+          }
+
+          // Save reminder log to Firestore
+          try {
+            await db.collection("reminders").add({
+              customerId: cust.id,
+              customerName: cust.fullName,
+              accountNo: cust.accountNo,
+              mobile: cust.mobile,
+              type: "disconnection_notice",
+              message: smsText,
+              channel: "sms",
+              status: smsResult.success ? "sent" : "failed",
+              invoiceId: targetInvoice.id,
+              createdAt: timestamp,
+            });
+          } catch (_) {}
+        }
+      } else if (isInGrace && cust.status === "active") {
+        // Sub-case B2: In Grace Period -> Update to overdue & send warning
+        graceCount++;
+        auditDetails.push(`Grace warning account ${cust.fullName} (${cust.accountNo}) - Due: ${targetInvoice.dueDate}`);
+
+        try {
+          await db.collection("customers").doc(cust.id).update({
+            status: "overdue",
+            updatedAt: timestamp,
+          });
+        } catch (err) {
+          console.warn(`[GraceAudit] Failed to set overdue on customer ${cust.id}:`, err.message);
+        }
+
+        if (cust.mobile) {
+          const balanceFormatted = Number(cust.balance || targetInvoice.balanceDue || 0).toLocaleString();
+          const smsText =
+            `SWIFTSTREAM OVERDUE NOTICE: Hi ${cust.fullName}, your account ${cust.accountNo} has an unpaid balance of ₱${balanceFormatted} (Due: ${targetInvoice.dueDate}). Please settle promptly via GCash ${gcashNumber} within the grace period to avoid service disruption.`;
+
+          const smsResult = await sendServerSms(cust.mobile, smsText, smsGateway);
+          if (smsResult.success) {
+            smsSentCount++;
+          }
+
+          try {
+            await db.collection("reminders").add({
+              customerId: cust.id,
+              customerName: cust.fullName,
+              accountNo: cust.accountNo,
+              mobile: cust.mobile,
+              type: "overdue_warning",
+              message: smsText,
+              channel: "sms",
+              status: smsResult.success ? "sent" : "failed",
+              invoiceId: targetInvoice.id,
+              createdAt: timestamp,
+            });
+          } catch (_) {}
+        }
+      }
+    }
+  }
+
+  // 5. Save System Audit Log
+  const summary = {
+    triggeredBy,
+    isolatedCount,
+    graceCount,
+    reactivatedCount,
+    smsSentCount,
+    timestamp,
+  };
+
+  try {
+    await db.collection("audit_logs").add({
+      userName: `System [${triggeredBy}]`,
+      action: "DAILY_GRACE_AUDIT_EXECUTED",
+      category: "network",
+      severity: isolatedCount > 0 ? "warning" : "info",
+      details: `Grace audit complete (${triggeredBy}). Isolated: ${isolatedCount}, In Grace: ${graceCount}, Reactivated: ${reactivatedCount}, SMS Sent: ${smsSentCount}.`,
+      status: "success",
+      metadata: summary,
+      createdAt: timestamp,
+    });
+  } catch (err) {
+    console.warn("[GraceAudit] Failed to write audit log:", err.message);
+  }
+
+  // 6. Notify Staff Channels
+  await sendStaffAlert(staffWebhooks, summary);
+
+  console.log(`[GraceAudit] Audit finished: ${isolatedCount} isolated, ${graceCount} in grace, ${reactivatedCount} reactivated, ${smsSentCount} SMS sent.`);
+
+  return {
+    success: true,
+    message: `Server grace audit executed successfully by ${triggeredBy}.`,
+    ...summary,
+    details: auditDetails,
+  };
+};
+
+/**
+ * Cloud Scheduler Midnight Cron: Runs daily at 00:00 (Asia/Manila)
+ */
+exports.dailyMidnightGraceAudit = onSchedule(
+  {
+    schedule: "0 0 * * *",
+    timeZone: "Asia/Manila",
+    region: "asia-southeast1",
+    memory: "512MiB",
+    timeoutSeconds: 300,
+  },
+  async (event) => {
+    try {
+      const result = await executeGraceAuditServerSide("Cloud Scheduler (00:00 PHT)");
+      console.log("[dailyMidnightGraceAudit] Completed:", result);
+      return result;
+    } catch (err) {
+      console.error("[dailyMidnightGraceAudit] Error:", err.message);
+      throw err;
+    }
+  }
+);
+
+/**
+ * On-Demand HTTP Trigger for Server-Side Grace Audit
+ * Enables administrators to trigger the exact same server-side logic from the web UI
+ */
+exports.triggerGraceAudit = onRequest(
+  { region: "asia-southeast1", cors: true },
+  async (req, res) => {
+    res.set("Access-Control-Allow-Origin", "*");
+    res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+    if (req.method === "OPTIONS") return res.status(204).send("");
+
+    try {
+      const triggeredBy = (req.body && req.body.triggeredBy) || (req.query && req.query.triggeredBy) || "Admin Web Console";
+      const result = await executeGraceAuditServerSide(triggeredBy);
+      return res.status(200).json(result);
+    } catch (err) {
+      console.error("[triggerGraceAudit] Error:", err.message);
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  }
+);
+
 
 

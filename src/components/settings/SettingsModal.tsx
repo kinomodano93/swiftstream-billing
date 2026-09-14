@@ -38,6 +38,7 @@ import {
   Image as ImageIcon,
   QrCode,
   ExternalLink,
+  Clock,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import {
@@ -147,6 +148,10 @@ export const SettingsModal: React.FC = () => {
     setBankName(businessProfile.paymentGateways.bankName || '');
     setBankAccountName(businessProfile.paymentGateways.bankAccountName || '');
     setBankAccountNumber(businessProfile.paymentGateways.bankAccountNumber || '');
+    setInvoiceGracePeriodDays(businessProfile.invoiceGracePeriodDays ?? 5);
+    setGracePeriodCutoffTime(businessProfile.gracePeriodCutoffTime || '23:59');
+    setDailyAuditScheduleTime(businessProfile.dailyAuditScheduleTime || '00:00');
+    setLateFeeAmount(businessProfile.lateFeeAmount ?? 50);
   }, [businessProfile]);
 
   // Address
@@ -157,6 +162,20 @@ export const SettingsModal: React.FC = () => {
   const [province, setProvince] = useState(businessProfile.address.province);
   const [zipCode, setZipCode] = useState(businessProfile.address.zipCode);
   const [landmark, setLandmark] = useState(businessProfile.address.landmark?.includes('Across Lagonoy Municipal Gymnasium') ? '' : (businessProfile.address.landmark || ''));
+
+  // Grace Period & Cloud Scheduler
+  const [invoiceGracePeriodDays, setInvoiceGracePeriodDays] = useState<number>(
+    businessProfile.invoiceGracePeriodDays ?? 5
+  );
+  const [gracePeriodCutoffTime, setGracePeriodCutoffTime] = useState<string>(
+    businessProfile.gracePeriodCutoffTime || '23:59'
+  );
+  const [dailyAuditScheduleTime, setDailyAuditScheduleTime] = useState<string>(
+    businessProfile.dailyAuditScheduleTime || '00:00'
+  );
+  const [lateFeeAmount, setLateFeeAmount] = useState<number>(
+    businessProfile.lateFeeAmount ?? 50
+  );
 
   // Payment Gateways
   const [gcashNumber, setGcashNumber] = useState(businessProfile.paymentGateways.gcashNumber);
@@ -466,6 +485,10 @@ export const SettingsModal: React.FC = () => {
         lastTestStatus: testResult?.success ? 'success' : testResult ? 'failed' : initialSmtp.lastTestStatus,
         lastTestedAt: testResult ? new Date().toISOString().replace('T', ' ').slice(0, 19) : initialSmtp.lastTestedAt,
       },
+      invoiceGracePeriodDays: Number(invoiceGracePeriodDays) || 5,
+      gracePeriodCutoffTime,
+      dailyAuditScheduleTime,
+      lateFeeAmount: Number(lateFeeAmount) || 0,
     });
   };
 
@@ -918,6 +941,105 @@ export const SettingsModal: React.FC = () => {
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-mono focus:border-cyan-500 focus:outline-none"
                     required
                   />
+                </div>
+              </div>
+
+              {/* Billing Policy, Grace Period & Cloud Scheduler Config */}
+              <div className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800/80 space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-800/60 pb-3">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 rounded-lg bg-purple-500/20 text-purple-400 border border-purple-500/30">
+                      <Clock className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-slate-200 text-xs sm:text-sm">
+                        Billing Grace Period & Cloud Scheduler Policy
+                      </h4>
+                      <p className="text-[11px] text-slate-400">
+                        Configure overdue grace duration, cut-off time, and automated midnight server isolation.
+                      </p>
+                    </div>
+                  </div>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                    SERVER-SYNCED
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div>
+                    <label className="block text-slate-400 mb-1 font-medium text-xs">
+                      Grace Period (Days) *
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={60}
+                      value={invoiceGracePeriodDays}
+                      onChange={(e) => setInvoiceGracePeriodDays(Math.max(1, parseInt(e.target.value) || 1))}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 font-mono focus:border-cyan-500 focus:outline-none"
+                      required
+                    />
+                    <span className="text-[10px] text-slate-500 mt-1 block">
+                      Days added to Due Date before auto-isolation
+                    </span>
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-400 mb-1 font-medium text-xs">
+                      Grace Cut-off Time *
+                    </label>
+                    <input
+                      type="time"
+                      value={gracePeriodCutoffTime}
+                      onChange={(e) => setGracePeriodCutoffTime(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 font-mono focus:border-cyan-500 focus:outline-none"
+                      required
+                    />
+                    <span className="text-[10px] text-slate-500 mt-1 block">
+                      Exact cut-off hour:minute on expiration day
+                    </span>
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-400 mb-1 font-medium text-xs">
+                      Daily Audit Schedule *
+                    </label>
+                    <input
+                      type="time"
+                      value={dailyAuditScheduleTime}
+                      onChange={(e) => setDailyAuditScheduleTime(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 font-mono focus:border-cyan-500 focus:outline-none"
+                      required
+                    />
+                    <span className="text-[10px] text-slate-500 mt-1 block">
+                      PHT (Asia/Manila) automated server cron
+                    </span>
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-400 mb-1 font-medium text-xs">
+                      Late Fee Surcharge (₱)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={lateFeeAmount}
+                      onChange={(e) => setLateFeeAmount(Math.max(0, parseFloat(e.target.value) || 0))}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 font-mono focus:border-cyan-500 focus:outline-none"
+                    />
+                    <span className="text-[10px] text-slate-500 mt-1 block">
+                      Surcharge appended to overdue accounts
+                    </span>
+                  </div>
+                </div>
+
+                <div className="p-2.5 rounded-xl bg-slate-900/60 border border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
+                    <span>
+                      Active Policy: Invoices expire at <strong className="text-slate-200">{gracePeriodCutoffTime || '23:59'}</strong> on Day <strong className="text-slate-200">+{invoiceGracePeriodDays || 5}</strong> after Due Date. Server audit triggers daily at <strong className="text-slate-200">{dailyAuditScheduleTime || '00:00'} PHT</strong>.
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>

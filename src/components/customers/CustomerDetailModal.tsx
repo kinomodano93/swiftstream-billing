@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X,
   User,
@@ -16,6 +16,11 @@ import {
   ShieldCheck,
   Zap,
   KeyRound,
+  Activity,
+  RefreshCw,
+  Power,
+  CheckCircle2,
+  AlertCircle,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import {
@@ -30,6 +35,14 @@ import {
 } from '../../utils/formatters';
 import { generateInvoicePDF, generateOfficialReceiptPDF } from '../../utils/pdfGenerator';
 import { ResetCustomerPasswordModal } from './ResetCustomerPasswordModal';
+import { SubscriberDiagnosticsModal } from '../network/SubscriberDiagnosticsModal';
+import {
+  syncSimpleQueue,
+  kickPppoeSession,
+  fetchPppoeActiveSessions,
+  PppoeActiveSessionItem,
+  MikrotikCredentials,
+} from '../../services/mikrotikApiService';
 
 interface CustomerDetailModalProps {
   customerId: string;
@@ -63,6 +76,7 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
     setSearchTerm,
     canAccessTab,
     systemRole,
+    mikrotikDevices,
   } = useApp();
 
   const [activeTab, setActiveTab] = useState<'profile' | 'invoices' | 'payments' | 'repairs'>('profile');
@@ -70,8 +84,81 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
   const [creditAmountInput, setCreditAmountInput] = useState<string>('');
   const [showPasswordResetModal, setShowPasswordResetModal] = useState<boolean>(false);
 
+  // MikroTik & Telemetry state
+  const [showDiagnosticsModal, setShowDiagnosticsModal] = useState<boolean>(false);
+  const [activeSession, setActiveSession] = useState<PppoeActiveSessionItem | null>(null);
+  const [isLoadingSession, setIsLoadingSession] = useState<boolean>(false);
+  const [isSyncingQueue, setIsSyncingQueue] = useState<boolean>(false);
+  const [isKickingSession, setIsKickingSession] = useState<boolean>(false);
+  const [actionNotice, setActionNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
   const customer = customers.find((c) => c.id === customerId);
+
+  const targetRouter =
+    mikrotikDevices?.find((d) => d.id === customer?.network?.mikrotikDeviceId || d.name === customer?.network?.mikrotikDeviceId) ||
+    mikrotikDevices?.find((d) => d.role === 'core_pppoe') ||
+    mikrotikDevices?.[0];
+
+  const routerCreds: MikrotikCredentials = {
+    id: targetRouter?.id,
+    name: targetRouter?.name || 'Core Router',
+    ipAddress: targetRouter?.remoteAddress || targetRouter?.ipAddress || 'remote.oxapsph.com',
+    port: targetRouter?.port || targetRouter?.webfigPort || 10988,
+    username: targetRouter?.username || 'admin',
+    password: targetRouter?.password || '',
+    useHttps: targetRouter?.useSsl || false,
+  };
+
+  const checkActiveSession = async () => {
+    if (!customer?.network?.pppoeUsername) return;
+    setIsLoadingSession(true);
+    try {
+      const res = await fetchPppoeActiveSessions(routerCreds);
+      if (res.success && Array.isArray(res.data)) {
+        const found = res.data.find(
+          (s) => (s.username || (s as any).name)?.toLowerCase() === customer.network.pppoeUsername.toLowerCase()
+        );
+        setActiveSession(found || null);
+      } else {
+        setActiveSession(null);
+      }
+    } catch (err) {
+      console.error('Failed to query PPPoE active sessions:', err);
+      setActiveSession(null);
+    } finally {
+      setIsLoadingSession(false);
+    }
+  };
+
+  useEffect(() => {
+    if (customer?.network?.pppoeUsername) {
+      checkActiveSession();
+    }
+  }, [customer?.id, customer?.network?.pppoeUsername]);
+
   if (!customer) return null;
+
+  const handleKickSession = async () => {
+    if (!customer.network?.pppoeUsername) return;
+    setIsKickingSession(true);
+    setActionNotice(null);
+    try {
+      const res = await kickPppoeSession(routerCreds, customer.network.pppoeUsername);
+      if (res.success) {
+        setActionNotice({ type: 'success', message: 'PPPoE session kicked. Subscriber ONT will re-authenticate.' });
+        setActiveSession(null);
+        setTimeout(() => {
+          checkActiveSession();
+        }, 3500);
+      } else {
+        setActionNotice({ type: 'error', message: res.details || 'Failed to kick PPPoE session.' });
+      }
+    } catch (err: any) {
+      setActionNotice({ type: 'error', message: err?.message || 'Error kicking PPPoE session' });
+    } finally {
+      setIsKickingSession(false);
+    }
+  };
 
   const handleAddCredit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -93,6 +180,43 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
                       plans[0];
   const activePlanName = matchedPlan?.name || customer.planName;
   const activeMonthlyFee = matchedPlan?.monthlyFee || customer.monthlyFee;
+
+  const handleSyncQueue = async () => {
+    if (!customer.network?.ipAddress) {
+      setActionNotice({ type: 'error', message: 'Assigned IP address is required to configure speed queues.' });
+      return;
+    }
+    setIsSyncingQueue(true);
+    setActionNotice(null);
+    try {
+      const planSpeed = matchedPlan?.speedMbps || 25;
+      const burstThreshold = Math.round(planSpeed * 0.85);
+      const burstRate = Math.round(planSpeed * 1.3);
+
+      const res = await syncSimpleQueue(routerCreds, {
+        name: `sub-${customer.network.pppoeUsername || customer.accountNo}`,
+        target: customer.network.ipAddress,
+        maxLimit: `${planSpeed}M/${planSpeed}M`,
+        burstLimit: `${burstRate}M/${burstRate}M`,
+        burstThreshold: `${burstThreshold}M/${burstThreshold}M`,
+        burstTime: '16s/16s',
+        comment: `Auto-queue for ${customer.fullName} (${customer.accountNo}) - Plan ${matchedPlan?.name || 'Custom'}`,
+      });
+
+      if (res.success) {
+        setActionNotice({
+          type: 'success',
+          message: `Simple Queue active: ${planSpeed}M/${planSpeed}M bandwidth limits enforced on ${targetRouter?.name || 'Core Router'}.`,
+        });
+      } else {
+        setActionNotice({ type: 'error', message: res.details || 'Failed to push Simple Queue.' });
+      }
+    } catch (err: any) {
+      setActionNotice({ type: 'error', message: err?.message || 'Error syncing speed limits' });
+    } finally {
+      setIsSyncingQueue(false);
+    }
+  };
 
   const statusBadge = getCustomerStatusBadge(customer.status);
 
@@ -173,12 +297,21 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
             {hasPermission('canAccessNetworkConfig') && (
               <button
                 onClick={() => syncCustomerMikrotik(customer.id)}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-600/20 text-purple-400 hover:bg-purple-600 hover:text-white rounded-lg font-semibold transition-colors"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-600/20 text-purple-400 hover:bg-purple-600 hover:text-white rounded-lg font-semibold transition-colors cursor-pointer"
               >
                 <Wifi className="w-3.5 h-3.5" />
                 <span>Sync Mikrotik</span>
               </button>
             )}
+
+            <button
+              onClick={() => setShowDiagnosticsModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-sky-600/20 text-sky-400 hover:bg-sky-600 hover:text-white rounded-lg font-semibold transition-colors cursor-pointer"
+              title="Ping, Traceroute & Realtime Latency Diagnostics"
+            >
+              <Activity className="w-3.5 h-3.5" />
+              <span>Line Diagnostics</span>
+            </button>
 
             <button
               onClick={() => setShowCreditInput((prev) => !prev)}
@@ -399,6 +532,219 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
                   </div>
                 </div>
               </div>
+
+              {/* MikroTik Live PPPoE Session Telemetry & Bandwidth Limiter */}
+              <div className="md:col-span-2 p-5 rounded-2xl bg-gradient-to-br from-slate-950/80 to-slate-900/80 border border-slate-800 space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+                      <Activity className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="font-semibold text-xs text-slate-200 uppercase tracking-wider flex items-center gap-2">
+                        Live PPPoE Session Telemetry & Speed Limiter
+                        <span className="text-[10px] font-normal px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700">
+                          {targetRouter?.name || 'MikroTik Core'}
+                        </span>
+                      </h4>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        Realtime session status via RouterOS API & automatic Simple Queue bandwidth shaping
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={checkActiveSession}
+                      disabled={isLoadingSession}
+                      className="flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium transition-colors disabled:opacity-50 cursor-pointer"
+                      title="Refresh Session Status"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${isLoadingSession ? 'animate-spin text-cyan-400' : ''}`} />
+                      <span>{isLoadingSession ? 'Checking...' : 'Refresh'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowDiagnosticsModal(true)}
+                      className="flex items-center gap-1.5 px-3 py-1 text-xs rounded-lg bg-sky-600/20 hover:bg-sky-600 text-sky-300 hover:text-white font-semibold transition-colors border border-sky-500/30 cursor-pointer"
+                    >
+                      <Activity className="w-3 h-3" />
+                      <span>1-Click Ping & Traceroute</span>
+                    </button>
+                  </div>
+                </div>
+
+                {actionNotice && (
+                  <div
+                    className={`p-3 rounded-xl text-xs flex items-center gap-2 ${
+                      actionNotice.type === 'success'
+                        ? 'bg-emerald-950/40 border border-emerald-800/60 text-emerald-300'
+                        : 'bg-rose-950/40 border border-rose-800/60 text-rose-300'
+                    }`}
+                  >
+                    {actionNotice.type === 'success' ? (
+                      <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+                    ) : (
+                      <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+                    )}
+                    <span>{actionNotice.message}</span>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                  {/* Active Session Status */}
+                  <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between space-y-3">
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400 font-medium">Session Status</span>
+                        {activeSession ? (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                            <span>ONLINE</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-slate-800 text-slate-400 border border-slate-700">
+                            <span className="w-2 h-2 rounded-full bg-slate-500" />
+                            <span>OFFLINE</span>
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-3 space-y-1.5">
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Active Uptime:</span>
+                          <span className="font-mono text-slate-200">{activeSession?.uptime || '—'}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Service:</span>
+                          <span className="font-mono text-cyan-400">{activeSession?.service || 'pppoe'}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Assigned IP:</span>
+                          <span className="font-mono text-slate-200">
+                            {activeSession?.assignedIp || (activeSession as any)?.address || customer.network?.ipAddress || '—'}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Caller-ID / MAC:</span>
+                          <span className="font-mono text-slate-300 truncate max-w-[140px]" title={activeSession?.callerIdMac || (activeSession as any)?.['caller-id'] || 'N/A'}>
+                            {activeSession?.callerIdMac || (activeSession as any)?.['caller-id'] || '—'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {activeSession && (
+                      <button
+                        type="button"
+                        onClick={handleKickSession}
+                        disabled={isKickingSession}
+                        className="w-full mt-2 flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-rose-600/20 hover:bg-rose-600 text-rose-300 hover:text-white font-medium transition-colors border border-rose-500/30 disabled:opacity-50 cursor-pointer"
+                        title="Force disconnect PPPoE tunnel to force ONT re-authentication"
+                      >
+                        <Power className="w-3.5 h-3.5" />
+                        <span>{isKickingSession ? 'Disconnecting...' : 'Kick / Reconnect Tunnel'}</span>
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Speed Limit & Queue Sync */}
+                  <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between space-y-3">
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400 font-medium">Automatic Speed Limiter</span>
+                        <span className="text-[10px] font-mono text-cyan-400 bg-cyan-950/60 px-2 py-0.5 rounded border border-cyan-800/40">
+                          Simple Queue
+                        </span>
+                      </div>
+                      <div className="mt-3 space-y-1.5">
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Plan Speed:</span>
+                          <span className="font-semibold text-slate-200">
+                            {matchedPlan?.speedMbps || 25} Mbps Down / {matchedPlan?.speedMbps || 25} Mbps Up
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Burst Profile:</span>
+                          <span className="font-mono text-emerald-400">
+                            {Math.round((matchedPlan?.speedMbps || 25) * 1.3)}M Burst (16s)
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Target Queue:</span>
+                          <span className="font-mono text-slate-300">
+                            {customer.network?.ipAddress ? `${customer.network.ipAddress}/32` : 'No IP'}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">PPPoE Profile:</span>
+                          <span className="font-mono text-slate-300 truncate max-w-[130px]" title={matchedPlan?.mikrotikProfile || 'default'}>
+                            {matchedPlan?.mikrotikProfile || 'default'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleSyncQueue}
+                      disabled={isSyncingQueue || !customer.network?.ipAddress}
+                      className="w-full mt-2 flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold transition-colors disabled:opacity-50 cursor-pointer"
+                      title="Push /queue/simple rule matching this customer's plan bandwidth"
+                    >
+                      <Zap className={`w-3.5 h-3.5 ${isSyncingQueue ? 'animate-bounce' : ''}`} />
+                      <span>{isSyncingQueue ? 'Syncing Queue...' : 'Sync Speed Queue'}</span>
+                    </button>
+                  </div>
+
+                  {/* Diagnostics & Line Quality Quick Card */}
+                  <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between space-y-3">
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400 font-medium">Line Health & Fiber Specs</span>
+                        <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/40">
+                          Optical Link
+                        </span>
+                      </div>
+                      <div className="mt-3 space-y-1.5">
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Optical Rx Power:</span>
+                          <span className="font-mono font-bold text-emerald-400">
+                            {customer.network.opticalPowerDbm || customer.installationDetails?.opticalPowerDbm || -18.5} dBm
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Drop Cable:</span>
+                          <span className="font-mono text-slate-300">
+                            {customer.installationDetails?.dropCableMeters || 120} meters
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Target ONU / Host:</span>
+                          <span className="font-mono text-slate-200">
+                            {customer.network.ipAddress || '192.168.10.100'}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Core Gateway:</span>
+                          <span className="font-mono text-slate-300 truncate max-w-[130px]">
+                            {targetRouter?.remoteAddress || targetRouter?.ipAddress || '192.168.88.1'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowDiagnosticsModal(true)}
+                      className="w-full mt-2 flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-sky-300 font-semibold transition-colors border border-slate-700 cursor-pointer"
+                    >
+                      <Activity className="w-3.5 h-3.5" />
+                      <span>Open ICMP & Trace Console</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 
@@ -600,7 +946,16 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
         isOpen={showPasswordResetModal}
         onClose={() => setShowPasswordResetModal(false)}
       />
+
+      {/* Line Diagnostics Modal (Ping & Traceroute) */}
+      <SubscriberDiagnosticsModal
+        isOpen={showDiagnosticsModal}
+        onClose={() => setShowDiagnosticsModal(false)}
+        customer={customer}
+        device={targetRouter}
+      />
     </div>
   );
 };
+
 

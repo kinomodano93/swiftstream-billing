@@ -6,6 +6,12 @@ import {
   Copy,
   Check,
   Terminal,
+  Clock,
+  Zap,
+  ShieldAlert,
+  RefreshCw,
+  Sliders,
+  CheckCircle2,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import {
@@ -20,9 +26,15 @@ interface MikrotikSstpModalProps {
 }
 
 export const MikrotikSstpModal: React.FC<MikrotikSstpModalProps> = ({ isOpen, onClose }) => {
-  const { businessProfile, customers, plans } = useApp();
+  const { businessProfile, customers, plans, triggerServerGraceAudit, updateBusinessProfile, showToast } = useApp();
   const [activeTab, setActiveTab] = useState<'pppoe' | 'isolation' | 'bootstrap'>('pppoe');
   const [copiedType, setCopiedType] = useState<string | null>(null);
+  const [isServerAuditing, setIsServerAuditing] = useState<boolean>(false);
+  const [isEditingGrace, setIsEditingGrace] = useState<boolean>(false);
+  const [quickGraceDays, setQuickGraceDays] = useState<number>(businessProfile.invoiceGracePeriodDays ?? 5);
+  const [quickCutoffTime, setQuickCutoffTime] = useState<string>(businessProfile.gracePeriodCutoffTime || '23:59');
+  const [quickDailySchedule, setQuickDailySchedule] = useState<string>(businessProfile.dailyAuditScheduleTime || '00:00');
+  const [isSavingGrace, setIsSavingGrace] = useState<boolean>(false);
 
   if (!isOpen) return null;
 
@@ -32,7 +44,10 @@ export const MikrotikSstpModal: React.FC<MikrotikSstpModalProps> = ({ isOpen, on
   const activeCustomers = customers.filter((c) => c.status === 'active');
 
   const pppoeScript = generatePppoeBatchScript(customers, plans, businessProfile);
-  const isolationScript = generateIsolationScript(customers);
+  const isolationScript = generateIsolationScript(
+    customers,
+    businessProfile?.portalDomain || businessProfile?.websiteUrl
+  );
   const fullRouterScript = generateFullRouterConfigScript(businessProfile, plans);
 
   const handleCopy = (text: string, type: string) => {
@@ -150,6 +165,171 @@ export const MikrotikSstpModal: React.FC<MikrotikSstpModalProps> = ({ isOpen, on
           {/* Tab 2: Isolation */}
           {activeTab === 'isolation' && (
             <div className="space-y-4">
+              {/* Automated Cloud Scheduler Status Banner */}
+              <div className="p-4 rounded-2xl bg-gradient-to-r from-purple-950/40 via-indigo-950/30 to-slate-900 border border-purple-500/30 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-start gap-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center shrink-0 mt-0.5">
+                      <Clock className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-bold text-purple-300">Automated Server Cloud Scheduler</span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                          Active • {businessProfile.dailyAuditScheduleTime || '00:00'} Asia/Manila (PHT)
+                        </span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-mono text-purple-300 bg-purple-500/10 border border-purple-500/20">
+                          {businessProfile.invoiceGracePeriodDays || 5} Days Grace @ {businessProfile.gracePeriodCutoffTime || '23:59'}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        Server automatically evaluates overdue invoices ({businessProfile.invoiceGracePeriodDays || 5}-day grace expiring at {businessProfile.gracePeriodCutoffTime || '23:59'}), isolates non-paying ONT lines, and sends SMS notices even when no admin is logged in.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingGrace(!isEditingGrace)}
+                      className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all border ${
+                        isEditingGrace
+                          ? 'bg-purple-900/60 border-purple-400 text-purple-200'
+                          : 'bg-slate-800/80 hover:bg-slate-700 border-slate-700 text-slate-300'
+                      }`}
+                      title="Quick edit grace days, cut-off hour, and cron schedule"
+                    >
+                      <Sliders className="w-3.5 h-3.5" />
+                      <span>{isEditingGrace ? 'Close Policy' : 'Edit Policy'}</span>
+                    </button>
+
+                    <button
+                      onClick={async () => {
+                        setIsServerAuditing(true);
+                        try {
+                          await triggerServerGraceAudit();
+                        } finally {
+                          setIsServerAuditing(false);
+                        }
+                      }}
+                      disabled={isServerAuditing}
+                      className="flex items-center justify-center gap-1.5 px-3 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-bold shadow-md shadow-purple-600/20 transition-all hover:scale-105 shrink-0 disabled:opacity-50"
+                      title="Trigger immediate server-side grace audit across Firestore and RouterOS"
+                    >
+                      {isServerAuditing ? (
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin text-purple-200" />
+                      ) : (
+                        <Zap className="w-3.5 h-3.5 text-amber-300" />
+                      )}
+                      <span>{isServerAuditing ? 'Executing...' : 'Run Server Audit Now'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Inline Quick Policy Editor */}
+                {isEditingGrace && (
+                  <div className="p-3.5 rounded-xl bg-slate-950/90 border border-purple-500/40 space-y-3 animate-in fade-in">
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                      <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                        <Sliders className="w-3.5 h-3.5 text-purple-400" />
+                        Quick Policy Settings: Grace Period & Cut-Off Schedule
+                      </span>
+                      <span className="text-[10px] text-slate-400">Syncs directly to Firestore & Cloud Functions</span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-medium text-slate-400 mb-1">
+                          Grace Period (Days)
+                        </label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={60}
+                          value={quickGraceDays}
+                          onChange={(e) => setQuickGraceDays(Math.max(1, parseInt(e.target.value) || 1))}
+                          className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-slate-100 font-mono text-xs focus:border-purple-500 focus:outline-none"
+                        />
+                        <span className="text-[10px] text-slate-500 mt-0.5 block">
+                          Days added after invoice due date
+                        </span>
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-medium text-slate-400 mb-1">
+                          Grace Cut-off Time
+                        </label>
+                        <input
+                          type="time"
+                          value={quickCutoffTime}
+                          onChange={(e) => setQuickCutoffTime(e.target.value)}
+                          className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-slate-100 font-mono text-xs focus:border-purple-500 focus:outline-none"
+                        />
+                        <span className="text-[10px] text-slate-500 mt-0.5 block">
+                          Daily hour on expiration day (e.g. 23:59 or 17:00)
+                        </span>
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-medium text-slate-400 mb-1">
+                          Daily Audit Schedule (PHT)
+                        </label>
+                        <input
+                          type="time"
+                          value={quickDailySchedule}
+                          onChange={(e) => setQuickDailySchedule(e.target.value)}
+                          className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-slate-100 font-mono text-xs focus:border-purple-500 focus:outline-none"
+                        />
+                        <span className="text-[10px] text-slate-500 mt-0.5 block">
+                          Cloud Scheduler midnight cron time
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-1 border-t border-slate-800/80">
+                      <p className="text-[10px] text-slate-400">
+                        Active calculation rule: Invoices expire at <strong>{quickCutoffTime}</strong> on Day <strong>+{quickGraceDays}</strong>.
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setIsEditingGrace(false)}
+                          className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isSavingGrace}
+                          onClick={async () => {
+                            setIsSavingGrace(true);
+                            try {
+                              updateBusinessProfile({
+                                invoiceGracePeriodDays: Number(quickGraceDays) || 5,
+                                gracePeriodCutoffTime: quickCutoffTime || '23:59',
+                                dailyAuditScheduleTime: quickDailySchedule || '00:00',
+                              });
+                              showToast(
+                                'success',
+                                'Grace Policy Saved',
+                                `Set to ${quickGraceDays} days (cutoff: ${quickCutoffTime}, daily audit: ${quickDailySchedule} PHT).`
+                              );
+                              setIsEditingGrace(false);
+                            } finally {
+                              setIsSavingGrace(false);
+                            }
+                          }}
+                          className="flex items-center gap-1.5 px-3 py-1 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs font-bold shadow-md shadow-purple-600/20"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>Save & Apply Policy</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <span className="font-bold text-slate-200 block">

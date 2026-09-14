@@ -99,7 +99,7 @@ export const initialBusinessProfile: BusinessProfile = {
   apiKeys: {
     resend: '',
     sendgrid: '',
-    smsApiKey: 'SMS-SWIFT-KEY-DEMO-99182',
+    smsApiKey: '',
     mikrotikIp: '192.168.88.1',
     mikrotikUser: 'admin',
     mikrotikPassword: '',
@@ -108,21 +108,21 @@ export const initialBusinessProfile: BusinessProfile = {
   },
   smsGateway: {
     provider: 'semaphore',
-    apiKey: 'semi_live_9a812b489c10293847',
+    apiKey: '',
     senderName: 'SWIFTSTREAM',
     philsmsSenderId: 'SWIFTSTREAM',
-    twilioAccountSid: 'AC_mock_twilio_991827461',
+    twilioAccountSid: '',
     twilioAuthToken: '',
-    twilioFromNumber: '+12055550199',
-    enabled: true,
-    lastTestedAt: '2026-08-28 14:20:00',
+    twilioFromNumber: '',
+    enabled: false,
+    lastTestedAt: '',
   },
   staffWebhooks: {
-    telegramEnabled: true,
-    telegramBotToken: 'bot6829104812:AAHk91jKq881_demo_token',
-    telegramChatId: '-1001928471920',
-    discordEnabled: true,
-    discordWebhookUrl: 'https://discord.com/api/webhooks/120938471928471/demo_webhook_swiftstream_noc',
+    telegramEnabled: false,
+    telegramBotToken: '',
+    telegramChatId: '',
+    discordEnabled: false,
+    discordWebhookUrl: '',
     notifyOnOutage: true,
     notifyOnCashierRemittance: true,
     notifyOnTelemetryWatchdog: true,
@@ -150,6 +150,8 @@ export const initialBusinessProfile: BusinessProfile = {
   currencySymbol: '₱',
   currencyCode: 'PHP',
   invoiceGracePeriodDays: 5,
+  gracePeriodCutoffTime: '23:59',
+  dailyAuditScheduleTime: '00:00',
   lateFeeAmount: 50,
 };
 
@@ -164,6 +166,8 @@ export const initialPlans: Plan[] = [
     description: 'Ultra High-Speed Dedicated Fiber with Symmetric 1:1 CIR for Heavy Business Operations & Cyber Cafes.',
     features: ['500 Mbps Symmetric Dedicated', 'Static Public IPv4', '24/7 Priority VIP Support', '99.9% SLA Guarantee', 'Dual WAN Failover Ready', 'Standard Installation: ₱1,500'],
     isActive: true,
+    mikrotikProfile: 'plan-500m',
+    isPublic: true,
   },
   {
     id: 'plan-fiber-pro-100',
@@ -175,6 +179,8 @@ export const initialPlans: Plan[] = [
     description: 'Optimal for remote work, 4K streaming, multi-device homes, and content creators.',
     features: ['100 Mbps Unlimited Fiber', 'Dual-Band WiFi 6 ONU', 'Standard Installation: ₱1,500', 'Low-Latency Gaming Route'],
     isActive: true,
+    mikrotikProfile: 'plan-100m',
+    isPublic: true,
   },
   {
     id: 'plan-home-turbo-50',
@@ -186,6 +192,8 @@ export const initialPlans: Plan[] = [
     description: 'High-speed household favorite for smooth streaming, Zoom, and social media.',
     features: ['50 Mbps Unlimited Fiber', 'Dual-Band Gigabit ONU', 'Unlimited Data No Cap', '24/7 Customer Hotline', 'Standard Installation: ₱1,500'],
     isActive: true,
+    mikrotikProfile: 'plan-50m',
+    isPublic: true,
   },
   {
     id: 'plan-starter-25',
@@ -197,6 +205,8 @@ export const initialPlans: Plan[] = [
     description: 'Budget-friendly fiber package for students, small households, and light surfing.',
     features: ['25 Mbps Unlimited Fiber', 'Standard Fiber Router', 'Zero Data Cap', 'Standard Installation: ₱1,500'],
     isActive: true,
+    mikrotikProfile: 'plan-25m',
+    isPublic: true,
   },
   {
     id: 'plan-biz-giga-200',
@@ -208,6 +218,8 @@ export const initialPlans: Plan[] = [
     description: 'Enterprise grade connection designed for offices, resorts, hotels, and retail stores.',
     features: ['200 Mbps Fiber', '2 Static IP addresses', 'Priority Field Support', 'Dual-Band Mesh System', 'Standard Installation: ₱1,500'],
     isActive: true,
+    mikrotikProfile: 'plan-200m',
+    isPublic: true,
   },
   {
     id: 'plan-piso-wifi',
@@ -219,6 +231,8 @@ export const initialPlans: Plan[] = [
     description: 'Dedicated high-burst bandwidth feeder line for coin-operated outdoor WiFi vending machines.',
     features: ['80 Mbps High-Burst Queue', 'Outdoor AP Compatible', 'Isolated VLAN', 'Bandwidth Limiter Support', 'Standard Installation: ₱1,500'],
     isActive: true,
+    mikrotikProfile: 'plan-80m-vendo',
+    isPublic: true,
   },
 ];
 

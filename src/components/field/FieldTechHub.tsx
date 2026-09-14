@@ -133,7 +133,7 @@ export const FieldTechHub: React.FC = () => {
       contractMonths: 24,
       network: {
         pppoeUsername: `swift_user_${randomNum}`,
-        ipAddress: `192.168.10.${Math.floor(50 + Math.random() * 150)}`,
+        ipAddress: '',
         napBoxId: napBoxes[0]?.id || 'NAP-01',
         napPortNumber: Math.floor(1 + Math.random() * 8),
         isMikrotikSynced: false,
@@ -660,7 +660,7 @@ export const FieldTechHub: React.FC = () => {
                                     advanceDeposit: 0,
                                     network: {
                                       pppoeUsername: ticket.customerId || 'subscriber',
-                                      ipAddress: '192.168.10.100',
+                                      ipAddress: '',
                                       napBoxId: napBoxes[0]?.id || 'NAP-01',
                                       napPortNumber: 1,
                                       opticalPowerDbm: -19.0,

@@ -19,6 +19,7 @@ import {
   Layers,
   Clock,
   Lock,
+  RefreshCw,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { Invoice, InvoiceStatus, Payment } from '../../types';
@@ -54,6 +55,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
     deleteInvoice,
     sendReminder,
     runDailyGraceAudit,
+    triggerServerGraceAudit,
     searchTerm,
     setSearchTerm,
     setActiveTab,
@@ -64,6 +66,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
 
   const [activeBillingTab, setActiveBillingTab] = useState<'invoices' | 'remittances' | 'grace_audit'>('invoices');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [isAuditing, setIsAuditing] = useState(false);
 
   // Thermal Receipt Modal State
   const [selectedPaymentForThermal, setSelectedPaymentForThermal] = useState<{
@@ -145,12 +148,24 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
         <div className="flex flex-wrap items-center gap-2.5">
           {hasPermission('canRunGraceAudit') && (
             <button
-              onClick={() => runDailyGraceAudit()}
-              className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold transition-all hover:scale-105"
-              title="Evaluate 5-day grace period, auto-isolate overdue accounts, and unsuspend paid accounts"
+              onClick={async () => {
+                setIsAuditing(true);
+                try {
+                  await triggerServerGraceAudit();
+                } finally {
+                  setIsAuditing(false);
+                }
+              }}
+              disabled={isAuditing}
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-purple-950/60 to-slate-800 hover:from-purple-900/70 hover:to-slate-700 text-purple-200 border border-purple-500/40 rounded-xl text-xs font-semibold transition-all hover:scale-105 disabled:opacity-50"
+              title={`Cloud Scheduler runs daily at ${businessProfile.dailyAuditScheduleTime || '00:00'} PHT (${businessProfile.invoiceGracePeriodDays || 5}-day grace @ ${businessProfile.gracePeriodCutoffTime || '23:59'}). Click to execute live audit across Firestore & MikroTik Core immediately.`}
             >
-              <ShieldCheck className="w-4 h-4 text-emerald-400" />
-              <span>Run Daily Grace Audit</span>
+              {isAuditing ? (
+                <RefreshCw className="w-4 h-4 text-purple-300 animate-spin" />
+              ) : (
+                <ShieldCheck className="w-4 h-4 text-emerald-400" />
+              )}
+              <span>{isAuditing ? 'Auditing Server...' : 'Run Server Grace Audit'}</span>
             </button>
           )}
 

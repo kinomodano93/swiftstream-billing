@@ -194,8 +194,8 @@ export const ClientApplicationManager: React.FC = () => {
         advanceDeposit: 0,
         network: {
           pppoeUsername: `swift_${app.applicantName.toLowerCase().replace(/[^a-z0-9]/g, '')}`,
-          ipAddress: `10.200.14.${Math.floor(10 + Math.random() * 200)}`,
-          napBoxId: assignedNap?.id || 'nap-01',
+          ipAddress: '',
+          napBoxId: assignedNap?.id || (napBoxes[0]?.id || ''),
           napPortNumber: 1,
           isMikrotikSynced: false,
         },
@@ -737,11 +737,19 @@ export const ClientApplicationManager: React.FC = () => {
                   onChange={(e) => setNewPlanId(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 font-medium"
                 >
-                  {plans.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} ({p.speedMbps} Mbps) — ₱{p.monthlyFee}/month
-                    </option>
-                  ))}
+                  {plans
+                    .filter(
+                      (p) =>
+                        p.category !== 'internal' &&
+                        !p.name?.toLowerCase().includes('router profile') &&
+                        !p.description?.toLowerCase().includes('imported from mikrotik') &&
+                        !p.features?.some((f) => f.toLowerCase().includes('routeros profile'))
+                    )
+                    .map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} ({p.speedMbps} Mbps) — ₱{p.monthlyFee}/month
+                      </option>
+                    ))}
                 </select>
               </div>
 

@@ -96,10 +96,20 @@ export const HomePage: React.FC<HomePageProps> = ({
     return [...lagonoyList, ...presentacionList];
   }, [lagonoyList, presentacionList]);
 
+  const isExcludedFromPublic = (p: Plan) => {
+    if (p.isPublic === false) return true;
+    if (p.category === 'internal') return true;
+    if (p.name?.toLowerCase().includes('router profile')) return true;
+    if (p.description?.toLowerCase().includes('imported from mikrotik')) return true;
+    if (p.features?.some((f) => f.toLowerCase().includes('routeros profile'))) return true;
+    return false;
+  };
+
   // Filter & sort plans: prioritize residential plans first, and sort by monthly fee ascending
   const filteredPlans = useMemo(() => {
     return plans
       .filter((p) => {
+        if (isExcludedFromPublic(p)) return false;
         if (!p.isActive && p.isActive !== undefined) return false;
         if (selectedCategory === 'all') return true;
         if (selectedCategory === 'residential') return p.category === 'residential';
@@ -118,7 +128,9 @@ export const HomePage: React.FC<HomePageProps> = ({
   }, [plans, selectedCategory]);
   // Interactive Speed Matcher Calculator & Capacity Telemetry
   const speedCalculation = useMemo(() => {
-    const activePlans = plans.filter((p) => p.isActive !== false);
+    const activePlans = plans.filter(
+      (p) => p.isActive !== false && !isExcludedFromPublic(p)
+    );
     const sortedPlans = [...activePlans].sort(
       (a, b) => a.speedMbps - b.speedMbps || a.monthlyFee - b.monthlyFee
     );
@@ -672,19 +684,6 @@ export const HomePage: React.FC<HomePageProps> = ({
                       <p className="text-xs text-slate-400 mt-1">{plan.description}</p>
                     </div>
 
-                    {/* Speed Badge */}
-                    <div className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800/80 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Zap className="w-5 h-5 text-cyan-400" />
-                        <span className="font-mono text-2xl font-black text-cyan-400">
-                          {plan.speedMbps}
-                        </span>
-                        <span className="text-xs text-slate-400 font-bold">Mbps</span>
-                      </div>
-                      <span className="text-[10px] font-mono font-bold text-emerald-400 bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-800/50">
-                        Synchronous
-                      </span>
-                    </div>
 
                     {/* Price */}
                     <div>
