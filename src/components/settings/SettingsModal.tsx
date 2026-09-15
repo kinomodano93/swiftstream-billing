@@ -55,6 +55,7 @@ import { testSmtpConnection, SMTP_PRESETS } from '../../utils/smtpService';
 import { testSmsGatewayConnection } from '../../utils/smsSender';
 import { sendTelegramStaffAlert, sendDiscordStaffAlert, testWebhookIntegration } from '../../utils/webhookService';
 import { testGeminiApiKey } from '../../utils/geminiService';
+import { testGoogleDriveAccess, authorizeGoogleDriveWithPopup } from '../../services/routerBackupService';
 import { XenditGatewaySettings } from './XenditGatewaySettings';
 import { FirebaseSettingsCard } from './FirebaseSettingsCard';
 import { SsoWhitelistSettingsCard } from './SsoWhitelistSettingsCard';
@@ -152,6 +153,9 @@ export const SettingsModal: React.FC = () => {
     setGracePeriodCutoffTime(businessProfile.gracePeriodCutoffTime || '23:59');
     setDailyAuditScheduleTime(businessProfile.dailyAuditScheduleTime || '00:00');
     setLateFeeAmount(businessProfile.lateFeeAmount ?? 50);
+    setDriveEnabled(businessProfile.apiKeys?.googleDriveConfig?.enabled ?? false);
+    setDriveToken(businessProfile.apiKeys?.googleDriveConfig?.accessToken || '');
+    setDriveFolderId(businessProfile.apiKeys?.googleDriveConfig?.folderId || '');
   }, [businessProfile]);
 
   // Address
@@ -222,6 +226,115 @@ export const SettingsModal: React.FC = () => {
       setIsTestingGemini(false);
     }
   };
+
+  // Google Drive Cloud Backup State
+  const [driveEnabled, setDriveEnabled] = useState<boolean>(businessProfile.apiKeys?.googleDriveConfig?.enabled ?? false);
+  const [driveToken, setDriveToken] = useState<string>(businessProfile.apiKeys?.googleDriveConfig?.accessToken || '');
+  const [driveFolderId, setDriveFolderId] = useState<string>(businessProfile.apiKeys?.googleDriveConfig?.folderId || '');
+  const [driveUserEmail, setDriveUserEmail] = useState<string>(businessProfile.apiKeys?.googleDriveConfig?.userEmail || '');
+  const [showDriveToken, setShowDriveToken] = useState<boolean>(false);
+  const [isTestingDrive, setIsTestingDrive] = useState<boolean>(false);
+  const [isConnectingDrive, setIsConnectingDrive] = useState<boolean>(false);
+  const [driveTestResult, setDriveTestResult] = useState<{ success: boolean; message: string; email?: string } | null>(null);
+
+  const handleConnectGoogleDrive = async () => {
+    setIsConnectingDrive(true);
+    setDriveTestResult(null);
+    try {
+      const res = await authorizeGoogleDriveWithPopup();
+      if (res.success && res.accessToken) {
+        setDriveToken(res.accessToken);
+        setDriveEnabled(true);
+        if (res.userEmail) setDriveUserEmail(res.userEmail);
+        setDriveTestResult({
+          success: true,
+          message: res.message,
+          email: res.userEmail,
+        });
+
+        // Persist directly to businessProfile
+        updateBusinessProfile({
+          apiKeys: {
+            ...businessProfile.apiKeys,
+            googleDriveConfig: {
+              enabled: true,
+              accessToken: res.accessToken,
+              folderId: driveFolderId.trim(),
+              userEmail: res.userEmail,
+              connectedAt: new Date().toISOString(),
+            },
+          },
+        });
+      } else {
+        setDriveTestResult({
+          success: false,
+          message: res.message || 'Failed to authorize Google Drive.',
+        });
+      }
+    } catch (err: any) {
+      setDriveTestResult({
+        success: false,
+        message: err?.message || 'Error connecting to Google account.',
+      });
+    } finally {
+      setIsConnectingDrive(false);
+    }
+  };
+
+  const handleDisconnectGoogleDrive = () => {
+    if (window.confirm('Are you sure you want to disconnect Google Drive? Cloud backup synchronization will be disabled.')) {
+      setDriveToken('');
+      setDriveUserEmail('');
+      setDriveEnabled(false);
+      setDriveTestResult(null);
+      updateBusinessProfile({
+        apiKeys: {
+          ...businessProfile.apiKeys,
+          googleDriveConfig: {
+            enabled: false,
+            accessToken: '',
+            folderId: driveFolderId.trim(),
+            userEmail: '',
+          },
+        },
+      });
+    }
+  };
+
+  const handleTestDrive = async () => {
+    if (!driveToken.trim()) {
+      setDriveTestResult({ success: false, message: 'Please connect Google Drive or enter an OAuth2 token first.' });
+      return;
+    }
+    setIsTestingDrive(true);
+    setDriveTestResult(null);
+    try {
+      const res = await testGoogleDriveAccess(driveToken.trim());
+      setDriveTestResult(res);
+      if (res.email) setDriveUserEmail(res.email);
+    } catch (err: any) {
+      setDriveTestResult({ success: false, message: err?.message || 'Connection test failed.' });
+    } finally {
+      setIsTestingDrive(false);
+    }
+  };
+
+  const handleSaveGoogleDriveSettings = () => {
+    updateBusinessProfile({
+      apiKeys: {
+        ...businessProfile.apiKeys,
+        googleDriveConfig: {
+          enabled: driveEnabled,
+          accessToken: driveToken.trim(),
+          folderId: driveFolderId.trim(),
+          userEmail: driveUserEmail,
+          connectedAt: new Date().toISOString(),
+        },
+      },
+    });
+    alert('Google Drive backup settings saved successfully!');
+  };
+
 
   // SMS Gateway Configuration
   const [smsProvider, setSmsProvider] = useState<SmsProviderType>(businessProfile.smsGateway?.provider || 'semaphore');
@@ -448,6 +561,11 @@ export const SettingsModal: React.FC = () => {
         mikrotikPassword,
         geminiApiKey,
         geminiModel,
+        googleDriveConfig: {
+          enabled: driveEnabled,
+          accessToken: driveToken.trim(),
+          folderId: driveFolderId.trim(),
+        },
       },
       smsGateway: {
         provider: smsProvider,
@@ -2383,6 +2501,221 @@ export const SettingsModal: React.FC = () => {
                   <input type="file" accept=".json" onChange={handleFileUpload} className="hidden" />
                 </label>
               </div>
+            </div>
+
+            {/* Google Drive Automated Cloud Backups */}
+            <div className="p-5 rounded-2xl bg-slate-950/60 border border-slate-800 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-xl bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                    <Cloud className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h5 className="font-bold text-slate-100 text-sm flex items-center gap-2">
+                      Google Drive Cloud Backups (.rsc & .json)
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                        Zero-WAN Disaster Recovery
+                      </span>
+                    </h5>
+                    <p className="text-[11px] text-slate-400">
+                      Sync MikroTik .rsc router configurations and daily billing ledger backups directly to your Google Drive folder.
+                    </p>
+                  </div>
+                </div>
+
+                <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={driveEnabled}
+                    onChange={(e) => setDriveEnabled(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                </label>
+              </div>
+
+              {driveEnabled && (
+                <div className="space-y-4 pt-2 border-t border-slate-800/80">
+                  {/* 1. 1-Click Link to Google Account (Primary) */}
+                  <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-200 flex items-center gap-2">
+                        <span>Google Account Authorization</span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                          Recommended
+                        </span>
+                      </span>
+                      {driveUserEmail && (
+                        <span className="text-[10px] text-emerald-400 font-mono font-semibold flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                          Authenticated
+                        </span>
+                      )}
+                    </div>
+
+                    {driveUserEmail || (driveToken && !showDriveToken) ? (
+                      /* Connected Account Card */
+                      <div className="p-3.5 rounded-xl bg-emerald-950/30 border border-emerald-800/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-xl bg-white flex items-center justify-center p-1.5 shadow shrink-0">
+                            <svg className="w-5 h-5" viewBox="0 0 24 24">
+                              <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z"/>
+                              <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.34 24 12 24z"/>
+                              <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 10.02 0 12s.45 3.82 1.25 5.42l4.03-3.15z"/>
+                              <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.34 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/>
+                            </svg>
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-bold text-slate-100 font-mono">
+                                {driveUserEmail || 'Google Drive Connected'}
+                              </span>
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                                ✓ Connected
+                              </span>
+                            </div>
+                            <p className="text-[10px] text-slate-400 mt-0.5">
+                              Scope: <code className="text-blue-300">drive.file</code> (Creates and manages SwiftStream router backups only)
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={handleConnectGoogleDrive}
+                            disabled={isConnectingDrive}
+                            className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 text-xs font-semibold cursor-pointer transition-all flex items-center gap-1.5 disabled:opacity-50"
+                            title="Re-authorize with Google or refresh token"
+                          >
+                            <RefreshCw className={`w-3.5 h-3.5 ${isConnectingDrive ? 'animate-spin text-blue-400' : ''}`} />
+                            <span>{isConnectingDrive ? 'Authorizing...' : 'Re-link'}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleDisconnectGoogleDrive}
+                            className="px-3 py-1.5 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/50 text-rose-300 text-xs font-semibold cursor-pointer transition-all flex items-center gap-1.5"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>Disconnect</span>
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      /* Not Connected: 1-Click Link Button */
+                      <div className="p-4 rounded-xl bg-slate-950/80 border border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                        <div>
+                          <p className="text-xs text-slate-300 font-semibold">
+                            Link Google Account for Automated Disaster Recovery
+                          </p>
+                          <p className="text-[11px] text-slate-400 mt-0.5">
+                            Connect your Google Drive in 1 click. Zero manual API keys or copy-pasting tokens.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleConnectGoogleDrive}
+                          disabled={isConnectingDrive}
+                          className="flex items-center justify-center gap-2.5 px-4 py-2.5 bg-white hover:bg-slate-100 text-slate-900 rounded-xl font-bold text-xs shadow-md shadow-white/10 hover:shadow-white/20 transition-all cursor-pointer disabled:opacity-60 active:scale-95 shrink-0"
+                        >
+                          <svg className="w-4 h-4" viewBox="0 0 24 24">
+                            <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z"/>
+                            <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.34 24 12 24z"/>
+                            <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 10.02 0 12s.45 3.82 1.25 5.42l4.03-3.15z"/>
+                            <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.34 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/>
+                          </svg>
+                          <span>{isConnectingDrive ? 'Opening Google...' : 'Link with Google (1-Click)'}</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 2. Target Folder ID */}
+                  <div>
+                    <label className="block font-medium text-slate-300 mb-1">
+                      Target Google Drive Folder ID (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 1A2b3C4d5E6f7G8h9I0jKlMnOp"
+                      value={driveFolderId}
+                      onChange={(e) => setDriveFolderId(e.target.value)}
+                      className="w-full px-3.5 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs font-mono text-slate-200 focus:outline-none focus:border-blue-500"
+                    />
+                    <p className="text-[10px] text-slate-500 mt-1">
+                      Leave blank to save backups in your Google Drive root folder, or paste the folder ID from your Drive folder URL.
+                    </p>
+                  </div>
+
+                  {/* 3. Advanced Collapsible Manual Token Override */}
+                  <div className="pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setShowDriveToken(!showDriveToken)}
+                      className="text-[11px] text-slate-400 hover:text-slate-200 font-medium flex items-center gap-1 cursor-pointer"
+                    >
+                      <span>{showDriveToken ? '▼ Hide Manual Token Settings' : '▶ Advanced: Enter OAuth2 Token Manually'}</span>
+                    </button>
+
+                    {showDriveToken && (
+                      <div className="mt-2.5 p-3.5 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
+                        <label className="block font-medium text-slate-300 text-xs">
+                          Manual OAuth2 Bearer Token
+                        </label>
+                        <input
+                          type="password"
+                          placeholder="ya29.a0AfH6SM..."
+                          value={driveToken}
+                          onChange={(e) => setDriveToken(e.target.value)}
+                          className="w-full px-3.5 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs font-mono text-slate-200 focus:outline-none focus:border-blue-500"
+                        />
+                        <p className="text-[10px] text-slate-500">
+                          For custom Google Cloud service accounts or API test tokens.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 4. Connection Test Result Banner */}
+                  {driveTestResult && (
+                    <div
+                      className={`p-3 rounded-xl border flex items-center gap-2.5 text-xs ${
+                        driveTestResult.success
+                          ? 'bg-emerald-950/40 border-emerald-800 text-emerald-300'
+                          : 'bg-rose-950/40 border-rose-800 text-rose-300'
+                      }`}
+                    >
+                      {driveTestResult.success ? (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                      ) : (
+                        <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                      )}
+                      <span>{driveTestResult.message}</span>
+                    </div>
+                  )}
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-3 pt-2">
+                    <button
+                      type="button"
+                      disabled={isTestingDrive || !driveToken.trim()}
+                      onClick={handleTestDrive}
+                      className="flex items-center gap-2 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl font-semibold transition-colors disabled:opacity-50 cursor-pointer text-xs"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isTestingDrive ? 'animate-spin text-blue-400' : ''}`} />
+                      <span>{isTestingDrive ? 'Testing...' : 'Test Connection'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSaveGoogleDriveSettings}
+                      className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-semibold transition-colors cursor-pointer text-xs"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Save Drive Settings</span>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="p-5 rounded-2xl bg-rose-950/20 border border-rose-900/40 space-y-2 pt-4">

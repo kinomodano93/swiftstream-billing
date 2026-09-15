@@ -29,7 +29,7 @@ export const getDefaultWalledGardenSettings = (businessProfile?: BusinessProfile
     bankAccountName: businessProfile?.paymentGateways?.bankAccountName || '',
     supportPhone: businessProfile?.representative?.mobile || '09624171684',
     supportEmail: businessProfile?.representative?.email || 'billing@swiftstream.ph',
-    reconnectNotice: '✓ Instant Automatic Reconnection: Once your payment is verified, our core router automatically unblocks your line within 30 seconds.',
+    reconnectNotice: '⚡ Instant AI Settlement (10s): Upload your GCash/Maya transfer receipt on our portal for Gemini AI verification and 10-second automatic line reconnection.',
     footerNote: `${companyName} • ${city}, ${province} Operations`,
     enableCustomHtmlOverride: false,
     customHtmlOverride: '',
@@ -63,7 +63,7 @@ export const generateWalledGardenHtml = (
   const headline = settings?.headline || 'Internet Line Restricted';
   const description = settings?.description || 'Your high-speed fiber internet has been temporarily placed in Walled Garden isolation due to an overdue billing statement. Settle your balance via <strong>GCash</strong> or <strong>Maya</strong> below to restore your connection.';
   const portalButtonText = settings?.portalButtonText || 'Open SwiftStream Online Portal →';
-  const reconnectNotice = settings?.reconnectNotice || '✓ Instant Automatic Reconnection: Once your payment is verified, our core router automatically unblocks your line within 30 seconds.';
+  const reconnectNotice = settings?.reconnectNotice || '⚡ Instant AI Settlement (10s): Upload your GCash/Maya transfer receipt on our portal for Gemini AI verification and 10-second automatic line reconnection.';
   const footerNote = settings?.footerNote || `${companyName} • ${city}, ${province} Operations`;
 
   return `<!DOCTYPE html>

@@ -35,6 +35,11 @@ import {
   ArrowDownCircle,
   ArrowUpCircle,
   Maximize2,
+  Cloud,
+  Download,
+  UploadCloud,
+  ExternalLink,
+  FileCode,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -47,7 +52,7 @@ import {
   Tooltip,
 } from 'recharts';
 import { useApp } from '../../context/AppContext';
-import { MikrotikDevice } from '../../types';
+import { MikrotikDevice, RouterBackupRecord } from '../../types';
 import { ConfirmDeleteModal } from '../common/ConfirmDeleteModal';
 import {
   generatePppoeBatchScript,
@@ -65,6 +70,13 @@ import {
   RouterHealthInfo,
 } from '../../services/mikrotikApiService';
 import { PppoeManager } from './PppoeManager';
+import { RouterWatchdogWidget } from './RouterWatchdogWidget';
+import {
+  createRouterBackup,
+  getRouterBackupRecords,
+  deleteRouterBackupRecord,
+  downloadRouterBackupFile,
+} from '../../services/routerBackupService';
 
 // Detect dynamic PPPoE session interfaces in a raw RouterOS interface entry
 const isPppoeSessionIface = (i: any): boolean => {
@@ -137,7 +149,71 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({
     };
 
   // Streamlined Tabs
-  const [activeTab, setActiveTab] = useState<'overview' | 'interfaces' | 'pppoe_sessions' | 'pppoe' | 'queues' | 'fleet'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'interfaces' | 'pppoe_sessions' | 'pppoe' | 'queues' | 'fleet' | 'backups'>('overview');
+
+  // Router Backups & Google Drive State
+  const [routerBackups, setRouterBackups] = useState<RouterBackupRecord[]>(() =>
+    getRouterBackupRecords(selectedRouterId)
+  );
+  const [isCreatingBackup, setIsCreatingBackup] = useState<boolean>(false);
+  const [backupResult, setBackupResult] = useState<{
+    success: boolean;
+    message: string;
+    driveLink?: string;
+  } | null>(null);
+
+  useEffect(() => {
+    setRouterBackups(getRouterBackupRecords(selectedRouterId));
+  }, [selectedRouterId]);
+
+  const handleCreateBackup = async () => {
+    if (!selectedDevice) return;
+    setIsCreatingBackup(true);
+    setBackupResult(null);
+    try {
+      const creds = {
+        id: selectedDevice.id,
+        name: selectedDevice.name,
+        ipAddress: selectedDevice.ipAddress || selectedDevice.remoteAddress || '',
+        port: selectedDevice.port || selectedDevice.webfigPort || 80,
+        username: selectedDevice.username || 'admin',
+        password: selectedDevice.password || '',
+        useHttps: selectedDevice.port === 443 || selectedDevice.webfigPort === 443,
+      };
+
+      const result = await createRouterBackup(
+        creds,
+        selectedDevice,
+        businessProfile,
+        plans,
+        customers,
+        { backupType: 'manual' }
+      );
+
+      setRouterBackups(getRouterBackupRecords(selectedRouterId));
+      setBackupResult({
+        success: result.success,
+        message: result.message,
+        driveLink: result.googleDriveResult?.webViewLink,
+      });
+
+      if (result.success) {
+        showToast('success', 'Router Backup Created', result.message);
+      } else {
+        showToast('error', 'Backup Notice', result.message);
+      }
+    } catch (err: any) {
+      showToast('error', 'Backup Failed', err?.message || 'Failed to create backup.');
+    } finally {
+      setIsCreatingBackup(false);
+    }
+  };
+
+  const handleDeleteBackup = (id: string) => {
+    deleteRouterBackupRecord(id);
+    setRouterBackups(getRouterBackupRecords(selectedRouterId));
+    showToast('info', 'Backup Removed', 'Backup record deleted from local storage.');
+  };
 
   // Live Telemetry & Polling State
   const [isLiveStreaming, setIsLiveStreaming] = useState<boolean>(true);
@@ -1152,6 +1228,23 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({
           <Server className="w-4 h-4" />
           <span>Fleet Settings ({mikrotikDevices.length})</span>
         </button>
+
+        <button
+          onClick={() => setActiveTab('backups')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+            activeTab === 'backups'
+              ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/20'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+          }`}
+        >
+          <HardDrive className="w-4 h-4" />
+          <span>Cloud & Drive Backups</span>
+          {routerBackups.length > 0 && (
+            <span className="px-1.5 py-0.5 rounded-full bg-slate-950 text-cyan-300 text-[10px] font-mono font-bold">
+              {routerBackups.length}
+            </span>
+          )}
+        </button>
       </div>
 
       {/* 4. TAB CONTENTS */}
@@ -1159,6 +1252,13 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({
       {/* TAB 1: OVERVIEW & BANDWIDTH CHART */}
       {activeTab === 'overview' && (
         <div className="space-y-6">
+          {/* Router Hardware & WAN Watchdog Widget */}
+          <RouterWatchdogWidget
+            device={selectedDevice}
+            onTriggerBackup={handleCreateBackup}
+            liveLatency={currentLatency}
+          />
+
           {/* Main Bandwidth Monitor Card */}
           <div className="p-6 rounded-3xl bg-slate-900/90 border border-slate-800 shadow-2xl space-y-5">
             {/* NOC Header */}
@@ -2232,6 +2332,223 @@ export const MikrotikDeviceManager: React.FC<MikrotikDeviceManagerProps> = ({
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {/* TAB 6: ROUTER CONFIGURATION BACKUPS & GOOGLE DRIVE */}
+      {activeTab === 'backups' && (
+        <div className="space-y-6">
+          {/* Header */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2">
+                <Cloud className="w-5 h-5 text-cyan-400" />
+                Router Configuration Backups & Google Drive
+              </h2>
+              <p className="text-xs text-slate-400">
+                1-Click Disaster Recovery scripts (.rsc) with automatic Google Drive cloud sync
+              </p>
+            </div>
+            <button
+              onClick={handleCreateBackup}
+              disabled={isCreatingBackup}
+              className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-black rounded-xl text-xs transition-all shadow-lg shadow-cyan-500/20 disabled:opacity-50 cursor-pointer"
+            >
+              {isCreatingBackup ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin text-slate-950" />
+                  <span>Generating Backup & Syncing...</span>
+                </>
+              ) : (
+                <>
+                  <UploadCloud className="w-4 h-4 text-slate-950" />
+                  <span>Create Backup (.RSC)</span>
+                </>
+              )}
+            </button>
+          </div>
+
+          {/* Backup Notice / Result Alert */}
+          {backupResult && (
+            <div
+              className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs ${
+                backupResult.success
+                  ? 'bg-emerald-950/30 border-emerald-800 text-emerald-300'
+                  : 'bg-rose-950/30 border-rose-800 text-rose-300'
+              }`}
+            >
+              <div className="flex items-center gap-2.5">
+                {backupResult.success ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                )}
+                <span>{backupResult.message}</span>
+              </div>
+              {backupResult.driveLink && (
+                <a
+                  href={backupResult.driveLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 rounded-xl text-xs font-bold transition-all border border-emerald-500/30 shrink-0"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>View in Google Drive</span>
+                </a>
+              )}
+            </div>
+          )}
+
+          {/* Stat Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800/80">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-400">Total Backups</span>
+                <FileCode className="w-4 h-4 text-cyan-400" />
+              </div>
+              <div className="text-2xl font-bold text-slate-100 mt-2 font-mono">
+                {routerBackups.length}
+              </div>
+              <p className="text-[10px] text-slate-500 mt-1">Stored locally & indexed</p>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800/80">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-400">Google Drive Synced</span>
+                <Cloud className="w-4 h-4 text-blue-400" />
+              </div>
+              <div className="text-2xl font-bold text-blue-400 mt-2 font-mono">
+                {routerBackups.filter((b) => b.googleDriveStatus === 'uploaded').length}
+              </div>
+              <p className="text-[10px] text-slate-500 mt-1">
+                {businessProfile?.apiKeys?.googleDriveConfig?.enabled
+                  ? 'Cloud sync enabled'
+                  : 'Configure Google Drive in Settings'}
+              </p>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800/80">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-400">Target Router</span>
+                <Server className="w-4 h-4 text-purple-400" />
+              </div>
+              <div className="text-base font-bold text-slate-100 mt-2 truncate">
+                {selectedDevice?.name || 'No Router Selected'}
+              </div>
+              <p className="text-[10px] text-slate-500 mt-1 font-mono">
+                {selectedDevice?.remoteAddress || selectedDevice?.ipAddress || '0.0.0.0'}
+              </p>
+            </div>
+          </div>
+
+          {/* Backup Records Table */}
+          <div className="bg-slate-900/60 border border-slate-800 rounded-3xl overflow-hidden shadow-xl">
+            <div className="p-4 sm:p-5 border-b border-slate-800/80 flex items-center justify-between">
+              <h3 className="text-sm font-bold text-slate-200 flex items-center gap-2">
+                <Clock className="w-4 h-4 text-cyan-400" />
+                Backup History & Disaster Recovery Files
+              </h3>
+              <span className="text-xs text-slate-500 font-mono">
+                {routerBackups.length} record{routerBackups.length === 1 ? '' : 's'}
+              </span>
+            </div>
+
+            {routerBackups.length === 0 ? (
+              <div className="p-12 text-center space-y-3">
+                <div className="w-12 h-12 rounded-2xl bg-slate-800/60 border border-slate-700/60 flex items-center justify-center mx-auto text-slate-400">
+                  <UploadCloud className="w-6 h-6 text-slate-500" />
+                </div>
+                <h4 className="text-sm font-bold text-slate-300">No Backups Generated Yet</h4>
+                <p className="text-xs text-slate-500 max-w-md mx-auto">
+                  Click the &quot;Create Backup (.RSC)&quot; button above to generate a complete disaster recovery configuration file for {selectedDevice?.name || 'your router'} and sync it to Google Drive.
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-950/80 text-slate-400 font-bold uppercase tracking-wider text-[10px]">
+                    <tr>
+                      <th className="py-3 px-4">Backup Name & Time</th>
+                      <th className="py-3 px-4">Router</th>
+                      <th className="py-3 px-4">File Size</th>
+                      <th className="py-3 px-4">RouterOS</th>
+                      <th className="py-3 px-4">Cloud Status</th>
+                      <th className="py-3 px-4 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60 bg-slate-900/30">
+                    {routerBackups.map((backup) => (
+                      <tr key={backup.id} className="hover:bg-slate-800/40 transition-colors">
+                        <td className="py-3 px-4">
+                          <div className="font-bold text-slate-200 font-mono flex items-center gap-2">
+                            <FileCode className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                            <span>{backup.name}</span>
+                          </div>
+                          <div className="text-[10px] text-slate-500 mt-0.5">
+                            {new Date(backup.timestamp).toLocaleString()}
+                          </div>
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="text-slate-300 font-medium">{backup.routerName}</div>
+                          <div className="text-[10px] text-slate-500 font-mono">{backup.routerIp}</div>
+                        </td>
+                        <td className="py-3 px-4 font-mono text-slate-400">
+                          {(backup.fileSizeBytes / 1024).toFixed(1)} KB
+                        </td>
+                        <td className="py-3 px-4 font-mono text-slate-400">
+                          {backup.routerOsVersion || 'v7.x'}
+                        </td>
+                        <td className="py-3 px-4">
+                          {backup.googleDriveStatus === 'uploaded' ? (
+                            backup.googleDriveWebViewLink ? (
+                              <a
+                                href={backup.googleDriveWebViewLink}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/10 text-blue-400 border border-blue-500/30 hover:bg-blue-500/20 transition-colors"
+                              >
+                                <Cloud className="w-3 h-3" />
+                                <span>Google Drive</span>
+                                <ExternalLink className="w-2.5 h-2.5 ml-0.5" />
+                              </a>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/10 text-blue-400 border border-blue-500/30">
+                                <Cloud className="w-3 h-3" />
+                                <span>Google Drive</span>
+                              </span>
+                            )
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-800 text-slate-400 border border-slate-700">
+                              <span>Local Only</span>
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3 px-4 text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              onClick={() => downloadRouterBackupFile(backup)}
+                              className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-800 hover:bg-cyan-600 hover:text-white text-slate-300 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                              title="Download .RSC Script"
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                              <span>Download</span>
+                            </button>
+                            <button
+                              onClick={() => handleDeleteBackup(backup.id)}
+                              className="p-1.5 hover:bg-rose-950/40 text-slate-500 hover:text-rose-400 rounded-lg transition-colors cursor-pointer"
+                              title="Delete backup record"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       )}

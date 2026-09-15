@@ -271,6 +271,14 @@ export interface BusinessProfile {
     mikrotikUseSsl?: boolean;
     geminiApiKey?: string;
     geminiModel?: string;
+    googleDriveConfig?: {
+      enabled: boolean;
+      folderId?: string;
+      accessToken?: string;
+      clientId?: string;
+      userEmail?: string;
+      connectedAt?: string;
+    };
   };
   smsGateway?: SmsGatewayConfig;
   staffWebhooks?: StaffWebhooksConfig;
@@ -284,6 +292,65 @@ export interface BusinessProfile {
   dailyAuditScheduleTime?: string;
   lateFeeAmount: number;
   walledGardenSettings?: WalledGardenSettings;
+}
+
+export interface RouterBackupRecord {
+  id: string;
+  name?: string;
+  fileName?: string;
+  routerId: string;
+  routerName: string;
+  routerIp: string;
+  timestamp: string;
+  rscContent: string;
+  fileSizeBytes: number;
+  routerOsVersion: string;
+  googleDriveFileId?: string;
+  googleDriveWebViewLink?: string;
+  googleDriveStatus?: 'uploaded' | 'local_only' | 'pending' | 'failed';
+  storageUrl?: string;
+  backupType: 'manual' | 'daily_automated';
+  status: 'success' | 'failed';
+  notes?: string;
+}
+
+export interface RouterWatchdogMetrics {
+  routerId: string;
+  routerName: string;
+  routerIp: string;
+  timestamp: string;
+  cpuLoad: number;
+  freeMemoryMb: number;
+  totalMemoryMb: number;
+  memoryUsagePercent: number;
+  uptime: string;
+  temperatureCelsius?: number;
+  voltageVolts?: number;
+  wanPingLatencyMs: number;
+  wanPacketLossPercent: number;
+  wanStatus: 'healthy' | 'degraded' | 'offline';
+  alerts: Array<{
+    type: 'cpu' | 'memory' | 'wan' | 'thermal';
+    severity: 'warning' | 'critical';
+    message: string;
+  }>;
+}
+
+export interface ReceiptOcrResult {
+  success: boolean;
+  referenceNumber: string;
+  amount: number;
+  paymentChannel: 'gcash' | 'maya' | 'bank_transfer' | 'other';
+  channel?: string;
+  transactionDate: string;
+  senderName?: string;
+  receiverName?: string;
+  confidence: number;
+  confidenceScore?: number;
+  isLegitimate: boolean;
+  notes?: string;
+  rawNotes?: string;
+  error?: string;
 }
 
 export interface WalledGardenSettings {
@@ -797,6 +864,9 @@ export interface MikrotikDevice {
   temperatureC: number;
   location: string;
   notes?: string;
+  version?: string;
+  wanInterface?: string;
+  lanInterface?: string;
   interfaces?: NetworkInterfaceTraffic[];
   sfpDiagnostics?: SfpOpticalDiagnostics[];
   wanCongestion?: WanCongestionTelemetry;

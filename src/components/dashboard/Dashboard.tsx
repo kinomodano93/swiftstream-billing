@@ -20,6 +20,7 @@ import { useApp } from '../../context/AppContext';
 import { StatCard } from './StatCard';
 import { RevenueChart } from './RevenueChart';
 import { PlanDistributionChart } from './PlanDistributionChart';
+import { RouterWatchdogWidget } from '../network/RouterWatchdogWidget';
 import { formatCurrency, formatDate, getCustomerStatusBadge } from '../../utils/formatters';
 
 interface DashboardProps {
@@ -43,6 +44,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     payments,
     napBoxes,
     repairOrders,
+    mikrotikDevices,
     setActiveTab,
     setSearchTerm,
     sendReminder,
@@ -51,6 +53,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
     overdueOperationalBillsCount,
     dueSoonOperationalBillsCount,
   } = useApp();
+
+  const primaryRouter = mikrotikDevices.find((d) => d.status === 'online') || mikrotikDevices[0];
 
   const upcomingOperationalBills = operationalBills
     .filter((b) => b.status !== 'paid')
@@ -170,6 +174,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
           onClick={() => setActiveTab('network')}
         />
       </div>
+
+      {/* Real-time Router Health & WAN Watchdog Widget */}
+      {primaryRouter && (
+        <RouterWatchdogWidget
+          device={primaryRouter}
+          onTriggerBackup={() => setActiveTab('mikrotik')}
+        />
+      )}
 
       {/* Charts Row */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
