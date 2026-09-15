@@ -283,6 +283,29 @@ export interface BusinessProfile {
   gracePeriodCutoffTime?: string;
   dailyAuditScheduleTime?: string;
   lateFeeAmount: number;
+  walledGardenSettings?: WalledGardenSettings;
+}
+
+export interface WalledGardenSettings {
+  badgeText?: string;
+  headline?: string;
+  description?: string;
+  companyTitle?: string;
+  portalButtonText?: string;
+  portalUrl?: string;
+  gcashNumber?: string;
+  gcashName?: string;
+  mayaNumber?: string;
+  mayaName?: string;
+  bankName?: string;
+  bankAccountNumber?: string;
+  bankAccountName?: string;
+  supportPhone?: string;
+  supportEmail?: string;
+  footerNote?: string;
+  reconnectNotice?: string;
+  customHtmlOverride?: string;
+  enableCustomHtmlOverride?: boolean;
 }
 
 export interface Plan {

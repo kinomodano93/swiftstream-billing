@@ -1,29 +1,70 @@
-import { BusinessProfile } from '../types';
+import { BusinessProfile, WalledGardenSettings } from '../types';
 
 export interface WalledGardenTemplateOptions {
   portalUrl?: string;
   accountNo?: string;
   subscriberName?: string;
   balanceDue?: number;
+  settings?: WalledGardenSettings;
 }
+
+export const getDefaultWalledGardenSettings = (businessProfile?: BusinessProfile): WalledGardenSettings => {
+  const companyName = businessProfile?.tradeName || businessProfile?.name || 'SwiftStream Fiber Telecommunications';
+  const city = businessProfile?.address?.city || 'Lagonoy';
+  const province = businessProfile?.address?.province || 'Camarines Sur';
+
+  return {
+    badgeText: 'Walled Garden Active',
+    headline: 'Internet Line Restricted',
+    companyTitle: companyName,
+    description: 'Your high-speed fiber internet has been temporarily placed in Walled Garden isolation due to an overdue billing statement. Settle your balance via <strong>GCash</strong> or <strong>Maya</strong> below to restore your connection.',
+    portalButtonText: 'Open SwiftStream Online Portal →',
+    portalUrl: businessProfile?.portalDomain || businessProfile?.websiteUrl || 'https://swiftstream-billing.web.app',
+    gcashNumber: businessProfile?.paymentGateways?.gcashNumber || '09624171684',
+    gcashName: businessProfile?.paymentGateways?.gcashName || 'Leonardo Flojo Jr',
+    mayaNumber: businessProfile?.paymentGateways?.mayaNumber || '09624171684',
+    mayaName: businessProfile?.paymentGateways?.mayaName || 'Leonardo Flojo Jr',
+    bankName: businessProfile?.paymentGateways?.bankName || '',
+    bankAccountNumber: businessProfile?.paymentGateways?.bankAccountNumber || '',
+    bankAccountName: businessProfile?.paymentGateways?.bankAccountName || '',
+    supportPhone: businessProfile?.representative?.mobile || '09624171684',
+    supportEmail: businessProfile?.representative?.email || 'billing@swiftstream.ph',
+    reconnectNotice: '✓ Instant Automatic Reconnection: Once your payment is verified, our core router automatically unblocks your line within 30 seconds.',
+    footerNote: `${companyName} • ${city}, ${province} Operations`,
+    enableCustomHtmlOverride: false,
+    customHtmlOverride: '',
+  };
+};
 
 export const generateWalledGardenHtml = (
   businessProfile: BusinessProfile,
   options: WalledGardenTemplateOptions = {}
 ): string => {
-  const companyName = businessProfile?.tradeName || businessProfile?.name || 'SwiftStream Fiber Telecommunications';
-  const portalUrl = options.portalUrl || businessProfile?.portalDomain || businessProfile?.websiteUrl || 'https://swiftstream-billing.web.app';
-  const gcashName = businessProfile?.paymentGateways?.gcashName || 'Leonardo Flojo Jr';
-  const gcashNumber = businessProfile?.paymentGateways?.gcashNumber || '09624171684';
-  const mayaName = businessProfile?.paymentGateways?.mayaName || 'Leonardo Flojo Jr';
-  const mayaNumber = businessProfile?.paymentGateways?.mayaNumber || '09624171684';
-  const bankName = businessProfile?.paymentGateways?.bankName;
-  const bankAccountName = businessProfile?.paymentGateways?.bankAccountName;
-  const bankAccountNumber = businessProfile?.paymentGateways?.bankAccountNumber;
-  const supportPhone = businessProfile?.representative?.mobile || '09624171684';
-  const supportEmail = businessProfile?.representative?.email || 'billing@swiftstream.ph';
+  const settings = options.settings || businessProfile?.walledGardenSettings;
+
+  if (settings?.enableCustomHtmlOverride && settings.customHtmlOverride?.trim()) {
+    return settings.customHtmlOverride;
+  }
+
+  const companyName = settings?.companyTitle || businessProfile?.tradeName || businessProfile?.name || 'SwiftStream Fiber Telecommunications';
+  const portalUrl = settings?.portalUrl || options.portalUrl || businessProfile?.portalDomain || businessProfile?.websiteUrl || 'https://swiftstream-billing.web.app';
+  const gcashName = settings?.gcashName || businessProfile?.paymentGateways?.gcashName || 'Leonardo Flojo Jr';
+  const gcashNumber = settings?.gcashNumber || businessProfile?.paymentGateways?.gcashNumber || '09624171684';
+  const mayaName = settings?.mayaName || businessProfile?.paymentGateways?.mayaName || 'Leonardo Flojo Jr';
+  const mayaNumber = settings?.mayaNumber || businessProfile?.paymentGateways?.mayaNumber || '09624171684';
+  const bankName = settings?.bankName !== undefined ? settings.bankName : businessProfile?.paymentGateways?.bankName;
+  const bankAccountName = settings?.bankAccountName !== undefined ? settings.bankAccountName : businessProfile?.paymentGateways?.bankAccountName;
+  const bankAccountNumber = settings?.bankAccountNumber !== undefined ? settings.bankAccountNumber : businessProfile?.paymentGateways?.bankAccountNumber;
+  const supportPhone = settings?.supportPhone || businessProfile?.representative?.mobile || '09624171684';
+  const supportEmail = settings?.supportEmail || businessProfile?.representative?.email || 'billing@swiftstream.ph';
   const city = businessProfile?.address?.city || 'Lagonoy';
   const province = businessProfile?.address?.province || 'Camarines Sur';
+  const badgeText = settings?.badgeText || 'Walled Garden Active';
+  const headline = settings?.headline || 'Internet Line Restricted';
+  const description = settings?.description || 'Your high-speed fiber internet has been temporarily placed in Walled Garden isolation due to an overdue billing statement. Settle your balance via <strong>GCash</strong> or <strong>Maya</strong> below to restore your connection.';
+  const portalButtonText = settings?.portalButtonText || 'Open SwiftStream Online Portal →';
+  const reconnectNotice = settings?.reconnectNotice || '✓ Instant Automatic Reconnection: Once your payment is verified, our core router automatically unblocks your line within 30 seconds.';
+  const footerNote = settings?.footerNote || `${companyName} • ${city}, ${province} Operations`;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -217,7 +258,7 @@ export const generateWalledGardenHtml = (
 
     <div class="badge-wrap">
       <span class="badge-dot"></span>
-      <span>Walled Garden Active</span>
+      <span>${badgeText}</span>
     </div>
 
     <div class="icon-shield">
@@ -229,10 +270,9 @@ export const generateWalledGardenHtml = (
     </div>
 
     <div class="company-title">${companyName}</div>
-    <h1>Internet Line Restricted</h1>
+    <h1>${headline}</h1>
     <p class="desc">
-      Your high-speed fiber internet has been temporarily placed in Walled Garden isolation due to an overdue billing statement.
-      Settle your balance via <strong>GCash</strong> or <strong>Maya</strong> below to restore your connection.
+      ${description}
     </p>
 
     <div class="highlight-box">
@@ -261,17 +301,17 @@ export const generateWalledGardenHtml = (
     </div>
 
     <a href="${portalUrl}" class="btn-portal">
-      Open SwiftStream Online Portal &rarr;
+      ${portalButtonText}
     </a>
 
     <div class="status-reconnect">
-      ✓ Instant Automatic Reconnection: Once your payment is verified, our core router automatically unblocks your line within 30 seconds.
+      ${reconnectNotice}
     </div>
 
     <div class="footer-help" style="margin-top: 20px;">
       <p>Need support or already paid? Contact our Operations Center:</p>
       <p>Hotline: <a href="tel:${supportPhone}">${supportPhone}</a> • Email: <a href="mailto:${supportEmail}">${supportEmail}</a></p>
-      <p style="margin-top: 4px; font-size: 10px; color: #475569;">${companyName} • ${city}, ${province} Operations</p>
+      <p style="margin-top: 4px; font-size: 10px; color: #475569;">${footerNote}</p>
     </div>
   </div>
 </body>

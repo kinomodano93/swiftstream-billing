@@ -41,9 +41,15 @@ import {
   Tablet,
   Maximize2,
   Minimize2,
+  Edit3,
+  Save,
+  Code,
+  Layout,
+  FileCode,
+  UploadCloud,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { Customer, Plan } from '../../types';
+import { Customer, Plan, WalledGardenSettings } from '../../types';
 import {
   generateIsolationScript,
 } from '../../utils/sstpService';
@@ -57,6 +63,8 @@ import {
   bulkSyncAllSimpleQueues,
   syncSimpleQueue,
   deployWalledGardenToRouter,
+  uploadWalledGardenHtmlToRouter,
+  deployAutoIsolationSchedulerToRouter,
   isolateOverdueSubscriber,
   reconnectSubscriber,
   PppoeSecretItem,
@@ -65,7 +73,7 @@ import {
   IpPoolItem,
 } from '../../services/mikrotikApiService';
 import { formatCurrency } from '../../utils/formatters';
-import { generateWalledGardenHtml } from '../../utils/walledGardenTemplate';
+import { generateWalledGardenHtml, getDefaultWalledGardenSettings } from '../../utils/walledGardenTemplate';
 
 interface PppoeManagerProps {
   onSelectCustomer?: (customerId: string) => void;
@@ -78,6 +86,7 @@ export const PppoeManager: React.FC<PppoeManagerProps> = ({ onSelectCustomer, se
     plans,
     mikrotikDevices,
     businessProfile,
+    updateBusinessProfile,
     updateCustomer,
     updateMikrotikDevice,
     showToast,
@@ -111,7 +120,7 @@ export const PppoeManager: React.FC<PppoeManagerProps> = ({ onSelectCustomer, se
 
   // Walled Garden State
   const [portalRedirectUrl, setPortalRedirectUrl] = useState<string>(
-    businessProfile?.portalDomain || 'https://swiftstream-billing.web.app'
+    businessProfile?.walledGardenSettings?.portalUrl || businessProfile?.portalDomain || 'https://swiftstream-billing.web.app'
   );
   const [isDeployingWalledGarden, setIsDeployingWalledGarden] = useState<boolean>(false);
   const [walledGardenDeployResult, setWalledGardenDeployResult] = useState<{
@@ -130,17 +139,112 @@ export const PppoeManager: React.FC<PppoeManagerProps> = ({ onSelectCustomer, se
   const [showInlinePreview, setShowInlinePreview] = useState<boolean>(true);
   const [inlinePreviewMode, setInlinePreviewMode] = useState<'mobile' | 'desktop'>('mobile');
 
+  // Direct 1-Click HTML Router Upload State
+  const [isUploadingHtmlToRouter, setIsUploadingHtmlToRouter] = useState<boolean>(false);
+  const [htmlUploadResult, setHtmlUploadResult] = useState<{
+    success: boolean;
+    message: string;
+    targetPath: string;
+    commands?: string[];
+  } | null>(null);
+
+  // Router-Side Web Proxy & Offline Serving State
+  const [enableWebProxyServing, setEnableWebProxyServing] = useState<boolean>(true);
+  const [localProxyPort, setLocalProxyPort] = useState<number>(8080);
+  const [localServingAddress, setLocalServingAddress] = useState<string>(() => {
+    return activeDevice?.ipAddress ? `http://${activeDevice.ipAddress}/walled_garden.html` : 'http://192.168.10.1/walled_garden.html';
+  });
+
+  // On-Router Auto-Isolation Scheduler State
+  const [cutoffTimeInput, setCutoffTimeInput] = useState<string>('12:00:00');
+  const [schedulerInterval, setSchedulerInterval] = useState<string>('1d');
+  const [isDeployingScheduler, setIsDeployingScheduler] = useState<boolean>(false);
+  const [schedulerDeployResult, setSchedulerDeployResult] = useState<{
+    success: boolean;
+    message: string;
+    commands?: string[];
+  } | null>(null);
+  const [showSchedulerScriptModal, setShowSchedulerScriptModal] = useState<boolean>(false);
+  const [copiedSchedulerScript, setCopiedSchedulerScript] = useState<boolean>(false);
+
+  // Sync default local serving address when active device IP updates
   useEffect(() => {
-    if (businessProfile?.portalDomain) {
+    if (activeDevice?.ipAddress) {
+      setLocalServingAddress(`http://${activeDevice.ipAddress}/walled_garden.html`);
+    }
+  }, [activeDevice?.ipAddress]);
+
+  // Walled Garden Template Customizer / Editor State
+  const [showEditTemplateModal, setShowEditTemplateModal] = useState<boolean>(false);
+  const [editTab, setEditTab] = useState<'form' | 'code'>('form');
+  const [editPreviewDevice, setEditPreviewDevice] = useState<'mobile' | 'desktop'>('mobile');
+  const [mobileEditorView, setMobileEditorView] = useState<'editor' | 'preview'>('editor');
+  const [draftSettings, setDraftSettings] = useState<WalledGardenSettings>(() => {
+    return businessProfile?.walledGardenSettings || getDefaultWalledGardenSettings(businessProfile);
+  });
+
+  // Re-sync draft when business profile updates
+  useEffect(() => {
+    if (businessProfile?.walledGardenSettings) {
+      setDraftSettings(businessProfile.walledGardenSettings);
+    } else {
+      setDraftSettings(getDefaultWalledGardenSettings(businessProfile));
+    }
+  }, [businessProfile]);
+
+  useEffect(() => {
+    if (businessProfile?.walledGardenSettings?.portalUrl) {
+      setPortalRedirectUrl(businessProfile.walledGardenSettings.portalUrl);
+    } else if (businessProfile?.portalDomain) {
       setPortalRedirectUrl(businessProfile.portalDomain);
     }
-  }, [businessProfile?.portalDomain]);
+  }, [businessProfile?.walledGardenSettings?.portalUrl, businessProfile?.portalDomain]);
 
   const localWalledGardenHtml = useMemo(() => {
     return generateWalledGardenHtml(businessProfile, {
-      portalUrl: portalRedirectUrl,
+      portalUrl: businessProfile?.walledGardenSettings?.portalUrl || portalRedirectUrl,
+      settings: businessProfile?.walledGardenSettings,
     });
   }, [businessProfile, portalRedirectUrl]);
+
+  const draftPreviewHtml = useMemo(() => {
+    return generateWalledGardenHtml(businessProfile, {
+      portalUrl: draftSettings.portalUrl || portalRedirectUrl,
+      settings: draftSettings,
+    });
+  }, [businessProfile, draftSettings, portalRedirectUrl]);
+
+  const handleSaveWalledGardenSettings = () => {
+    updateBusinessProfile({
+      walledGardenSettings: draftSettings,
+      portalDomain: draftSettings.portalUrl || businessProfile?.portalDomain,
+    });
+    if (draftSettings.portalUrl) {
+      setPortalRedirectUrl(draftSettings.portalUrl);
+    }
+    showToast('success', 'Walled Garden Saved', 'Template settings have been saved and applied to router traffic.');
+    setShowEditTemplateModal(false);
+  };
+
+  const handleResetWalledGardenDefaults = () => {
+    const defaults = getDefaultWalledGardenSettings(businessProfile);
+    setDraftSettings(defaults);
+    showToast('info', 'Reset to Defaults', 'Default template loaded. Click "Save & Apply Changes" to persist.');
+  };
+
+  const handleLoadCurrentTemplateIntoCode = () => {
+    const generated = generateWalledGardenHtml(businessProfile, {
+      portalUrl: draftSettings.portalUrl || portalRedirectUrl,
+      settings: { ...draftSettings, enableCustomHtmlOverride: false },
+    });
+    setDraftSettings((prev) => ({
+      ...prev,
+      customHtmlOverride: generated,
+      enableCustomHtmlOverride: true,
+    }));
+    setEditTab('code');
+    showToast('info', 'Code Loaded', 'Base HTML loaded into code editor. You can now edit markup directly.');
+  };
 
   // Router Live Data State (No Mock Fallbacks)
   const [secrets, setSecrets] = useState<PppoeSecretItem[]>([]);
@@ -284,8 +388,42 @@ export const PppoeManager: React.FC<PppoeManagerProps> = ({ onSelectCustomer, se
   }, [overdueCustomers]);
 
   const walledGardenScript = useMemo(() => {
-    return generateIsolationScript(customers, portalRedirectUrl, activeDevice?.ipAddress);
-  }, [customers, portalRedirectUrl, activeDevice?.ipAddress]);
+    return generateIsolationScript(customers, portalRedirectUrl, activeDevice?.ipAddress, {
+      enableProxy: enableWebProxyServing,
+      proxyPort: localProxyPort,
+      localServingAddress: localServingAddress || `http://${activeDevice?.ipAddress || '192.168.10.1'}/walled_garden.html`,
+      cutoffTime: cutoffTimeInput,
+      scheduleInterval: schedulerInterval,
+    });
+  }, [
+    customers,
+    portalRedirectUrl,
+    activeDevice?.ipAddress,
+    enableWebProxyServing,
+    localProxyPort,
+    localServingAddress,
+    cutoffTimeInput,
+    schedulerInterval,
+  ]);
+
+  const schedulerScriptText = useMemo(() => {
+    const cutoff = cutoffTimeInput || '12:00:00';
+    const interval = schedulerInterval || '1d';
+    return `# ====================================================================
+# SwiftStream On-Router Auto-Isolation Scheduler Script
+# Automatically sweeps delinquent accounts and drops PPPoE sessions
+# Target: ${activeDevice?.name || 'Core Router'} (${activeDevice?.ipAddress || '192.168.10.1'})
+# Cutoff Time: ${cutoff} | Schedule Interval: ${interval}
+# ====================================================================
+
+/system script
+remove [find name="swiftstream_auto_cut"]
+add name="swiftstream_auto_cut" policy=read,write,test source=":log info \\"SwiftStream: Commencing daily delinquent line isolation sweep...\\"; :local isolatedCount 0; :foreach item in=[/ip firewall address-list find where list=\\"NON_PAYMENT_ISOLATION\\"] do={ :local targetIp [/ip firewall address-list get \\$item address]; :foreach session in=[/interface pppoe-server find where address=\\$targetIp] do={ :local userName [/interface pppoe-server get \\$session user]; :log warning (\\"SwiftStream Isolation: Terminating active session for overdue line: \\" . \\$userName . \\" (\\" . \\$targetIp . \\")\\"); /interface pppoe-server remove \\$session; :set isolatedCount (\\$isolatedCount + 1); } }; :log info (\\"SwiftStream: Isolation sweep finished. \\" . \\$isolatedCount . \\" delinquent sessions disconnected and redirected.\\");" comment="SwiftStream Automated Delinquent PPPoE Isolation Sweep"
+
+/system scheduler
+remove [find name="swiftstream_auto_cut_sched"]
+add name="swiftstream_auto_cut_sched" start-time="${cutoff}" interval="${interval}" on-event="swiftstream_auto_cut" comment="SwiftStream Scheduled Overdue Cutoff"`;
+  }, [cutoffTimeInput, schedulerInterval, activeDevice]);
 
   const handleDeployWalledGarden = async () => {
     if (!activeDevice) {
@@ -307,6 +445,9 @@ export const PppoeManager: React.FC<PppoeManagerProps> = ({ onSelectCustomer, se
       const res = await deployWalledGardenToRouter(creds, {
         portalUrl: portalRedirectUrl,
         portalIp: activeDevice.ipAddress,
+        enableWebProxyServing,
+        localProxyPort,
+        localServingAddress: localServingAddress || `http://${activeDevice.ipAddress || '192.168.10.1'}/walled_garden.html`,
       });
 
       setWalledGardenDeployResult(res);
@@ -316,13 +457,103 @@ export const PppoeManager: React.FC<PppoeManagerProps> = ({ onSelectCustomer, se
         action: 'MIKROTIK_WALLED_GARDEN_DEPLOYED',
         category: 'network',
         severity: 'info',
-        details: `Option A Walled Garden deployed to ${activeDevice.name} (${creds.ipAddress}). Captive redirect and payment whitelist provisioned.`,
+        details: `Option A Walled Garden deployed to ${activeDevice.name} (${creds.ipAddress}). Captive redirect, proxy serving (${enableWebProxyServing ? 'port ' + localProxyPort : 'disabled'}), and payment whitelist provisioned.`,
         status: 'success',
       });
     } catch (err: any) {
       showToast('error', 'Deployment Failed', err?.message || 'Failed to deploy Walled Garden rules.');
     } finally {
       setIsDeployingWalledGarden(false);
+    }
+  };
+
+  const handleUploadHtmlToRouter = async () => {
+    if (!activeDevice) {
+      showToast('error', 'No Router Selected', 'Please select an active MikroTik router first.');
+      return;
+    }
+    setIsUploadingHtmlToRouter(true);
+    setHtmlUploadResult(null);
+    try {
+      const creds = {
+        id: activeDevice.id,
+        name: activeDevice.name,
+        ipAddress: activeDevice.ipAddress || activeDevice.remoteAddress || '',
+        port: activeDevice.port || activeDevice.webfigPort || 80,
+        username: activeDevice.username || 'admin',
+        password: activeDevice.password || '',
+        useHttps: activeDevice.port === 443 || activeDevice.webfigPort === 443,
+      };
+
+      const res = await uploadWalledGardenHtmlToRouter(creds, localWalledGardenHtml, {
+        targetFileName: 'walled_garden.html',
+        uploadToHotspotDir: true,
+      });
+
+      setHtmlUploadResult(res);
+      if (res.success) {
+        showToast('success', 'Router Storage Updated', res.message);
+        logAuditEvent({
+          userName: 'Admin Leonardo Flojo',
+          action: 'MIKROTIK_HTML_UPLOADED',
+          category: 'network',
+          severity: 'info',
+          details: `Walled Garden HTML template pushed directly to router flash (${res.targetPath}) on ${activeDevice.name}.`,
+          status: 'success',
+        });
+      } else {
+        showToast('warning', 'Direct Upload Notice', res.message);
+      }
+    } catch (err: any) {
+      showToast('error', 'Upload Failed', err?.message || 'Failed to upload HTML template to router.');
+    } finally {
+      setIsUploadingHtmlToRouter(false);
+    }
+  };
+
+  const handleDeployScheduler = async () => {
+    if (!activeDevice) {
+      showToast('error', 'No Router Selected', 'Please select an active MikroTik router first.');
+      return;
+    }
+    setIsDeployingScheduler(true);
+    setSchedulerDeployResult(null);
+    try {
+      const creds = {
+        id: activeDevice.id,
+        name: activeDevice.name,
+        ipAddress: activeDevice.ipAddress || activeDevice.remoteAddress || '',
+        port: activeDevice.port || activeDevice.webfigPort || 80,
+        username: activeDevice.username || 'admin',
+        password: activeDevice.password || '',
+        useHttps: activeDevice.port === 443 || activeDevice.webfigPort === 443,
+      };
+
+      const res = await deployAutoIsolationSchedulerToRouter(creds, {
+        cutoffTime: cutoffTimeInput,
+        interval: schedulerInterval,
+        scriptName: 'swiftstream_auto_cut',
+        schedulerName: 'swiftstream_auto_cut_sched',
+      });
+
+      setSchedulerDeployResult(res);
+      if (res.success) {
+        showToast('success', 'Scheduler Deployed', res.message);
+        logAuditEvent({
+          userName: 'Admin Leonardo Flojo',
+          action: 'MIKROTIK_SCHEDULER_DEPLOYED',
+          category: 'network',
+          severity: 'info',
+          details: `Auto-isolation scheduler installed on ${activeDevice.name} at cutoff ${cutoffTimeInput} (interval ${schedulerInterval}).`,
+          status: 'success',
+        });
+      } else {
+        showToast('error', 'Scheduler Deployment Failed', res.message);
+      }
+    } catch (err: any) {
+      showToast('error', 'Deployment Error', err?.message || 'Failed to install auto-isolation scheduler.');
+    } finally {
+      setIsDeployingScheduler(false);
     }
   };
 
@@ -1373,6 +1604,59 @@ export const PppoeManager: React.FC<PppoeManagerProps> = ({ onSelectCustomer, se
               </div>
             </div>
 
+            {/* Router-Side Web Proxy & Offline Serving Configuration */}
+            <div className="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={enableWebProxyServing}
+                    onChange={(e) => setEnableWebProxyServing(e.target.checked)}
+                    className="w-4 h-4 rounded text-cyan-600 focus:ring-cyan-500 bg-slate-950 border-slate-700 cursor-pointer"
+                  />
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-slate-200">
+                      Enable Router-Side Web Proxy & Offline Serving
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-800/40 text-[9px] font-mono font-bold">
+                      Zero-WAN Dependency
+                    </span>
+                  </div>
+                </label>
+
+                <div className="flex items-center gap-2 text-[11px]">
+                  <span className="text-slate-400 font-mono">Proxy Port:</span>
+                  <input
+                    type="number"
+                    value={localProxyPort}
+                    onChange={(e) => setLocalProxyPort(Number(e.target.value) || 8080)}
+                    disabled={!enableWebProxyServing}
+                    className="w-20 px-2.5 py-1 bg-slate-950 border border-slate-800 rounded-lg text-slate-200 font-mono text-xs focus:outline-none focus:border-cyan-500 disabled:opacity-50"
+                  />
+                </div>
+              </div>
+
+              {enableWebProxyServing && (
+                <div className="pt-2 border-t border-slate-800/60 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                  <div className="sm:col-span-2 space-y-1">
+                    <label className="text-[11px] font-bold text-slate-400 block">
+                      Local Offline Redirect Destination:
+                    </label>
+                    <input
+                      type="text"
+                      value={localServingAddress}
+                      onChange={(e) => setLocalServingAddress(e.target.value)}
+                      placeholder="http://192.168.10.1/walled_garden.html"
+                      className="w-full px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-slate-100 font-mono text-xs focus:outline-none focus:border-cyan-500"
+                    />
+                  </div>
+                  <div className="text-[11px] text-slate-400 flex items-center leading-relaxed">
+                    Automatically configures <code className="text-cyan-400 font-mono mx-1">/ip proxy</code> and <code className="text-cyan-400 font-mono mx-1">/ip proxy access</code> to serve <code className="text-cyan-400 font-mono mx-1">walled_garden.html</code> directly from router storage.
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Deployment Feedback Banner */}
             {walledGardenDeployResult && (
               <div className="p-3 rounded-xl bg-emerald-950/40 border border-emerald-800/50 text-emerald-300 text-xs flex items-center justify-between gap-3">
@@ -1409,6 +1693,15 @@ export const PppoeManager: React.FC<PppoeManagerProps> = ({ onSelectCustomer, se
                     <span className="px-2.5 py-0.5 rounded-full bg-emerald-950/80 text-emerald-300 border border-emerald-800/40 text-[10px] font-mono font-bold">
                       Zero External Dependencies
                     </span>
+                    {businessProfile?.walledGardenSettings?.enableCustomHtmlOverride ? (
+                      <span className="px-2.5 py-0.5 rounded-full bg-purple-950/80 text-purple-300 border border-purple-800/40 text-[10px] font-mono font-bold">
+                        Custom HTML Mode
+                      </span>
+                    ) : businessProfile?.walledGardenSettings ? (
+                      <span className="px-2.5 py-0.5 rounded-full bg-blue-950/80 text-blue-300 border border-blue-800/40 text-[10px] font-mono font-bold">
+                        Customized Content
+                      </span>
+                    ) : null}
                   </div>
                   <p className="text-xs text-slate-400 mt-1">
                     Standalone offline HTML stored directly on MikroTik flash memory (<code className="text-cyan-400">/file</code> or <code className="text-cyan-400">/hotspot</code>) to serve delinquent subscribers even during full internet isolation.
@@ -1418,6 +1711,17 @@ export const PppoeManager: React.FC<PppoeManagerProps> = ({ onSelectCustomer, se
 
               {/* Action Toolbar */}
               <div className="flex flex-wrap items-center gap-2">
+                {/* Edit Template Button */}
+                <button
+                  type="button"
+                  onClick={() => setShowEditTemplateModal(true)}
+                  className="flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-cyan-600/20 cursor-pointer"
+                  title="Customize Walled Garden text, payment info, and HTML code"
+                >
+                  <Edit3 className="w-3.5 h-3.5" />
+                  <span>Edit Template</span>
+                </button>
+
                 {/* Inline Preview Toggle */}
                 <button
                   type="button"
@@ -1479,6 +1783,22 @@ export const PppoeManager: React.FC<PppoeManagerProps> = ({ onSelectCustomer, se
                   <span>Fullscreen Preview</span>
                 </button>
 
+                {/* Push Directly to Router Flash */}
+                <button
+                  type="button"
+                  onClick={handleUploadHtmlToRouter}
+                  disabled={isUploadingHtmlToRouter || !activeDevice}
+                  className="flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-emerald-600/20 disabled:opacity-50 cursor-pointer"
+                  title="Push HTML directly to router flash (/file or /hotspot) using REST API"
+                >
+                  {isUploadingHtmlToRouter ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <UploadCloud className="w-3.5 h-3.5" />
+                  )}
+                  <span>{isUploadingHtmlToRouter ? 'Pushing to Router...' : 'Push to Router Flash'}</span>
+                </button>
+
                 {/* Download Button */}
                 <button
                   type="button"
@@ -1502,6 +1822,38 @@ export const PppoeManager: React.FC<PppoeManagerProps> = ({ onSelectCustomer, se
                 </button>
               </div>
             </div>
+
+            {/* Direct Upload Result Feedback Banner */}
+            {htmlUploadResult && (
+              <div
+                className={`p-3.5 rounded-xl border text-xs flex items-center justify-between gap-3 ${
+                  htmlUploadResult.success
+                    ? 'bg-emerald-950/50 border-emerald-800/60 text-emerald-300'
+                    : 'bg-amber-950/50 border-amber-800/60 text-amber-300'
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  {htmlUploadResult.success ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                  ) : (
+                    <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0" />
+                  )}
+                  <div>
+                    <span className="font-bold">{htmlUploadResult.message}</span>
+                    <span className="text-[11px] block opacity-80 font-mono mt-0.5">
+                      Target Path: {htmlUploadResult.targetPath} (Router: {activeDevice?.name})
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setHtmlUploadResult(null)}
+                  className="text-slate-400 hover:text-slate-200 p-1 cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
 
             {/* Live Inline Preview Container */}
             {showInlinePreview && (
@@ -1570,6 +1922,182 @@ export const PppoeManager: React.FC<PppoeManagerProps> = ({ onSelectCustomer, se
                   <strong className="text-slate-100">Offline Serving:</strong> Isolated subscribers browsing HTTP will be directed to this local page, which displays your official GCash (<span className="text-cyan-400 font-mono font-bold">{businessProfile?.paymentGateways?.gcashNumber || '09624171684'}</span>), Maya, and hotline without requiring external internet.
                 </li>
               </ol>
+            </div>
+          </div>
+
+          {/* Card: On-Router Auto-Isolation Scheduler (/system script & /system scheduler) */}
+          <div className="p-6 rounded-3xl bg-slate-950 border border-amber-900/40 shadow-xl shadow-amber-950/10 space-y-5">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <div className="p-2.5 rounded-2xl bg-amber-950/80 border border-amber-800/50 text-amber-400 mt-0.5">
+                  <Clock className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h5 className="text-sm font-bold text-slate-100">
+                      On-Router Auto-Isolation Scheduler (<code className="text-amber-400">/system scheduler</code>)
+                    </h5>
+                    <span className="px-2.5 py-0.5 rounded-full bg-amber-950 text-amber-300 border border-amber-800/50 text-[10px] font-mono font-bold tracking-wide">
+                      Router-Side Cron
+                    </span>
+                    <span className="px-2.5 py-0.5 rounded-full bg-emerald-950/80 text-emerald-300 border border-emerald-800/40 text-[10px] font-mono font-bold">
+                      Zero-Browser Dependency
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Installs an automated RouterOS script (<code className="text-cyan-400 font-mono">swiftstream_auto_cut</code>) and scheduler (<code className="text-cyan-400 font-mono">swiftstream_auto_cut_sched</code>) directly into router memory. Automatically disconnects active delinquent PPPoE sessions at your daily cutoff time even if your computer is shut down.
+                  </p>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowSchedulerScriptModal(true)}
+                  className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-200 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                  title="View RouterOS script code for the scheduler"
+                >
+                  <FileCode className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>Inspect Script</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleDeployScheduler}
+                  disabled={isDeployingScheduler || !activeDevice}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-amber-600/20 disabled:opacity-50 cursor-pointer"
+                  title="Push /system script and /system scheduler directly to the active MikroTik router"
+                >
+                  {isDeployingScheduler ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Clock className="w-3.5 h-3.5" />
+                  )}
+                  <span>{isDeployingScheduler ? 'Installing on Router...' : 'Deploy Scheduler to Router'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Scheduler Status / Feedback Banner */}
+            {schedulerDeployResult && (
+              <div
+                className={`p-3.5 rounded-xl border text-xs flex items-center justify-between gap-3 ${
+                  schedulerDeployResult.success
+                    ? 'bg-emerald-950/50 border-emerald-800/60 text-emerald-300'
+                    : 'bg-rose-950/50 border-rose-800/60 text-rose-300'
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  {schedulerDeployResult.success ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                  ) : (
+                    <AlertTriangle className="w-4 h-4 text-rose-400 flex-shrink-0" />
+                  )}
+                  <span className="font-bold">{schedulerDeployResult.message}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSchedulerDeployResult(null)}
+                  className="text-slate-400 hover:text-slate-200 p-1 cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+
+            {/* Scheduler Settings Grid */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 pt-2 border-t border-slate-900 text-xs">
+              {/* Cutoff Time Input + Presets */}
+              <div className="space-y-2.5">
+                <label className="text-slate-300 font-semibold block">
+                  Daily Cutoff Execution Time (24h format):
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={cutoffTimeInput}
+                    onChange={(e) => setCutoffTimeInput(e.target.value)}
+                    placeholder="12:00:00"
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-amber-300 font-mono text-xs focus:outline-none focus:border-amber-500 font-bold"
+                  />
+                  <span className="text-[11px] text-slate-500 font-mono shrink-0">HH:MM:SS</span>
+                </div>
+                {/* Quick Presets */}
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  <span className="text-[10px] text-slate-500 block w-full">Quick Presets:</span>
+                  {[
+                    { label: '12:00 PM (Noon)', value: '12:00:00' },
+                    { label: '8:00 AM (Morning)', value: '08:00:00' },
+                    { label: '5:00 PM (Afternoon)', value: '17:00:00' },
+                    { label: '11:59 PM (Midnight)', value: '23:59:00' },
+                  ].map((preset) => (
+                    <button
+                      key={preset.value}
+                      type="button"
+                      onClick={() => setCutoffTimeInput(preset.value)}
+                      className={`px-2 py-1 rounded-lg text-[10px] font-mono transition-colors cursor-pointer border ${
+                        cutoffTimeInput === preset.value
+                          ? 'bg-amber-600 text-white border-amber-500 font-bold'
+                          : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800'
+                      }`}
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Interval & Trigger frequency */}
+              <div className="space-y-2.5">
+                <label className="text-slate-300 font-semibold block">
+                  Schedule Execution Frequency:
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { label: 'Every 24h', value: '1d', desc: 'Daily sweep' },
+                    { label: 'Every 12h', value: '12h', desc: 'Twice daily' },
+                    { label: 'Every 6h', value: '6h', desc: 'Quad sweep' },
+                  ].map((item) => (
+                    <button
+                      key={item.value}
+                      type="button"
+                      onClick={() => setSchedulerInterval(item.value)}
+                      className={`p-2 rounded-xl text-left transition-all border cursor-pointer ${
+                        schedulerInterval === item.value
+                          ? 'bg-amber-950/70 border-amber-600 text-amber-200'
+                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      <span className="text-xs font-bold block">{item.label}</span>
+                      <span className="text-[10px] opacity-75 font-mono">{item.value} ({item.desc})</span>
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[11px] text-slate-500 leading-relaxed">
+                  RouterOS will automatically fire the script every <span className="text-amber-400 font-mono font-bold">{schedulerInterval}</span> starting at <span className="text-amber-400 font-mono font-bold">{cutoffTimeInput}</span>.
+                </p>
+              </div>
+
+              {/* On-Router Execution Logic Preview */}
+              <div className="p-3 rounded-2xl bg-slate-900/80 border border-slate-800 text-slate-300 space-y-1.5 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between text-[11px] font-bold text-amber-400 pb-1 border-b border-slate-800">
+                    <span>Active Script Sweep Logic</span>
+                    <span className="text-slate-500 font-mono text-[10px]">RouterOS v6/v7</span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 pt-1.5 leading-relaxed">
+                    1. Queries <code className="text-rose-400 font-mono">NON_PAYMENT_ISOLATION</code> address list.<br />
+                    2. Matches active sessions via <code className="text-cyan-400 font-mono">/interface pppoe-server</code>.<br />
+                    3. Drops session with <code className="text-rose-400 font-mono">/interface pppoe-server remove</code> to force client reconnect into the throttled <code className="text-amber-300 font-mono">isolated</code> profile.
+                  </p>
+                </div>
+
+                <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-[10px] text-slate-400 font-mono">
+                  <span>Target Router: <strong className="text-cyan-400">{activeDevice?.name || 'Core Router'}</strong></span>
+                  <span className="text-emerald-400 font-bold">&bull; Autonomous</span>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -1789,6 +2317,92 @@ export const PppoeManager: React.FC<PppoeManagerProps> = ({ onSelectCustomer, se
             </div>
           )}
 
+          {/* Modal: On-Router Auto-Isolation Scheduler Script Viewer */}
+          {showSchedulerScriptModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in">
+              <div className="w-full max-w-2xl rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl p-6 space-y-4 max-h-[90vh] flex flex-col">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                  <div>
+                    <h3 className="font-bold text-slate-100 flex items-center gap-2">
+                      <Clock className="w-5 h-5 text-amber-400" />
+                      <span>RouterOS Auto-Isolation Scheduler Script</span>
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Autonomous /system script and /system scheduler definitions for MikroTik RouterOS.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowSchedulerScriptModal(false)}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between gap-3 text-xs">
+                  <span className="text-slate-400">
+                    Cutoff: <strong className="text-amber-400 font-mono">{cutoffTimeInput}</strong> | Interval: <strong className="text-cyan-400 font-mono">{schedulerInterval}</strong>
+                  </span>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(schedulerScriptText);
+                        setCopiedSchedulerScript(true);
+                        showToast('success', 'Copied to Clipboard', 'Scheduler script copied.');
+                        setTimeout(() => setCopiedSchedulerScript(false), 2000);
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl font-bold transition-all cursor-pointer"
+                    >
+                      {copiedSchedulerScript ? (
+                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                      ) : (
+                        <Copy className="w-3.5 h-3.5" />
+                      )}
+                      <span>{copiedSchedulerScript ? 'Copied!' : 'Copy Script'}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const blob = new Blob([schedulerScriptText], { type: 'text/plain' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `swiftstream_scheduler_${cutoffTimeInput.replace(/:/g, '')}.rsc`;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                        showToast('success', 'Downloaded .rsc', 'Scheduler script downloaded.');
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded-xl font-bold transition-all shadow cursor-pointer"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Download .rsc</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-4 rounded-2xl bg-slate-950 border border-slate-800 font-mono text-[11px] text-amber-300/90 whitespace-pre leading-relaxed scrollbar-thin">
+                  {schedulerScriptText}
+                </div>
+
+                <div className="pt-3 border-t border-slate-800 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setShowSchedulerScriptModal(false)}
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Modal: MikroTik Local Storage HTML Template Preview */}
           {showLocalTemplateModal && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-950/85 backdrop-blur-md animate-in fade-in">
@@ -1852,6 +2466,19 @@ export const PppoeManager: React.FC<PppoeManagerProps> = ({ onSelectCustomer, se
                         <span>Desktop (Full)</span>
                       </button>
                     </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowLocalTemplateModal(false);
+                        setShowEditTemplateModal(true);
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 text-xs font-bold transition-colors cursor-pointer"
+                      title="Edit this Walled Garden template"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">Edit Template</span>
+                    </button>
 
                     <button
                       type="button"
@@ -1957,6 +2584,551 @@ export const PppoeManager: React.FC<PppoeManagerProps> = ({ onSelectCustomer, se
                       className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-bold cursor-pointer transition-all"
                     >
                       Close
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Modal: Edit Walled Garden Template */}
+          {showEditTemplateModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 md:p-6 bg-slate-950/90 backdrop-blur-md animate-in fade-in">
+              <div className="w-full max-w-7xl h-[94vh] min-h-[640px] rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl flex flex-col overflow-hidden">
+                {/* Header */}
+                <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between gap-3 flex-shrink-0 bg-slate-900/90">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 rounded-2xl bg-cyan-950 border border-cyan-800/40 text-cyan-400">
+                      <Edit3 className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-slate-100 flex items-center gap-2">
+                        <span className="text-base">Customize Walled Garden Template</span>
+                        <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-800/40 font-mono font-bold">
+                          walled_garden.html
+                        </span>
+                      </h3>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        Customize notice messages, payment settlement info, and branding served to isolated subscribers.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 sm:gap-3">
+                    {/* Mode Switcher: Form vs Code */}
+                    <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => setEditTab('form')}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
+                          editTab === 'form'
+                            ? 'bg-cyan-600 text-white shadow'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        <Layout className="w-3.5 h-3.5" />
+                        <span>Visual Form</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditTab('code')}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
+                          editTab === 'code'
+                            ? 'bg-cyan-600 text-white shadow'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        <Code className="w-3.5 h-3.5" />
+                        <span>Raw HTML</span>
+                      </button>
+                    </div>
+
+                    {/* Mobile View Switcher: Editor vs Live Preview */}
+                    <div className="lg:hidden flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => setMobileEditorView('editor')}
+                        className={`px-2.5 py-1 rounded-lg font-bold ${
+                          mobileEditorView === 'editor' ? 'bg-slate-800 text-white' : 'text-slate-400'
+                        }`}
+                      >
+                        Editor
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setMobileEditorView('preview')}
+                        className={`px-2.5 py-1 rounded-lg font-bold ${
+                          mobileEditorView === 'preview' ? 'bg-slate-800 text-white' : 'text-slate-400'
+                        }`}
+                      >
+                        Preview
+                      </button>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleResetWalledGardenDefaults}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-all border border-slate-700 cursor-pointer"
+                      title="Reset all fields to standard SwiftStream defaults"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
+                      <span className="hidden sm:inline">Reset Defaults</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowEditTemplateModal(false)}
+                      className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                      title="Discard and close"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Body Split */}
+                <div className="flex-1 flex flex-col lg:flex-row min-h-0 overflow-hidden">
+                  {/* Left Column: Editor Inputs */}
+                  <div
+                    className={`w-full lg:w-1/2 flex-1 flex flex-col min-h-0 overflow-y-auto p-4 sm:p-6 space-y-5 bg-slate-900/50 border-r border-slate-800 scrollbar-thin ${
+                      mobileEditorView === 'preview' ? 'hidden lg:flex' : 'flex'
+                    }`}
+                  >
+                    {editTab === 'form' ? (
+                      <div className="space-y-6">
+                        {/* Section 1: Notice Header & Branding */}
+                        <div className="p-4 rounded-2xl bg-slate-950/70 border border-slate-800/80 space-y-4">
+                          <h4 className="text-xs font-bold uppercase tracking-wider text-cyan-400 flex items-center gap-2">
+                            <FileText className="w-4 h-4" />
+                            <span>Notice Header & Branding</span>
+                          </h4>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                                Notice Headline
+                              </label>
+                              <input
+                                type="text"
+                                value={draftSettings.headline || ''}
+                                onChange={(e) =>
+                                  setDraftSettings((prev) => ({ ...prev, headline: e.target.value }))
+                                }
+                                placeholder="Internet Line Restricted"
+                                className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500 font-sans"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                                Status Badge Text
+                              </label>
+                              <input
+                                type="text"
+                                value={draftSettings.badgeText || ''}
+                                onChange={(e) =>
+                                  setDraftSettings((prev) => ({ ...prev, badgeText: e.target.value }))
+                                }
+                                placeholder="Walled Garden Active"
+                                className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500 font-sans"
+                              />
+                            </div>
+
+                            <div className="sm:col-span-2">
+                              <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                                Company Title / Brand Name
+                              </label>
+                              <input
+                                type="text"
+                                value={draftSettings.companyTitle || ''}
+                                onChange={(e) =>
+                                  setDraftSettings((prev) => ({ ...prev, companyTitle: e.target.value }))
+                                }
+                                placeholder="SwiftStream Fiber Telecommunications"
+                                className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500 font-sans"
+                              />
+                            </div>
+
+                            <div className="sm:col-span-2">
+                              <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                                Suspension Explanation & Instructions (HTML supported)
+                              </label>
+                              <textarea
+                                rows={3}
+                                value={draftSettings.description || ''}
+                                onChange={(e) =>
+                                  setDraftSettings((prev) => ({ ...prev, description: e.target.value }))
+                                }
+                                placeholder="Explain why the line is restricted and how to settle..."
+                                className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500 font-sans leading-relaxed"
+                              />
+                            </div>
+
+                            <div className="sm:col-span-2">
+                              <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                                Reconnection Assurance Notice
+                              </label>
+                              <input
+                                type="text"
+                                value={draftSettings.reconnectNotice || ''}
+                                onChange={(e) =>
+                                  setDraftSettings((prev) => ({ ...prev, reconnectNotice: e.target.value }))
+                                }
+                                placeholder="✓ Instant Automatic Reconnection..."
+                                className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500 font-sans"
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Section 2: Settlement Channels */}
+                        <div className="p-4 rounded-2xl bg-slate-950/70 border border-slate-800/80 space-y-4">
+                          <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-2">
+                            <Zap className="w-4 h-4" />
+                            <span>Payment Settlement Channels</span>
+                          </h4>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                                GCash Account Number
+                              </label>
+                              <input
+                                type="text"
+                                value={draftSettings.gcashNumber || ''}
+                                onChange={(e) =>
+                                  setDraftSettings((prev) => ({ ...prev, gcashNumber: e.target.value }))
+                                }
+                                placeholder="09624171684"
+                                className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-100 font-mono placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                                GCash Account Name
+                              </label>
+                              <input
+                                type="text"
+                                value={draftSettings.gcashName || ''}
+                                onChange={(e) =>
+                                  setDraftSettings((prev) => ({ ...prev, gcashName: e.target.value }))
+                                }
+                                placeholder="Leonardo Flojo Jr"
+                                className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                                Maya Account Number
+                              </label>
+                              <input
+                                type="text"
+                                value={draftSettings.mayaNumber || ''}
+                                onChange={(e) =>
+                                  setDraftSettings((prev) => ({ ...prev, mayaNumber: e.target.value }))
+                                }
+                                placeholder="09624171684"
+                                className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-100 font-mono placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                                Maya Account Name
+                              </label>
+                              <input
+                                type="text"
+                                value={draftSettings.mayaName || ''}
+                                onChange={(e) =>
+                                  setDraftSettings((prev) => ({ ...prev, mayaName: e.target.value }))
+                                }
+                                placeholder="Leonardo Flojo Jr"
+                                className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+                              />
+                            </div>
+
+                            <div className="sm:col-span-2">
+                              <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                                Bank Name (Optional)
+                              </label>
+                              <input
+                                type="text"
+                                value={draftSettings.bankName || ''}
+                                onChange={(e) =>
+                                  setDraftSettings((prev) => ({ ...prev, bankName: e.target.value }))
+                                }
+                                placeholder="BDO / BPI / UnionBank / Landbank"
+                                className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                                Bank Account Number
+                              </label>
+                              <input
+                                type="text"
+                                value={draftSettings.bankAccountNumber || ''}
+                                onChange={(e) =>
+                                  setDraftSettings((prev) => ({ ...prev, bankAccountNumber: e.target.value }))
+                                }
+                                placeholder="1234-5678-9012"
+                                className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-100 font-mono placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                                Bank Account Name
+                              </label>
+                              <input
+                                type="text"
+                                value={draftSettings.bankAccountName || ''}
+                                onChange={(e) =>
+                                  setDraftSettings((prev) => ({ ...prev, bankAccountName: e.target.value }))
+                                }
+                                placeholder="Leonardo Flojo Jr"
+                                className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Section 3: Portal & Support Contact */}
+                        <div className="p-4 rounded-2xl bg-slate-950/70 border border-slate-800/80 space-y-4">
+                          <h4 className="text-xs font-bold uppercase tracking-wider text-amber-400 flex items-center gap-2">
+                            <Globe className="w-4 h-4" />
+                            <span>Portal Link & Support Contact</span>
+                          </h4>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                                Portal Button Text
+                              </label>
+                              <input
+                                type="text"
+                                value={draftSettings.portalButtonText || ''}
+                                onChange={(e) =>
+                                  setDraftSettings((prev) => ({ ...prev, portalButtonText: e.target.value }))
+                                }
+                                placeholder="Open SwiftStream Online Portal →"
+                                className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                                Portal Redirect URL
+                              </label>
+                              <input
+                                type="text"
+                                value={draftSettings.portalUrl || ''}
+                                onChange={(e) =>
+                                  setDraftSettings((prev) => ({ ...prev, portalUrl: e.target.value }))
+                                }
+                                placeholder="https://swiftstream-billing.web.app"
+                                className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-100 font-mono placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                                Support Phone / Hotline
+                              </label>
+                              <input
+                                type="text"
+                                value={draftSettings.supportPhone || ''}
+                                onChange={(e) =>
+                                  setDraftSettings((prev) => ({ ...prev, supportPhone: e.target.value }))
+                                }
+                                placeholder="09624171684"
+                                className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-100 font-mono placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                                Support Email
+                              </label>
+                              <input
+                                type="text"
+                                value={draftSettings.supportEmail || ''}
+                                onChange={(e) =>
+                                  setDraftSettings((prev) => ({ ...prev, supportEmail: e.target.value }))
+                                }
+                                placeholder="billing@swiftstream.ph"
+                                className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+                              />
+                            </div>
+
+                            <div className="sm:col-span-2">
+                              <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                                Footer Operations Center Note
+                              </label>
+                              <input
+                                type="text"
+                                value={draftSettings.footerNote || ''}
+                                onChange={(e) =>
+                                  setDraftSettings((prev) => ({ ...prev, footerNote: e.target.value }))
+                                }
+                                placeholder="SwiftStream Fiber Telecommunications • Lagonoy, Camarines Sur Operations"
+                                className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      /* Raw HTML Code Tab */
+                      <div className="space-y-4">
+                        <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-3">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <label className="flex items-center gap-2 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={Boolean(draftSettings.enableCustomHtmlOverride)}
+                                onChange={(e) =>
+                                  setDraftSettings((prev) => ({ ...prev, enableCustomHtmlOverride: e.target.checked }))
+                                }
+                                className="w-4 h-4 rounded text-cyan-600 focus:ring-cyan-500 bg-slate-900 border-slate-700 cursor-pointer"
+                              />
+                              <span className="text-xs font-bold text-slate-200">
+                                Enable Custom Raw HTML Override
+                              </span>
+                            </label>
+
+                            <button
+                              type="button"
+                              onClick={handleLoadCurrentTemplateIntoCode}
+                              className="text-[11px] px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-300 font-bold flex items-center gap-1.5 cursor-pointer transition-colors border border-slate-700"
+                            >
+                              <FileCode className="w-3.5 h-3.5" />
+                              <span>Load Generated HTML into Editor</span>
+                            </button>
+                          </div>
+
+                          <p className="text-[11px] text-slate-400 leading-relaxed">
+                            When enabled, the exact HTML markup below will be served from your router storage (<code className="text-cyan-400">walled_garden.html</code>). When disabled, the template is generated dynamically from the Visual Form fields.
+                          </p>
+                        </div>
+
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between text-xs text-slate-400 font-mono">
+                            <span>HTML Source Code Markup</span>
+                            <span className="text-cyan-400 font-bold">{draftSettings.customHtmlOverride?.length || 0} characters</span>
+                          </div>
+
+                          <textarea
+                            value={draftSettings.customHtmlOverride || ''}
+                            onChange={(e) =>
+                              setDraftSettings((prev) => ({
+                                ...prev,
+                                customHtmlOverride: e.target.value,
+                                enableCustomHtmlOverride: true,
+                              }))
+                            }
+                            placeholder="<!DOCTYPE html><html>...</html>"
+                            rows={18}
+                            className="w-full p-4 rounded-2xl bg-slate-950 border border-slate-800 font-mono text-[11px] text-cyan-300 leading-relaxed focus:outline-none focus:border-cyan-500 resize-none scrollbar-thin"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Right Column: Live Real-time Preview */}
+                  <div
+                    className={`w-full lg:w-1/2 flex-1 flex flex-col min-h-0 bg-slate-950 overflow-hidden ${
+                      mobileEditorView === 'editor' ? 'hidden lg:flex' : 'flex'
+                    }`}
+                  >
+                    {/* Live Preview Bar */}
+                    <div className="px-4 py-2.5 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between gap-3 text-xs flex-shrink-0">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                        <span className="font-bold text-slate-200 text-xs">Live Real-time Preview</span>
+                        <span className="text-slate-500 font-mono text-[10px] hidden sm:inline">Updates as you type</span>
+                      </div>
+
+                      {/* Device Switcher */}
+                      <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
+                        <button
+                          type="button"
+                          onClick={() => setEditPreviewDevice('mobile')}
+                          className={`flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold text-[11px] transition-all cursor-pointer ${
+                            editPreviewDevice === 'mobile'
+                              ? 'bg-cyan-600 text-white shadow'
+                              : 'text-slate-400 hover:text-slate-200'
+                          }`}
+                        >
+                          <Smartphone className="w-3 h-3" />
+                          <span>Mobile</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditPreviewDevice('desktop')}
+                          className={`flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold text-[11px] transition-all cursor-pointer ${
+                            editPreviewDevice === 'desktop'
+                              ? 'bg-cyan-600 text-white shadow'
+                              : 'text-slate-400 hover:text-slate-200'
+                          }`}
+                        >
+                          <Monitor className="w-3 h-3" />
+                          <span>Desktop</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Frame Container */}
+                    <div className="flex-1 p-3 sm:p-5 flex items-center justify-center overflow-hidden bg-slate-950 relative">
+                      <div
+                        className={`transition-all duration-300 shadow-2xl overflow-hidden border border-slate-700/70 bg-black flex flex-col ${
+                          editPreviewDevice === 'mobile'
+                            ? 'w-[380px] h-full max-h-[680px] rounded-[28px] border-4 border-slate-700'
+                            : 'w-full h-full rounded-xl border border-slate-800'
+                        }`}
+                      >
+                        <div className="px-3.5 py-1.5 bg-slate-900/90 border-b border-slate-800 text-[10px] font-mono text-slate-400 flex items-center justify-between flex-shrink-0">
+                          <span className="text-slate-300">
+                            {editPreviewDevice === 'mobile' ? 'Mobile Viewport (380px)' : 'Desktop Viewport'}
+                          </span>
+                          <span className="text-cyan-400">192.168.88.1/walled_garden.html</span>
+                        </div>
+                        <iframe
+                          title="Walled Garden Live Customizer Preview"
+                          srcDoc={draftPreviewHtml}
+                          className="w-full flex-1 border-0"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Modal Footer Actions */}
+                <div className="px-6 py-4 bg-slate-900 border-t border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs flex-shrink-0">
+                  <span className="text-slate-400 text-[11px]">
+                    Saved customizations immediately apply to your router isolation page, downloads, and previews.
+                  </span>
+
+                  <div className="flex items-center gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setShowEditTemplateModal(false)}
+                      className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-bold cursor-pointer transition-all"
+                    >
+                      Cancel
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleSaveWalledGardenSettings}
+                      className="flex items-center gap-1.5 px-5 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl font-bold cursor-pointer shadow-lg shadow-cyan-600/20 transition-all"
+                    >
+                      <Save className="w-4 h-4" />
+                      <span>Save & Apply Changes</span>
                     </button>
                   </div>
                 </div>

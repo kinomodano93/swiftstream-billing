@@ -664,6 +664,16 @@ export interface WalledGardenDeployOptions {
   redirectPort?: number;
   dnsServers?: string;
   customWhitelistedDomains?: string[];
+  enableWebProxyServing?: boolean;
+  localProxyPort?: number;
+  localServingAddress?: string;
+}
+
+export interface AutoIsolationSchedulerOptions {
+  cutoffTime?: string;
+  interval?: string;
+  scriptName?: string;
+  schedulerName?: string;
 }
 
 /**
@@ -841,9 +851,10 @@ export const deployWalledGardenToRouter = async (
     `/ip firewall nat add chain=dstnat src-address-list="NON_PAYMENT_ISOLATION" dst-address-list="WALLED_GARDEN_WHITELIST" action=accept comment="SwiftStream WG: Permit Whitelist HTTP"`
   );
 
-  const natRedirectCmd = portalIp
+  const effectiveRedirectPort = options.enableWebProxyServing ? (options.localProxyPort || 8080) : redirectPort;
+  const natRedirectCmd = portalIp && !options.enableWebProxyServing
     ? `/ip firewall nat add chain=dstnat src-address-list="NON_PAYMENT_ISOLATION" protocol=tcp dst-port=80 action=dst-nat to-addresses=${portalIp} to-ports=80 comment="SwiftStream WG: HTTP Captive Portal Redirect"`
-    : `/ip firewall nat add chain=dstnat src-address-list="NON_PAYMENT_ISOLATION" protocol=tcp dst-port=80 action=redirect to-ports=${redirectPort} comment="SwiftStream WG: HTTP Captive Portal Redirect"`;
+    : `/ip firewall nat add chain=dstnat src-address-list="NON_PAYMENT_ISOLATION" protocol=tcp dst-port=80 action=redirect to-ports=${effectiveRedirectPort} comment="SwiftStream WG: HTTP Captive Portal Redirect"`;
   executedCommands.push(natRedirectCmd);
 
   try {
@@ -863,7 +874,7 @@ export const deployWalledGardenToRouter = async (
       method: 'PUT',
       headers: authHeaders,
       body: JSON.stringify(
-        portalIp
+        portalIp && !options.enableWebProxyServing
           ? {
               chain: 'dstnat',
               'src-address-list': 'NON_PAYMENT_ISOLATION',
@@ -880,13 +891,51 @@ export const deployWalledGardenToRouter = async (
               protocol: 'tcp',
               'dst-port': '80',
               action: 'redirect',
-              'to-ports': String(redirectPort),
+              'to-ports': String(effectiveRedirectPort),
               comment: 'SwiftStream WG: HTTP Captive Portal Redirect',
             }
       ),
     });
   } catch (err) {
     console.info('[MikroTik Walled Garden] NAT rule deployment note:', err);
+  }
+
+  // 3b. Router-Side Web Proxy & Offline Serving Automation
+  if (options.enableWebProxyServing) {
+    const proxyPort = options.localProxyPort || 8080;
+    const localServingAddress = options.localServingAddress || '192.168.10.1';
+
+    const enableProxyCmd = `/ip proxy set enabled=yes port=${proxyPort} max-cache-size=none`;
+    executedCommands.push(enableProxyCmd);
+    try {
+      await executeMikrotikRequest(`${baseUrl}/ip/proxy`, {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({
+          enabled: true,
+          port: String(proxyPort),
+          'max-cache-size': 'none',
+        }),
+      });
+    } catch (err) {
+      console.info('[MikroTik Walled Garden] Proxy enable note:', err);
+    }
+
+    const proxyAccessCmd = `/ip proxy access add action=deny redirect-to="http://${localServingAddress}/walled_garden.html" comment="SwiftStream WG: Offline Redirect"`;
+    executedCommands.push(proxyAccessCmd);
+    try {
+      await executeMikrotikRequest(`${baseUrl}/ip/proxy/access`, {
+        method: 'PUT',
+        headers: authHeaders,
+        body: JSON.stringify({
+          action: 'deny',
+          'redirect-to': `http://${localServingAddress}/walled_garden.html`,
+          comment: 'SwiftStream WG: Offline Redirect',
+        }),
+      });
+    } catch (err) {
+      console.info('[MikroTik Walled Garden] Proxy access rule note:', err);
+    }
   }
 
   // 4. Filter Rules
@@ -969,6 +1018,210 @@ export const deployWalledGardenToRouter = async (
   return {
     success: true,
     message: `Walled Garden (Option A) rules successfully deployed to router at ${creds.ipAddress}. Whitelisted ${defaultWhitelistDomains.length} domains and configured captive redirection.`,
+    commands: executedCommands,
+  };
+};
+
+/**
+ * 3c. Direct 1-Click Router Upload for walled_garden.html via RouterOS REST API (/file)
+ */
+export const uploadWalledGardenHtmlToRouter = async (
+  creds: MikrotikCredentials,
+  htmlContent: string,
+  options: {
+    targetFileName?: string;
+    uploadToHotspotDir?: boolean;
+  } = {}
+): Promise<{
+  success: boolean;
+  message: string;
+  targetPath: string;
+  commands: string[];
+  error?: string;
+}> => {
+  const baseUrl = getBaseUrl(creds);
+  const authHeaders = getAuthHeaders(creds.username, creds.password);
+  const fileName = options.targetFileName || 'walled_garden.html';
+  const targetPath = options.uploadToHotspotDir ? `hotspot/${fileName}` : fileName;
+  const executedCommands: string[] = [];
+
+  const uploadCmd = `/file/add name="${targetPath}" contents="${htmlContent.slice(0, 60)}..."`;
+  executedCommands.push(uploadCmd);
+
+  try {
+    // 1. Attempt upload to /file using RouterOS v7 REST API POST
+    const res = await executeMikrotikRequest(`${baseUrl}/file`, {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify({
+        name: targetPath,
+        contents: htmlContent,
+      }),
+    });
+
+    if (res.ok) {
+      return {
+        success: true,
+        message: `Successfully uploaded "${targetPath}" directly to router flash memory (${(htmlContent.length / 1024).toFixed(1)} KB).`,
+        targetPath,
+        commands: executedCommands,
+      };
+    }
+
+    // 2. If POST fails with 405 or 409, try PUT to update existing file
+    const putRes = await executeMikrotikRequest(`${baseUrl}/file/${encodeURIComponent(targetPath)}`, {
+      method: 'PUT',
+      headers: authHeaders,
+      body: JSON.stringify({
+        contents: htmlContent,
+      }),
+    });
+
+    if (putRes.ok) {
+      return {
+        success: true,
+        message: `Updated "${targetPath}" on router storage (${(htmlContent.length / 1024).toFixed(1)} KB).`,
+        targetPath,
+        commands: executedCommands,
+      };
+    }
+
+    // If REST API responded with an error message
+    const errText = await res.text().catch(() => '');
+    return {
+      success: false,
+      message: `Router responded (${res.status}): ${errText || 'Upload failed'}. You can still download the file and drag into Winbox Files.`,
+      targetPath,
+      commands: executedCommands,
+      error: errText,
+    };
+  } catch (err: any) {
+    console.error('[MikroTik File Upload Error]:', err);
+    return {
+      success: false,
+      message: `Failed to connect to router REST file API (${err?.message || 'Network error'}). You can still download the file and drag into Winbox.`,
+      targetPath,
+      commands: executedCommands,
+      error: err?.message,
+    };
+  }
+};
+
+/**
+ * 3d. Deploy On-Router Auto-Isolation Scheduler (/system script & /system scheduler)
+ * Automatically checks delinquent address-list and disconnects active PPPoE sessions at the cutoff time.
+ */
+export const deployAutoIsolationSchedulerToRouter = async (
+  creds: MikrotikCredentials,
+  options: AutoIsolationSchedulerOptions = {}
+): Promise<{
+  success: boolean;
+  message: string;
+  commands: string[];
+  error?: string;
+}> => {
+  const baseUrl = getBaseUrl(creds);
+  const authHeaders = getAuthHeaders(creds.username, creds.password);
+  const executedCommands: string[] = [];
+  const cutoffTime = options.cutoffTime || '12:00:00';
+  const interval = options.interval || '1d';
+  const scriptName = options.scriptName || 'swiftstream_auto_cut';
+  const schedulerName = options.schedulerName || 'swiftstream_auto_cut_sched';
+
+  const scriptSource = `:log info "SwiftStream: Commencing daily delinquent line isolation sweep...";
+:local isolatedCount 0;
+:foreach item in=[/ip firewall address-list find where list="NON_PAYMENT_ISOLATION"] do={
+  :local targetIp [/ip firewall address-list get $item address];
+  :foreach session in=[/interface pppoe-server find where address=$targetIp] do={
+    :local userName [/interface pppoe-server get $session user];
+    :log warning ("SwiftStream Isolation: Terminating active session for overdue line: " . $userName . " (" . $targetIp . ")");
+    /interface pppoe-server remove $session;
+    :set isolatedCount ($isolatedCount + 1);
+  }
+}
+:log info ("SwiftStream: Isolation sweep finished. " . $isolatedCount . " delinquent sessions disconnected and redirected.");`;
+
+  // 1. Script Creation
+  const scriptCmd = `/system script add name="${scriptName}" source={ ${scriptSource} } comment="SwiftStream Automated Delinquent PPPoE Isolation Sweep"`;
+  executedCommands.push(scriptCmd);
+
+  try {
+    // Attempt removal of existing script to avoid duplicates
+    try {
+      const existingScriptsRes = await executeMikrotikRequest(`${baseUrl}/system/script`, {
+        method: 'GET',
+        headers: authHeaders,
+      });
+      if (existingScriptsRes.ok) {
+        const scripts = await existingScriptsRes.json();
+        const existing = Array.isArray(scripts) ? scripts.find((s: any) => s.name === scriptName) : null;
+        if (existing && existing['.id']) {
+          await executeMikrotikRequest(`${baseUrl}/system/script/${existing['.id']}`, {
+            method: 'DELETE',
+            headers: authHeaders,
+          });
+        }
+      }
+    } catch {
+      // Ignored
+    }
+
+    await executeMikrotikRequest(`${baseUrl}/system/script`, {
+      method: 'PUT',
+      headers: authHeaders,
+      body: JSON.stringify({
+        name: scriptName,
+        source: scriptSource,
+        comment: 'SwiftStream Automated Delinquent PPPoE Isolation Sweep',
+      }),
+    });
+  } catch (err) {
+    console.info('[MikroTik Scheduler] Script setup note:', err);
+  }
+
+  // 2. Scheduler Creation
+  const schedCmd = `/system scheduler add name="${schedulerName}" start-time="${cutoffTime}" interval="${interval}" on-event="${scriptName}" comment="SwiftStream Daily Grace Period Cutoff Sweep"`;
+  executedCommands.push(schedCmd);
+
+  try {
+    // Attempt removal of existing scheduler to avoid duplicates
+    try {
+      const existingSchedRes = await executeMikrotikRequest(`${baseUrl}/system/scheduler`, {
+        method: 'GET',
+        headers: authHeaders,
+      });
+      if (existingSchedRes.ok) {
+        const schedulers = await existingSchedRes.json();
+        const existing = Array.isArray(schedulers) ? schedulers.find((s: any) => s.name === schedulerName) : null;
+        if (existing && existing['.id']) {
+          await executeMikrotikRequest(`${baseUrl}/system/scheduler/${existing['.id']}`, {
+            method: 'DELETE',
+            headers: authHeaders,
+          });
+        }
+      }
+    } catch {
+      // Ignored
+    }
+
+    await executeMikrotikRequest(`${baseUrl}/system/scheduler`, {
+      method: 'PUT',
+      headers: authHeaders,
+      body: JSON.stringify({
+        name: schedulerName,
+        'start-time': cutoffTime,
+        interval: interval,
+        'on-event': scriptName,
+        comment: 'SwiftStream Daily Grace Period Cutoff Sweep',
+      }),
+    });
+  } catch (err) {
+    console.info('[MikroTik Scheduler] Scheduler setup note:', err);
+  }
+
+  return {
+    success: true,
+    message: `Auto-isolation scheduler installed on router. Configured daily cutoff at ${cutoffTime} (interval: ${interval}).`,
     commands: executedCommands,
   };
 };

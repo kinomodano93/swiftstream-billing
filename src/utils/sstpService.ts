@@ -42,6 +42,15 @@ export const generatePppoeBatchScript = (
   return script;
 };
 
+export interface IsolationScriptOptions {
+  portalIp?: string;
+  enableProxy?: boolean;
+  proxyPort?: number;
+  localServingAddress?: string;
+  cutoffTime?: string;
+  scheduleInterval?: string;
+}
+
 /**
  * Generates RouterOS Option A Walled Garden & Overdue Non-Payment Isolation Script
  * (Strict Redirection, Captive Portal Trigger via HTTPS reset, and Payment Gateway Whitelist)
@@ -49,7 +58,8 @@ export const generatePppoeBatchScript = (
 export const generateIsolationScript = (
   customers: Customer[],
   portalUrl?: string,
-  portalIp?: string
+  portalIp?: string,
+  options: IsolationScriptOptions = {}
 ): string => {
   const overdueCustomers = customers.filter(
     (c) => c.status === 'overdue' || c.status === 'suspended' || c.status === 'disconnected'
@@ -147,6 +157,33 @@ add chain=forward src-address-list="NON_PAYMENT_ISOLATION" protocol=tcp dst-port
 
 # 4. Drop all other traffic for isolated accounts
 add chain=forward src-address-list="NON_PAYMENT_ISOLATION" action=drop comment="SwiftStream WG: Drop Non-Payment Internet Traffic"
+`;
+
+  if (options.enableProxy !== false) {
+    const proxyPort = options.proxyPort || 8080;
+    const redirectTarget = options.localServingAddress || 'http://192.168.10.1/walled_garden.html';
+    script += `
+# Step 6: Router-Side Web Proxy & Offline Serving (Zero-WAN Dependency)
+/ip proxy
+set enabled=yes port=${proxyPort} max-cache-size=none
+/ip proxy access
+remove [find comment="SwiftStream WG: Offline Redirect"]
+add action=deny redirect-to="${redirectTarget}" comment="SwiftStream WG: Offline Redirect"
+`;
+  }
+
+  const cutoffTime = options.cutoffTime || '12:00:00';
+  const scheduleInterval = options.scheduleInterval || '1d';
+  script += `
+# Step 7: On-Router Auto-Isolation Scheduler (Daily Cutoff Automation)
+# Automatically sweeps NON_PAYMENT_ISOLATION list and terminates active PPPoE sessions
+/system script
+remove [find name="swiftstream_auto_cut"]
+add name="swiftstream_auto_cut" policy=read,write,test source=":log info \\"SwiftStream: Commencing daily delinquent line isolation sweep...\\"; :local isolatedCount 0; :foreach item in=[/ip firewall address-list find where list=\\"NON_PAYMENT_ISOLATION\\"] do={ :local targetIp [/ip firewall address-list get \\$item address]; :foreach session in=[/interface pppoe-server find where address=\\$targetIp] do={ :local userName [/interface pppoe-server get \\$session user]; :log warning (\\"SwiftStream Isolation: Terminating active session for overdue line: \\" . \\$userName . \\" (\\" . \\$targetIp . \\")\\"); /interface pppoe-server remove \\$session; :set isolatedCount (\\$isolatedCount + 1); } }; :log info (\\"SwiftStream: Isolation sweep finished. \\" . \\$isolatedCount . \\" delinquent sessions disconnected and redirected.\\");" comment="SwiftStream Automated Delinquent PPPoE Isolation Sweep"
+
+/system scheduler
+remove [find name="swiftstream_auto_cut_sched"]
+add name="swiftstream_auto_cut_sched" start-time="${cutoffTime}" interval="${scheduleInterval}" on-event="swiftstream_auto_cut" comment="SwiftStream Scheduled Overdue Cutoff"
 `;
 
   return script;
