@@ -1,81 +1,270 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // System health check
+
+    // =========================================================================
+    // SECURITY HELPERS & ROLE-BASED ACCESS CONTROL (RBAC)
+    // =========================================================================
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Direct bootstrap check against verified administrator emails
+    function isVerifiedAdminEmail() {
+      return isSignedIn() &&
+        request.auth.token.email_verified == true &&
+        request.auth.token.email in [
+          'swiftstream.telecom@gmail.com',
+          'admin@swiftstream.ph'
+        ];
+    }
+
+    // Fetches the user profile document from /system_users/{uid}
+    function getUserData() {
+      return get(/databases/$(database)/documents/system_users/$(request.auth.uid)).data;
+    }
+
+    function hasUserDoc() {
+      return isSignedIn() && exists(/databases/$(database)/documents/system_users/$(request.auth.uid));
+    }
+
+    // Checks user role from system_users or verified admin token
+    function hasRole(role) {
+      return isVerifiedAdminEmail() || (hasUserDoc() && getUserData().role == role);
+    }
+
+    function isAdmin() {
+      return isVerifiedAdminEmail() || hasRole('admin');
+    }
+
+    function isStaff() {
+      return isAdmin() || (hasUserDoc() && getUserData().role in ['admin', 'cashier', 'technician', 'tech']);
+    }
+
+    function isSubscriber() {
+      return hasUserDoc() && getUserData().role == 'subscriber';
+    }
+
+    // Validates that the requesting authenticated user owns the customer account
+    function isCustomerOwner(customerId) {
+      return isSignedIn() && (
+        request.auth.uid == customerId ||
+        (hasUserDoc() && (
+          (getUserData().accountNo != null && resource.data.accountNo == getUserData().accountNo) ||
+          (getUserData().email != null && resource.data.email == getUserData().email)
+        ))
+      );
+    }
+
+    // Validates ownership for child collections (invoices, payments, tickets)
+    function isResourceOwner() {
+      return isSignedIn() && (
+        resource.data.customerId == request.auth.uid ||
+        (hasUserDoc() && getUserData().accountNo != null && resource.data.accountNo == getUserData().accountNo)
+      );
+    }
+
+    // =========================================================================
+    // COLLECTION-SPECIFIC SECURITY RULES
+    // =========================================================================
+
+    // 1. System Health Check
     match /_system_health/{document=**} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
-    
-    // ISP Operations collections: Subscribers, Invoices, Payments, Network Assets
+
+    // 2. Customers / Subscribers
     match /customers/{customerId} {
-      allow read, write: if true; // In production: request.auth != null
+      allow read: if isStaff() || isCustomerOwner(customerId);
+      allow create: if isStaff();
+      // Subscribers may update limited non-billing contact fields; billing & status are staff-only
+      allow update: if isStaff() || (
+        isCustomerOwner(customerId) &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'balance', 'walletBalance', 'advanceDeposit', 'planId',
+          'planSpeedMbps', 'monthlyFee', 'status', 'billingDay', 'network'
+        ])
+      );
+      allow delete: if isAdmin();
     }
-    
+
+    // 3. Invoices (Statements of Account)
     match /invoices/{invoiceId} {
-      allow read, write: if true;
+      allow read: if isStaff() || isResourceOwner();
+      allow create, update: if isStaff();
+      allow delete: if isAdmin();
     }
-    
+
+    // 4. Payments (Official Receipts Ledger - Immutable Settlements)
     match /payments/{paymentId} {
-      allow read, write: if true;
+      allow read: if isStaff() || isResourceOwner();
+      allow create: if isStaff();
+      allow update: if isStaff();
+      allow delete: if false; // Financial ledger immutability: payments cannot be deleted
     }
-    
+
+    // 5. Payment Submissions (Online Proof of Transfers from Subscribers)
     match /payment_submissions/{submissionId} {
-      allow read, write: if true;
+      allow read: if isStaff() || (
+        isSignedIn() && (
+          resource.data.customerId == request.auth.uid ||
+          (hasUserDoc() && resource.data.customerId == getUserData().accountNo) ||
+          resource.data.subscriberEmail == request.auth.token.email
+        )
+      );
+      // Authenticated subscribers can upload their payment receipts
+      allow create: if isSignedIn() &&
+        request.resource.data.amount is number &&
+        request.resource.data.amount > 0 &&
+        request.resource.data.referenceNumber is string &&
+        request.resource.data.referenceNumber.size() > 0 &&
+        request.resource.data.status == 'pending_review';
+      // Only staff can approve, reject, or audit payment submissions
+      allow update, delete: if isStaff();
     }
-    
+
+    // 6. Commercial Internet Plans (Single Source of Truth)
     match /plans/{planId} {
-      allow read, write: if true;
+      allow read: if true; // Public catalog
+      allow create, update: if isAdmin() &&
+        request.resource.data.name is string &&
+        request.resource.data.speedMbps is number &&
+        request.resource.data.speedMbps > 0 &&
+        request.resource.data.monthlyFee is number;
+      allow delete: if isAdmin();
     }
-    
+
+    // 7. Repair Orders / Trouble Tickets
     match /repair_orders/{orderId} {
-      allow read, write: if true;
+      allow read: if isStaff() || (isSignedIn() && resource.data.customerId == request.auth.uid);
+      allow create: if isStaff() || (isSignedIn() && request.resource.data.customerId != null);
+      // Subscribers can append messages to their tickets; staff can update status/technician
+      allow update: if isStaff() || (
+        isSignedIn() &&
+        resource.data.customerId == request.auth.uid &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['messages', 'updatedAt'])
+      );
+      allow delete: if isAdmin();
     }
-    
-    match /nap_boxes/{boxId} {
-      allow read, write: if true;
-    }
-    
-    match /fiber_cables/{cableId} {
-      allow read, write: if true;
-    }
-    
-    match /fiber_closures/{closureId} {
-      allow read, write: if true;
-    }
-    
-    match /olt_nodes/{nodeId} {
-      allow read, write: if true;
-    }
-    
+
+    // 8. MikroTik Hardware Credentials & Device Registry
+    // STRICT: Router credentials, passwords, and API ports must NEVER be exposed to subscribers or public
     match /mikrotik_devices/{deviceId} {
-      allow read, write: if true;
+      allow read: if isStaff();
+      allow create, update, delete: if isAdmin();
     }
-    
-    match /expenses/{expenseId} {
-      allow read, write: if true;
-    }
-    
-    match /audit_logs/{logId} {
-      allow read, write: if true;
-    }
-    
-    match /daily_remittances/{remittanceId} {
-      allow read, write: if true;
-    }
-    
-    match /addon_catalog/{itemId} {
-      allow read, write: if true;
-    }
-    
+
+    // 9. Business Profile & Payment Gateway Settings
     match /business_profile/{profileId} {
-      allow read, write: if true;
+      allow read: if true; // Public company info, bank QR, contact numbers
+      allow create, update: if isAdmin();
+      allow delete: if false; // Business profile must not be deleted
     }
-    
-    // Default fallback
+
+    // 10. Audit Logs (Immutable Security Audit Trail)
+    match /audit_logs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isSignedIn() &&
+        request.resource.data.action is string &&
+        request.resource.data.userName is string;
+      allow update, delete: if false; // Tamper-proof audit trail
+    }
+
+    // 11. Expenses, Daily Remittances, and Operational Bills
+    match /expenses/{expenseId} {
+      allow read, create, update: if isStaff();
+      allow delete: if isAdmin();
+    }
+
+    match /daily_remittances/{remittanceId} {
+      allow read, create, update: if isStaff();
+      allow delete: if isAdmin();
+    }
+
+    match /operational_bills/{billId} {
+      allow read, create, update: if isStaff();
+      allow delete: if isAdmin();
+    }
+
+    // 12. Reminders & Network Advisories
+    match /reminders/{reminderId} {
+      allow read: if isStaff() || (
+        isSignedIn() && (
+          resource.data.customerId == request.auth.uid ||
+          (resource.data.mobile != null && request.auth.token.phone_number != null && resource.data.mobile == request.auth.token.phone_number)
+        )
+      );
+      allow create, update, delete: if isStaff();
+    }
+
+    // 13. System Users (User Roles & Profiles)
+    match /system_users/{userId} {
+      allow read: if isStaff() || (isSignedIn() && request.auth.uid == userId);
+      // New subscribers can register self-profile; staff creation requires admin
+      allow create: if isAdmin() || (
+        isSignedIn() &&
+        request.auth.uid == userId &&
+        request.resource.data.role == 'subscriber'
+      );
+      // Users can update their profile; role escalation is blocked
+      allow update: if isAdmin() || (
+        isSignedIn() &&
+        request.auth.uid == userId &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'isApproved', 'status'])
+      );
+      allow delete: if isAdmin();
+    }
+
+    // 14. Online Connection Applications (Public Portal)
+    match /online_applications/{applicationId} {
+      allow create: if true; // Public self-registration application
+      allow read, update, delete: if isStaff();
+    }
+
+    // 15. Outage Broadcasts
+    match /outage_broadcasts/{broadcastId} {
+      allow read: if true;
+      allow write: if isStaff();
+    }
+
+    // 16. Network Topology & GIS Infrastructure
+    match /nap_boxes/{boxId} {
+      allow read, write: if isStaff();
+    }
+
+    match /fiber_cables/{cableId} {
+      allow read, write: if isStaff();
+    }
+
+    match /fiber_closures/{closureId} {
+      allow read, write: if isStaff();
+    }
+
+    match /olt_nodes/{nodeId} {
+      allow read, write: if isStaff();
+    }
+
+    match /coverage_areas/{areaId} {
+      allow read: if true; // Public coverage lookup
+      allow write: if isStaff();
+    }
+
+    match /addon_catalog/{itemId} {
+      allow read: if true; // Public addons
+      allow write: if isStaff();
+    }
+
+    match /system_config/{configId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // =========================================================================
+    // DEFAULT CATCH-ALL: DENY EVERYTHING ELSE
+    // =========================================================================
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if false;
     }
   }
 }
-

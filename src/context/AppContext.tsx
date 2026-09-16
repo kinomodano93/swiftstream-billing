@@ -1153,8 +1153,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     customerData: Omit<Customer, 'id' | 'createdAt' | 'updatedAt'>,
     options?: { skipMikrotikSync?: boolean }
   ): Customer => {
+    // Sync Policy Guard: Guarantee planSpeedMbps originates from authoritative commercial plan
+    let resolvedSpeed = customerData.planSpeedMbps;
+    if (!resolvedSpeed || resolvedSpeed <= 0) {
+      const matchedPlan = plans.find((p) => p.id === customerData.planId) || plans[0];
+      resolvedSpeed = matchedPlan ? matchedPlan.speedMbps : 50;
+    }
+
     const newCustomer: Customer = {
       ...customerData,
+      planSpeedMbps: resolvedSpeed,
       id: generateId('CUST'),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -1254,7 +1262,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setCustomers((prev) =>
       prev.map((c) => {
         if (c.id === id) {
-          const updated = { ...c, ...updates, updatedAt: new Date().toISOString() };
+          // Sync Policy Guard: If planId changed and planSpeedMbps was not explicitly provided, update planSpeedMbps from authoritative plan
+          let resolvedSpeed = updates.planSpeedMbps ?? c.planSpeedMbps;
+          if (updates.planId && updates.planId !== c.planId && !updates.planSpeedMbps) {
+            const matchedPlan = plans.find((p) => p.id === updates.planId);
+            if (matchedPlan) {
+              resolvedSpeed = matchedPlan.speedMbps;
+            }
+          }
+          const updated = { ...c, ...updates, planSpeedMbps: resolvedSpeed, updatedAt: new Date().toISOString() };
           updatedCustomerObj = updated;
           saveFirestoreDoc(COLLECTIONS.CUSTOMERS, updated);
           return updated;
@@ -2695,16 +2711,34 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       showToast('error', 'Access Denied', 'You do not have permission to create or manage internet plans.');
       return;
     }
+
+    // Sync Policy Guard: Router profile formats (e.g. Plan-70M, plan-100m) are technical rate limits and cannot be commercial plans
+    if (isRouterProfileName(planData.name)) {
+      showToast('error', 'Invalid Plan Name', `"${planData.name}" is a technical MikroTik profile format. Commercial plans must use customer-facing branding (e.g. "Gamer Pro").`);
+      return;
+    }
+
+    if (!planData.speedMbps || planData.speedMbps <= 0) {
+      showToast('error', 'Invalid Plan Speed', 'Commercial internet plans must have a positive speed in Mbps.');
+      return;
+    }
+
     const newPlan: Plan = { ...planData, id: generateId('PLAN') };
 
     setPlans((prev) => [...prev, newPlan]);
     saveFirestoreDoc(COLLECTIONS.PLANS, newPlan);
-    showToast('success', 'Plan Created', `Internet plan "${newPlan.name}" is now available.`);
+    showToast('success', 'Plan Created', `Internet plan "${newPlan.name}" (${newPlan.speedMbps} Mbps) is now available.`);
   };
 
   const updatePlan = (id: string, updates: Partial<Plan>) => {
     if (!hasPermission('canManagePlans')) {
       showToast('error', 'Access Denied', 'You do not have permission to modify internet plans.');
+      return;
+    }
+
+    // Sync Policy Guard: Prevent renaming commercial plans to router profiles
+    if (updates.name && isRouterProfileName(updates.name)) {
+      showToast('error', 'Invalid Plan Name', `"${updates.name}" is a technical MikroTik profile format. Commercial plans must use customer-facing branding.`);
       return;
     }
 
@@ -2719,13 +2753,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       })
     );
 
-    // Keep subscribers subscribed to this plan in sync with updated package details
+    // Keep subscribers subscribed to this plan in sync with updated package details (name, speed, fee)
     setCustomers((prev) =>
       prev.map((c) => {
         if (c.planId === id) {
           const updated = {
             ...c,
             planName: updates.name || c.planName,
+            planSpeedMbps: updates.speedMbps !== undefined ? updates.speedMbps : c.planSpeedMbps,
             monthlyFee: updates.monthlyFee !== undefined ? updates.monthlyFee : c.monthlyFee,
             updatedAt: new Date().toISOString(),
           };
