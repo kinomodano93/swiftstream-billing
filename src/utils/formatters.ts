@@ -256,6 +256,178 @@ export const generateId = (prefix: string = 'ID'): string => {
   return `${prefix}-${timestamp}-${randomStr}`.toUpperCase();
 };
 
+export const isRouterProfileName = (name?: string): boolean => {
+  if (!name) return false;
+  const n = name.trim().toLowerCase();
+  return (
+    /^plan[-_]\d+m(?:bps)?$/i.test(n) ||
+    /^\d+\s*m(?:bps)?$/i.test(n) ||
+    /^profile[-_]/i.test(n) ||
+    n.startsWith('pppoe') ||
+    n.includes('pppoe') ||
+    n.includes('router profile') ||
+    n.includes('default-encryption') ||
+    n.includes('imported from mikrotik') ||
+    n.includes('routeros profile') ||
+    n === 'default'
+  );
+};
+
+export const formatCommercialPlanName = (rawPlanName?: string, plan?: Plan | null): string => {
+  const cleanRaw = rawPlanName ? rawPlanName.replace(/\s*\|\s*\d+\s*m(?:bps)?/i, '').trim() : '';
+
+  // If raw plan name is valid and NOT a router profile, prefer it
+  if (cleanRaw && !isRouterProfileName(cleanRaw)) {
+    return cleanRaw;
+  }
+
+  // Next, if plan object has a non-router profile name, use it
+  if (plan && plan.name && !isRouterProfileName(plan.name)) {
+    return plan.name.replace(/\s*\|\s*\d+\s*m(?:bps)?/i, '').trim();
+  }
+
+  // If it was a router profile like "Plan-70M" or "plan-250m", extract speed
+  const textToScan = rawPlanName || plan?.name || '';
+  if (textToScan && isRouterProfileName(textToScan)) {
+    const speedMatch = textToScan.match(/(\d+)\s*(?:M|Mbps)?/i);
+    if (speedMatch) {
+      return `SwiftStream Fiber ${speedMatch[1]} Mbps`;
+    }
+  }
+
+  return cleanRaw || 'SwiftStream Pure Fiber';
+};
+
+export interface CustomerPlanResolution {
+  plan: Plan;
+  cleanName: string;
+  speedMbps: number;
+}
+
+export const resolveCustomerPlan = (
+  customer: Customer | null | undefined,
+  plans?: Plan[]
+): CustomerPlanResolution => {
+  if (!customer) {
+    const defaultSpeed = 50;
+    const defaultName = 'SwiftStream Pure Fiber';
+    const fallbackPlan: Plan = {
+      id: 'default-plan',
+      name: defaultName,
+      speedMbps: defaultSpeed,
+      monthlyFee: 1299,
+      installationFee: 1500,
+      category: 'residential',
+      description: `${defaultName} (${defaultSpeed} Mbps)`,
+      features: [`${defaultSpeed} Mbps Fiber`, 'Unlimited Bandwidth', '24/7 Support'],
+      isActive: true,
+      isPublic: true,
+      mikrotikProfile: `plan-${defaultSpeed}m`,
+    };
+    return { plan: fallbackPlan, cleanName: defaultName, speedMbps: defaultSpeed };
+  }
+
+  const allPlans = plans && plans.length > 0 ? plans : initialPlans;
+  const rawName = (customer.planName || '').trim();
+
+  // Strip speed suffixes like "| 250mbps", "| 250 Mbps", "| 250M", etc.
+  let cleanName = rawName.replace(/\s*\|\s*\d+\s*m(?:bps)?/i, '').trim();
+
+  // Extract explicit speed embedded in rawName (e.g. "250mbps" from "Gamer Pro | 250mbps")
+  let embeddedSpeed: number | null = null;
+  const speedMatch = rawName.match(/(\d+)\s*(?:m|mbps)/i);
+  if (speedMatch) {
+    embeddedSpeed = parseInt(speedMatch[1], 10);
+  }
+
+  // If rawName is a router profile like "Plan-70M" or "plan-250m", format it
+  if (isRouterProfileName(cleanName)) {
+    const sp = cleanName.match(/(\d+)\s*(?:M|Mbps)?/i)?.[1];
+    cleanName = sp ? `SwiftStream Fiber ${sp} Mbps` : 'SwiftStream Pure Fiber';
+  }
+
+  let matchedPlan: Plan | undefined;
+
+  // 1. Match by customer's planId
+  if (customer.planId) {
+    matchedPlan = allPlans.find((p) => p.id === customer.planId && !isRouterProfileName(p.name));
+  }
+
+  // 2. Match by cleanName (exact)
+  if (!matchedPlan && cleanName) {
+    const lowerClean = cleanName.toLowerCase();
+    matchedPlan = allPlans.find((p) => p.name.trim().toLowerCase() === lowerClean && !isRouterProfileName(p.name));
+  }
+
+  // 3. Match by partial plan name
+  if (!matchedPlan && cleanName) {
+    const lowerClean = cleanName.toLowerCase();
+    matchedPlan = allPlans.find(
+      (p) =>
+        !isRouterProfileName(p.name) &&
+        (p.name.toLowerCase().includes(lowerClean) || lowerClean.includes(p.name.toLowerCase()))
+    );
+  }
+
+  // 4. Match by embedded speed (e.g. 250 Mbps from "Gamer Pro | 250mbps")
+  if (!matchedPlan && embeddedSpeed) {
+    matchedPlan = allPlans.find((p) => p.speedMbps === embeddedSpeed && !isRouterProfileName(p.name));
+  }
+
+  // 5. Match by customer.speedMbps property if present
+  if (!matchedPlan && (customer as any)?.speedMbps) {
+    matchedPlan = allPlans.find((p) => p.speedMbps === (customer as any).speedMbps && !isRouterProfileName(p.name));
+  }
+
+  // 6. Match by monthlyFee
+  if (!matchedPlan && customer.monthlyFee && customer.monthlyFee > 0) {
+    matchedPlan = allPlans.find((p) => p.monthlyFee === customer.monthlyFee && !isRouterProfileName(p.name));
+  }
+
+  // If matched plan has a proper name and cleanName was empty or a router profile, use matchedPlan.name
+  if (matchedPlan) {
+    if (!cleanName || isRouterProfileName(cleanName)) {
+      cleanName = matchedPlan.name.replace(/\s*\|\s*\d+\s*m(?:bps)?/i, '').trim();
+    }
+  }
+
+  // Authoritative speed: get the speed data directly from the matched plan in Internet Plans
+  const speedMbps = (matchedPlan && matchedPlan.speedMbps > 0)
+    ? matchedPlan.speedMbps
+    : (embeddedSpeed || (customer as any)?.speedMbps || 50);
+
+  if (!cleanName) {
+    cleanName = matchedPlan ? matchedPlan.name : `SwiftStream Fiber ${speedMbps} Mbps`;
+  }
+
+  // Create an effective plan that always honors the subscriber's resolved speed and clean commercial name
+  const effectivePlan: Plan = matchedPlan
+    ? {
+        ...matchedPlan,
+        name: cleanName || matchedPlan.name,
+        speedMbps: speedMbps,
+      }
+    : {
+        id: customer.planId || `plan-${speedMbps}m`,
+        name: cleanName,
+        speedMbps,
+        monthlyFee: customer.monthlyFee || 0,
+        installationFee: 0,
+        category: 'residential',
+        description: `${cleanName} - High-Speed Fiber Internet (${speedMbps} Mbps)`,
+        features: [`${speedMbps} Mbps Dedicated Fiber`, 'Unlimited Bandwidth', 'Ultra-Low Latency Route', '24/7 Priority Support'],
+        isActive: true,
+        isPublic: true,
+        mikrotikProfile: `plan-${speedMbps}m`,
+      };
+
+  return {
+    plan: effectivePlan,
+    cleanName,
+    speedMbps,
+  };
+};
+
 export interface InvoicePlanDetails {
   planId: string;
   planName: string;
@@ -274,87 +446,101 @@ export const resolveInvoicePlanDetails = (
 ): InvoicePlanDetails => {
   const allPlans = plans && plans.length > 0 ? plans : initialPlans;
 
+  const rawCustomerPlanName = customer?.planName || '';
+  const cleanCustomerPlanName = rawCustomerPlanName.replace(/\s*\|\s*\d+\s*m(?:bps)?/i, '').trim();
+  const rawInvoicePlanName = invoice.planName || '';
+  const cleanInvoicePlanName = rawInvoicePlanName.replace(/\s*\|\s*\d+\s*m(?:bps)?/i, '').trim();
+
+  // Extract embedded speed if present (e.g. 250 from "Gamer Pro | 250mbps")
+  let embeddedSpeed: number | null = null;
+  const speedMatch = (rawCustomerPlanName || rawInvoicePlanName).match(/(\d+)\s*(?:m|mbps)/i);
+  if (speedMatch) {
+    embeddedSpeed = parseInt(speedMatch[1], 10);
+  }
+
   // 1. Authoritative lookup in Plans & Packages catalog:
   let matchedPlan: Plan | undefined;
 
   // Priority 1: Customer's assigned planId in Plans & Packages
   if (customer?.planId) {
-    matchedPlan = allPlans.find((p) => p.id === customer.planId);
+    matchedPlan = allPlans.find((p) => p.id === customer.planId && !isRouterProfileName(p.name));
   }
 
   // Priority 2: Invoice's recorded planId
   if (!matchedPlan && invoice.planId) {
-    matchedPlan = allPlans.find((p) => p.id === invoice.planId);
+    matchedPlan = allPlans.find((p) => p.id === invoice.planId && !isRouterProfileName(p.name));
   }
 
-  // Priority 3: Exact match by Customer's plan name (case-insensitive)
-  if (!matchedPlan && customer?.planName) {
-    const custPlanName = customer.planName.trim().toLowerCase();
-    matchedPlan = allPlans.find((p) => p.name.trim().toLowerCase() === custPlanName);
+  // Priority 3: Exact match by cleaned customer plan name
+  if (!matchedPlan && cleanCustomerPlanName) {
+    const custPlanName = cleanCustomerPlanName.toLowerCase();
+    matchedPlan = allPlans.find((p) => p.name.trim().toLowerCase() === custPlanName && !isRouterProfileName(p.name));
   }
 
-  // Priority 4: Exact match by Invoice's plan name (case-insensitive)
-  if (!matchedPlan && invoice.planName) {
-    const invPlanName = invoice.planName.trim().toLowerCase();
-    matchedPlan = allPlans.find((p) => p.name.trim().toLowerCase() === invPlanName);
+  // Priority 4: Exact match by cleaned invoice plan name
+  if (!matchedPlan && cleanInvoicePlanName) {
+    const invPlanName = cleanInvoicePlanName.toLowerCase();
+    matchedPlan = allPlans.find((p) => p.name.trim().toLowerCase() === invPlanName && !isRouterProfileName(p.name));
   }
 
-  // Priority 5: Match by plan name appearing in invoice items description
+  // Priority 5: Match by embedded speed
+  if (!matchedPlan && embeddedSpeed) {
+    matchedPlan = allPlans.find((p) => p.speedMbps === embeddedSpeed && !isRouterProfileName(p.name));
+  }
+
+  // Priority 6: Match by plan name appearing in invoice items description
   if (!matchedPlan && invoice.items && invoice.items.length > 0) {
     matchedPlan = allPlans.find((p) =>
+      !isRouterProfileName(p.name) &&
       invoice.items.some((it) => it.description && it.description.toLowerCase().includes(p.name.toLowerCase()))
     );
   }
 
-  // Priority 6: Match by speed in invoice item descriptions (e.g. "500 Mbps", "100 Mbps", "25 Mbps")
+  // Priority 7: Match by speed in invoice item descriptions (e.g. "500 Mbps", "100 Mbps", "25 Mbps")
   if (!matchedPlan && invoice.items && invoice.items.length > 0) {
     for (const item of invoice.items) {
       if (!item.description) continue;
-      const speedMatch = item.description.match(/(\d+)\s*(?:M|Mbps)/i);
-      if (speedMatch) {
-        const foundSpeed = parseInt(speedMatch[1], 10);
-        matchedPlan = allPlans.find((p) => p.speedMbps === foundSpeed);
+      const spMatch = item.description.match(/(\d+)\s*(?:M|Mbps)/i);
+      if (spMatch) {
+        const foundSpeed = parseInt(spMatch[1], 10);
+        matchedPlan = allPlans.find((p) => p.speedMbps === foundSpeed && !isRouterProfileName(p.name));
         if (matchedPlan) break;
       }
     }
   }
 
-  // Priority 7: Match by monthly rate (customer.monthlyFee or invoice item unitPrice)
+  // Priority 8: Match by monthly rate (customer.monthlyFee or invoice item unitPrice)
   if (!matchedPlan) {
     const planItem = invoice.items?.find((it) => it.type === 'plan');
     const targetFee = customer?.monthlyFee || invoice.monthlyFee || planItem?.unitPrice || invoice.subtotal;
     if (targetFee && targetFee > 0) {
-      matchedPlan = allPlans.find((p) => p.monthlyFee === targetFee);
+      matchedPlan = allPlans.find((p) => p.monthlyFee === targetFee && !isRouterProfileName(p.name));
     }
   }
 
-  // Priority 8: Partial substring match with plan names
-  if (!matchedPlan && (customer?.planName || invoice.planName)) {
-    const searchTarget = (customer?.planName || invoice.planName || '').toLowerCase();
+  // Priority 9: Partial substring match with plan names
+  if (!matchedPlan && (cleanCustomerPlanName || cleanInvoicePlanName)) {
+    const searchTarget = (cleanCustomerPlanName || cleanInvoicePlanName).toLowerCase();
     matchedPlan = allPlans.find((p) =>
-      p.name.toLowerCase().includes(searchTarget) || searchTarget.includes(p.name.toLowerCase())
+      !isRouterProfileName(p.name) &&
+      (p.name.toLowerCase().includes(searchTarget) || searchTarget.includes(p.name.toLowerCase()))
     );
   }
 
-  // Fallback: Default to the first plan in Plans & Packages catalog (never an arbitrary hardcoded string)
-  if (!matchedPlan) {
-    matchedPlan = allPlans[0] || initialPlans[0];
-  }
-
-  // All plan details are sourced directly from the authoritative Plans & Packages catalog!
-  const planId = matchedPlan.id;
-  const planName = matchedPlan.name;
-  const speedMbps = matchedPlan.speedMbps;
-  const monthlyFee = matchedPlan.monthlyFee;
-  const category = matchedPlan.category;
-  const planDescription = matchedPlan.description || '';
+  const cleanFallbackName = cleanCustomerPlanName || cleanInvoicePlanName || (matchedPlan ? matchedPlan.name : 'SwiftStream Pure Fiber');
+  const speedMbps = embeddedSpeed || matchedPlan?.speedMbps || 50;
+  const planId = matchedPlan?.id || customer?.planId || invoice.planId || `plan-${speedMbps}m`;
+  const planName = formatCommercialPlanName(cleanFallbackName, matchedPlan);
+  const monthlyFee = matchedPlan?.monthlyFee || customer?.monthlyFee || invoice.monthlyFee || invoice.subtotal || 0;
+  const category = matchedPlan?.category || 'residential';
+  const planDescription = matchedPlan?.description || `${planName} (${speedMbps} Mbps)`;
   const billingDay = customer?.billingDay || invoice.billingDay || 15;
 
   let serviceDescription: string;
   if (invoice.isProrated && invoice.proratedDays) {
-    serviceDescription = `Internet Plan: ${planName} (${speedMbps} Mbps) — Prorated Subscription (${invoice.proratedDays} Days)`;
+    serviceDescription = `Internet Plan: ${planName} — Prorated Subscription (${invoice.proratedDays} Days)`;
   } else {
-    serviceDescription = `Internet Plan: ${planName} (${speedMbps} Mbps) — Monthly Subscription`;
+    serviceDescription = `Internet Plan: ${planName} — Monthly Subscription`;
   }
 
   return {

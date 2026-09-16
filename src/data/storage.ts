@@ -40,7 +40,6 @@ import {
   initialPaymentSubmissions,
   initialCoverageAreas,
   initialStaffUsers,
-  initialOperationalBills,
 } from './initialData';
 import { resolveInvoicePlanDetails } from '../utils/formatters';
 
@@ -310,9 +309,10 @@ export const loadStoredData = () => {
       localStorage.setItem(STORAGE_KEYS.STAFF_USERS, JSON.stringify(staffUsers));
     } catch {}
 
-    const operationalBills = JSON.parse(
-      localStorage.getItem(STORAGE_KEYS.OPERATIONAL_BILLS) || JSON.stringify(initialOperationalBills)
-    ) as OperationalBill[];
+    const rawStoredBills = localStorage.getItem(STORAGE_KEYS.OPERATIONAL_BILLS);
+    const operationalBills = rawStoredBills
+      ? (JSON.parse(rawStoredBills) as OperationalBill[]).filter((b) => !b.id.startsWith('bill-'))
+      : [];
 
     return {
       businessProfile,
@@ -358,7 +358,7 @@ export const loadStoredData = () => {
       paymentSubmissions: initialPaymentSubmissions,
       coverageAreas: initialCoverageAreas,
       staffUsers: initialStaffUsers,
-      operationalBills: initialOperationalBills,
+      operationalBills: [],
     };
   }
 };

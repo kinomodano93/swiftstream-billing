@@ -32,6 +32,7 @@ import {
   getInvoiceStatusBadge,
   getPaymentMethodLabel,
   getRepairStatusBadge,
+  formatCommercialPlanName,
 } from '../../utils/formatters';
 import { generateInvoicePDF, generateOfficialReceiptPDF } from '../../utils/pdfGenerator';
 import { ResetCustomerPasswordModal } from './ResetCustomerPasswordModal';
@@ -178,7 +179,7 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
   const matchedPlan = plans.find((p) => p.id === customer.planId) ||
                       plans.find((p) => p.name?.trim().toLowerCase() === customer.planName?.trim().toLowerCase()) ||
                       plans[0];
-  const activePlanName = matchedPlan?.name || customer.planName;
+  const activePlanName = formatCommercialPlanName(customer.planName, matchedPlan);
   const activeMonthlyFee = matchedPlan?.monthlyFee || customer.monthlyFee;
 
   const handleSyncQueue = async () => {
@@ -674,12 +675,6 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
                           <span className="text-slate-500">Target Queue:</span>
                           <span className="font-mono text-slate-300">
                             {customer.network?.ipAddress ? `${customer.network.ipAddress}/32` : 'No IP'}
-                          </span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-500">PPPoE Profile:</span>
-                          <span className="font-mono text-slate-300 truncate max-w-[130px]" title={matchedPlan?.mikrotikProfile || 'default'}>
-                            {matchedPlan?.mikrotikProfile || 'default'}
                           </span>
                         </div>
                       </div>

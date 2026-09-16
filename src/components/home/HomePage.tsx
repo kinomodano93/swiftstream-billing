@@ -38,7 +38,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { Plan } from '../../types';
-import { formatBusinessAddress, formatCurrency, formatPhoneNumber } from '../../utils/formatters';
+import { formatBusinessAddress, formatCurrency, formatPhoneNumber, formatCommercialPlanName, isRouterProfileName } from '../../utils/formatters';
 import { GeminiAiAssistant } from '../ai/GeminiAiAssistant';
 import { LAGONOY_BARANGAYS, PRESENTACION_BARANGAYS } from '../network/CoverageAreaManager';
 
@@ -99,6 +99,7 @@ export const HomePage: React.FC<HomePageProps> = ({
   const isExcludedFromPublic = (p: Plan) => {
     if (p.isPublic === false) return true;
     if (p.category === 'internal') return true;
+    if (isRouterProfileName(p.name)) return true;
     if (p.name?.toLowerCase().includes('router profile')) return true;
     if (p.description?.toLowerCase().includes('imported from mikrotik')) return true;
     if (p.features?.some((f) => f.toLowerCase().includes('routeros profile'))) return true;

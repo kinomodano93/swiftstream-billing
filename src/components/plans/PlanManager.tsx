@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { Plan } from '../../types';
-import { formatCurrency } from '../../utils/formatters';
+import { formatCurrency, isRouterProfileName, formatCommercialPlanName } from '../../utils/formatters';
 import { ConfirmDeleteModal } from '../common/ConfirmDeleteModal';
 import {
   fetchPppoeProfilesDetailed,
@@ -212,6 +212,7 @@ export const PlanManager: React.FC = () => {
     return plans.filter(
       (p) =>
         p.category !== 'internal' &&
+        !isRouterProfileName(p.name) &&
         !p.name?.toLowerCase().includes('router profile') &&
         !p.description?.toLowerCase().includes('imported from mikrotik') &&
         !p.features?.some((f) => f.toLowerCase().includes('routeros profile'))
@@ -274,7 +275,7 @@ export const PlanManager: React.FC = () => {
 
                 {/* Plan Name & Speed */}
                 <h3 className="text-lg font-bold text-slate-100 group-hover:text-cyan-300 transition-colors">
-                  {plan.name}
+                  {formatCommercialPlanName(plan.name, plan)}
                 </h3>
                 <div className="flex items-baseline gap-2 mt-2">
                   <span className="text-3xl font-extrabold text-slate-100 font-mono">

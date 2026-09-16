@@ -59,6 +59,9 @@ import {
   getPaymentMethodLabel,
   getRepairStatusBadge,
   resolveInvoicePlanDetails,
+  formatCommercialPlanName,
+  isRouterProfileName,
+  resolveCustomerPlan,
 } from '../../utils/formatters';
 import { TicketChatModal } from '../support/TicketChatModal';
 import { generateInvoicePDF, generateOfficialReceiptPDF } from '../../utils/pdfGenerator';
@@ -226,11 +229,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
   const customerTickets = customer
     ? repairOrders.filter((r) => r.customerId === customer.id)
     : [];
-  const customerPlan = customer
-    ? plans.find((p) => p.id === customer.planId) ||
-      plans.find((p) => p.name?.trim().toLowerCase() === customer.planName?.trim().toLowerCase()) ||
-      plans[0]
-    : null;
+  const { plan: customerPlan, cleanName: displayPlanName, speedMbps: resolvedSpeed } = resolveCustomerPlan(customer, plans);
 
   // Payment submissions / proofs for this subscriber
   const customerSubmissions = customer
@@ -638,7 +637,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
       contactNumber: customer.mobile,
       address: `${customer.address.street}, Brgy. ${customer.address.barangay}, ${customer.address.city}`,
       deviceType: 'ONU/Router',
-      issueDescription: `PLAN UPGRADE REQUEST: Upgrade from ${customer.planName} (${customerPlan?.speedMbps || 50} Mbps @ ${formatCurrency(customer.monthlyFee)}) to ${targetPlan.name} (${targetPlan.speedMbps} Mbps @ ${formatCurrency(targetPlan.monthlyFee)}). Monthly fee difference: +${formatCurrency(diff)}/mo.`,
+      issueDescription: `PLAN UPGRADE REQUEST: Upgrade from ${displayPlanName} (${resolvedSpeed} Mbps @ ${formatCurrency(customer.monthlyFee)}) to ${targetPlan.name} (${targetPlan.speedMbps} Mbps @ ${formatCurrency(targetPlan.monthlyFee)}). Monthly fee difference: +${formatCurrency(diff)}/mo.`,
       diagnosisNotes: `Requested via Customer Portal. Target speed: ${targetPlan.speedMbps} Mbps. Pending Mikrotik profile rate-limit adjustment.`,
       technician: 'NOC Network Admin (Lagonoy)',
       partsUsed: [],
@@ -725,7 +724,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
     setUploadSpeed(0);
     setPingLatency(0);
 
-    const targetMax = customerPlan ? customerPlan.speedMbps : 50;
+    const targetMax = resolvedSpeed || 50;
 
     let prog = 0;
     const interval = setInterval(() => {
@@ -914,7 +913,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                   )}
                 </button>
                 <span className="text-[10px] text-slate-500">•</span>
-                <span className="text-[10px] text-slate-400">{customer.planName}</span>
+                <span className="text-[10px] text-slate-400">{displayPlanName}</span>
               </div>
             </div>
           </div>
@@ -1096,12 +1095,12 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                   </span>
                   <span className="px-2.5 py-0.5 rounded-full bg-cyan-950 text-cyan-300 font-mono font-bold text-xs border border-cyan-800/40 flex items-center gap-1">
                     <Zap className="w-3 h-3 text-cyan-400" />
-                    <span>{customerPlan?.speedMbps || 50} Mbps</span>
+                    <span>{resolvedSpeed} Mbps</span>
                   </span>
                 </div>
 
                 <div>
-                  <h3 className="text-lg font-bold text-slate-100">{customer.planName}</h3>
+                  <h3 className="text-lg font-bold text-slate-100">{displayPlanName}</h3>
                   <p className="text-2xl font-black text-cyan-400 font-mono mt-1">
                     {formatCurrency(customer.monthlyFee)}
                     <span className="text-xs text-slate-400 font-normal"> / month</span>
@@ -1471,8 +1470,8 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                               const planDetails = resolveInvoicePlanDetails(inv, customer, plans);
                               const displayDesc = item.description || (isPlanItem
                                 ? (inv.isProrated && inv.proratedDays
-                                    ? `Internet Plan: ${planDetails.planName} (${planDetails.speedMbps} Mbps) — Prorated (${inv.proratedDays} Days)`
-                                    : `Internet Plan: ${planDetails.planName} (${planDetails.speedMbps} Mbps) — Monthly Subscription`)
+                                    ? `Internet Plan: ${planDetails.planName} — Prorated (${inv.proratedDays} Days)`
+                                    : `Internet Plan: ${planDetails.planName} — Monthly Subscription`)
                                 : 'Service Item');
 
                               const unitPrice = isPlanItem && (item.unitPrice <= 0 || !inv.isProrated) ? planDetails.monthlyFee : item.unitPrice;
@@ -2652,7 +2651,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                 Live Speed & Latency Test
               </h2>
               <p className="text-xs text-slate-400 mt-1">
-                Target Plan: <strong className="text-cyan-400">{customer.planName} ({customerPlan?.speedMbps || 50} Mbps Dedicated)</strong>
+                Target Plan: <strong className="text-cyan-400">{displayPlanName} ({resolvedSpeed} Mbps Dedicated)</strong>
               </p>
             </div>
 
@@ -2756,9 +2755,9 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
 
                 <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 space-y-1 text-xs">
                   <span className="text-[10px] text-slate-500 uppercase font-bold">Current Subscription</span>
-                  <p className="font-bold text-slate-200 text-sm">{customer.planName}</p>
+                  <p className="font-bold text-slate-200 text-sm">{displayPlanName}</p>
                   <p className="text-cyan-400 font-mono font-semibold">
-                    {customerPlan?.speedMbps || 50} Mbps Dedicated • {formatCurrency(customer.monthlyFee)}/mo
+                    {resolvedSpeed} Mbps Dedicated • {formatCurrency(customer.monthlyFee)}/mo
                   </p>
                 </div>
 
@@ -2766,15 +2765,15 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                   <div>
                     <label className="block text-slate-400 mb-1 font-medium">Select Desired Target Plan</label>
                     <select
-                      value={targetUpgradePlanId || (plans.find((p) => p.id !== customer.planId)?.id || '')}
+                      value={targetUpgradePlanId || (plans.find((p) => p.id !== customer.planId && !isRouterProfileName(p.name))?.id || '')}
                       onChange={(e) => setTargetUpgradePlanId(e.target.value)}
                       className="w-full px-3 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500"
                     >
                       {plans
-                        .filter((p) => p.id !== customer.planId)
+                        .filter((p) => p.id !== customer.planId && !isRouterProfileName(p.name))
                         .map((p) => (
                           <option key={p.id} value={p.id}>
-                            {p.name} ({p.speedMbps} Mbps) — {formatCurrency(p.monthlyFee)}/mo
+                            {formatCommercialPlanName(p.name, p)} ({p.speedMbps} Mbps) — {formatCurrency(p.monthlyFee)}/mo
                           </option>
                         ))}
                     </select>

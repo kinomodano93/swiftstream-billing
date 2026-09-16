@@ -183,9 +183,9 @@ export const generateInvoicePDF = (
     let description = item.description;
     if (isPlanItem) {
       if (invoice.isProrated && invoice.proratedDays) {
-        description = `Monthly Internet Subscription: ${cleanPlanName || planDetails.planName} (${planDetails.speedMbps} Mbps) — Prorated (${invoice.proratedDays} Days)`;
+        description = `Monthly Internet Subscription: ${cleanPlanName || planDetails.planName} — Prorated (${invoice.proratedDays} Days)`;
       } else {
-        description = `Monthly Internet Subscription: ${cleanPlanName || planDetails.planName} (${planDetails.speedMbps} Mbps)`;
+        description = `Monthly Internet Subscription: ${cleanPlanName || planDetails.planName}`;
       }
     } else if (item.type === 'installation') {
       description = item.description || 'Installation & Setup Fee';

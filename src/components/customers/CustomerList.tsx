@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { Customer, CustomerStatus } from '../../types';
-import { formatCurrency, formatPhoneNumber, getCustomerStatusBadge } from '../../utils/formatters';
+import { formatCurrency, formatPhoneNumber, getCustomerStatusBadge, formatCommercialPlanName, isRouterProfileName } from '../../utils/formatters';
 import { ProvisionModal } from './ProvisionModal';
 import { ConfirmDeleteModal } from '../common/ConfirmDeleteModal';
 import { ConfirmActionModal } from '../common/ConfirmActionModal';
@@ -269,13 +269,14 @@ export const CustomerList: React.FC<CustomerListProps> = ({
                 .filter(
                   (p) =>
                     p.category !== 'internal' &&
+                    !isRouterProfileName(p.name) &&
                     !p.name?.toLowerCase().includes('router profile') &&
                     !p.description?.toLowerCase().includes('imported from mikrotik') &&
                     !p.features?.some((f) => f.toLowerCase().includes('routeros profile'))
                 )
                 .map((p) => (
                   <option key={p.id} value={p.id}>
-                    {p.name} (₱{p.monthlyFee.toLocaleString()})
+                    {formatCommercialPlanName(p.name, p)} (₱{p.monthlyFee.toLocaleString()})
                   </option>
                 ))}
             </select>
@@ -345,7 +346,7 @@ export const CustomerList: React.FC<CustomerListProps> = ({
                       {/* Plan */}
                       <td className="py-3 px-4">
                         <div className="font-semibold text-slate-200 truncate max-w-[150px]">
-                          {customer.planName}
+                          {formatCommercialPlanName(customer.planName)}
                         </div>
                         <div className="text-[11px] font-mono text-cyan-400 mt-0.5">
                           {formatCurrency(customer.monthlyFee)}/mo

@@ -44,8 +44,8 @@ import {
   setStoredStaffUsers,
   STORAGE_KEYS,
 } from '../data/storage';
-import { initialPlans, initialBusinessProfile, initialCoverageAreas, initialStaffUsers, initialOperationalBills } from '../data/initialData';
-import { generateId, formatCurrency } from '../utils/formatters';
+import { initialPlans, initialBusinessProfile, initialCoverageAreas, initialStaffUsers } from '../data/initialData';
+import { generateId, formatCurrency, formatCommercialPlanName, isRouterProfileName } from '../utils/formatters';
 import { findCustomerInvoiceForMonth, hasCustomerInvoiceForMonth } from '../utils/billingRules';
 import { generateReminderMessage, sendMockNotification } from '../utils/smsSender';
 import {
@@ -375,7 +375,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     initial.coverageAreas && initial.coverageAreas.length > 0 ? initial.coverageAreas : initialCoverageAreas
   );
   const [operationalBills, setOperationalBills] = useState<OperationalBill[]>(
-    initial.operationalBills && initial.operationalBills.length > 0 ? initial.operationalBills : initialOperationalBills
+    initial.operationalBills || []
   );
 
   const VALID_TABS = new Set([
@@ -864,7 +864,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const key = item.email && item.email.includes('@') ? item.email.toLowerCase().trim() : (item.id || item.accountNo);
         if (!seen.has(key)) {
           seen.add(key);
-          uniqueList.push(item);
+          const cleanName = formatCommercialPlanName(item.planName);
+          uniqueList.push({
+            ...item,
+            planName: cleanName,
+          });
         }
       }
       setCustomers(uniqueList);
@@ -890,6 +894,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const isImportedRouterProfile = (p: Plan) =>
           Boolean(
             p.category === 'internal' ||
+            isRouterProfileName(p.name) ||
             p.name?.toLowerCase().includes('router profile') ||
             p.description?.toLowerCase().includes('imported from mikrotik') ||
             p.features?.some((f) => f.toLowerCase().includes('routeros profile'))
@@ -930,7 +935,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setExpenses(data || []);
     });
     const unsubOperationalBills = subscribeToCollection<OperationalBill>(COLLECTIONS.OPERATIONAL_BILLS, (data) => {
-      if (data && data.length > 0) setOperationalBills(data);
+      const incoming = data || [];
+      // Automatically purge any legacy mock bills that may exist in Firestore
+      incoming.forEach((b) => {
+        if (b.id && (b.id.startsWith('bill-') || b.id === 'bill-dia-01' || b.id === 'bill-elec-01' || b.id === 'bill-rent-01' || b.id === 'bill-poles-01' || b.id === 'bill-ntc-01')) {
+          deleteFirestoreDoc(COLLECTIONS.OPERATIONAL_BILLS, b.id);
+        }
+      });
+      const realBills = incoming.filter(
+        (b) => !b.id.startsWith('bill-') && b.id !== 'bill-dia-01' && b.id !== 'bill-elec-01' && b.id !== 'bill-rent-01' && b.id !== 'bill-poles-01' && b.id !== 'bill-ntc-01'
+      );
+      setOperationalBills(realBills);
     });
     const unsubRemittances = subscribeToCollection<DailyRemittanceRecord>(COLLECTIONS.DAILY_REMITTANCES, (data) => {
       setDailyRemittances(data || []);
@@ -3995,7 +4010,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setReminders([]);
     setMikrotikDevices([]);
     setExpenses([]);
-    setOperationalBills(initialOperationalBills);
+    setOperationalBills([]);
     setAuditLogs([]);
     setDailyRemittances([]);
     setPaymentSubmissions([]);

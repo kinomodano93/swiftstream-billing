@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { Customer, CustomerStatus } from '../../types';
+import { formatCommercialPlanName, isRouterProfileName } from '../../utils/formatters';
 import { LAGONOY_BARANGAYS, PRESENTACION_BARANGAYS } from '../network/CoverageAreaManager';
 import {
   fetchPppoeSecrets,
@@ -827,13 +828,14 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
                     .filter(
                       (p) =>
                         p.category !== 'internal' &&
+                        !isRouterProfileName(p.name) &&
                         !p.name?.toLowerCase().includes('router profile') &&
                         !p.description?.toLowerCase().includes('imported from mikrotik') &&
                         !p.features?.some((f) => f.toLowerCase().includes('routeros profile'))
                     )
                     .map((p) => (
                       <option key={p.id} value={p.id}>
-                        {p.name} — ₱{p.monthlyFee.toLocaleString()}/mo ({p.speedMbps} Mbps)
+                        {formatCommercialPlanName(p.name, p)} — ₱{p.monthlyFee.toLocaleString()}/mo ({p.speedMbps} Mbps)
                       </option>
                     ))}
                 </select>

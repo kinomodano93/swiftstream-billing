@@ -18,6 +18,7 @@ import {
 import { useApp } from '../../context/AppContext';
 import { OnlineApplication, OnlineApplicationStatus } from '../../types';
 import { saveFirestoreDoc, subscribeToCollection, COLLECTIONS } from '../../services/firestoreService';
+import { formatCommercialPlanName, isRouterProfileName } from '../../utils/formatters';
 import { syncCustomerApprovalToUser } from '../../services/authService';
 import { LAGONOY_BARANGAYS, PRESENTACION_BARANGAYS } from '../network/CoverageAreaManager';
 
@@ -741,13 +742,14 @@ export const ClientApplicationManager: React.FC = () => {
                     .filter(
                       (p) =>
                         p.category !== 'internal' &&
+                        !isRouterProfileName(p.name) &&
                         !p.name?.toLowerCase().includes('router profile') &&
                         !p.description?.toLowerCase().includes('imported from mikrotik') &&
                         !p.features?.some((f) => f.toLowerCase().includes('routeros profile'))
                     )
                     .map((p) => (
                       <option key={p.id} value={p.id}>
-                        {p.name} ({p.speedMbps} Mbps) — ₱{p.monthlyFee}/month
+                        {formatCommercialPlanName(p.name, p)} ({p.speedMbps} Mbps) — ₱{p.monthlyFee}/month
                       </option>
                     ))}
                 </select>

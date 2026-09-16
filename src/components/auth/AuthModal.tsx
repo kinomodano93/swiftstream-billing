@@ -37,7 +37,7 @@ import {
   signInWithGoogle,
   resetUserPassword,
 } from '../../services/authService';
-import { formatCurrency } from '../../utils/formatters';
+import { formatCurrency, formatCommercialPlanName, isRouterProfileName } from '../../utils/formatters';
 import { LAGONOY_BARANGAYS, PRESENTACION_BARANGAYS } from '../network/CoverageAreaManager';
 import { OnlineApplication, Plan } from '../../types';
 import { saveFirestoreDoc, COLLECTIONS } from '../../services/firestoreService';
@@ -81,6 +81,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const isExcludedFromPublic = (p: Plan) => {
     if (p.isPublic === false) return true;
     if (p.category === 'internal') return true;
+    if (isRouterProfileName(p.name)) return true;
     if (p.name?.toLowerCase().includes('router profile')) return true;
     if (p.description?.toLowerCase().includes('imported from mikrotik')) return true;
     if (p.features?.some((f) => f.toLowerCase().includes('routeros profile'))) return true;

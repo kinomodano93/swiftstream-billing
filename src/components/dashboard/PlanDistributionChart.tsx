@@ -1,13 +1,15 @@
 import React from 'react';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend } from 'recharts';
 import { useApp } from '../../context/AppContext';
+import { formatCommercialPlanName } from '../../utils/formatters';
 
 export const PlanDistributionChart: React.FC = () => {
   const { customers, plans } = useApp();
 
   const planCounts: { [key: string]: number } = {};
   customers.forEach((c) => {
-    planCounts[c.planName] = (planCounts[c.planName] || 0) + 1;
+    const cleanName = formatCommercialPlanName(c.planName);
+    planCounts[cleanName] = (planCounts[cleanName] || 0) + 1;
   });
 
   const COLORS = ['#06b6d4', '#0284c7', '#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b'];

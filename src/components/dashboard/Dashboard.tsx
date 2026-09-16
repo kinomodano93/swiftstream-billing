@@ -21,7 +21,7 @@ import { StatCard } from './StatCard';
 import { RevenueChart } from './RevenueChart';
 import { PlanDistributionChart } from './PlanDistributionChart';
 import { RouterWatchdogWidget } from '../network/RouterWatchdogWidget';
-import { formatCurrency, formatDate, getCustomerStatusBadge } from '../../utils/formatters';
+import { formatCurrency, formatDate, getCustomerStatusBadge, formatCommercialPlanName } from '../../utils/formatters';
 
 interface DashboardProps {
   onOpenPaymentModal: (customerId?: string, invoiceId?: string) => void;
@@ -294,7 +294,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                           </button>
                           <span className="text-[10px] text-slate-500 font-mono">{cust.accountNo}</span>
                         </td>
-                        <td className="py-3 text-slate-300 truncate max-w-[130px]">{cust.planName}</td>
+                        <td className="py-3 text-slate-300 truncate max-w-[130px]">{formatCommercialPlanName(cust.planName)}</td>
                         <td className="py-3 font-mono font-bold text-rose-400">
                           {formatCurrency(cust.balance)}
                         </td>
