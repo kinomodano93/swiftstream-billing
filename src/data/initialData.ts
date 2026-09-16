@@ -234,6 +234,19 @@ export const initialPlans: Plan[] = [
     mikrotikProfile: 'plan-80m-vendo',
     isPublic: true,
   },
+  {
+    id: 'plan-gamer-pro-250',
+    name: 'Gamer Pro',
+    speedMbps: 250,
+    monthlyFee: 1500,
+    installationFee: 1500,
+    category: 'residential',
+    description: 'Ultra-low latency dedicated fiber connection optimized for competitive gaming, streaming, and fast household downloads.',
+    features: ['250 Mbps Dedicated Gaming Fiber', 'Optimized Low-Ping Direct Routing', 'Dual-Band WiFi 6 ONU', 'Unlimited Bandwidth', 'Standard Installation: ₱1,500'],
+    isActive: true,
+    mikrotikProfile: 'Plan-70M',
+    isPublic: true,
+  },
 ];
 
 export const initialOltNode: OltPopNode = {

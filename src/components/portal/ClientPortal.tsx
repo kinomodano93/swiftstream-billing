@@ -637,7 +637,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
       contactNumber: customer.mobile,
       address: `${customer.address.street}, Brgy. ${customer.address.barangay}, ${customer.address.city}`,
       deviceType: 'ONU/Router',
-      issueDescription: `PLAN UPGRADE REQUEST: Upgrade from ${displayPlanName} (${resolvedSpeed} Mbps @ ${formatCurrency(customer.monthlyFee)}) to ${targetPlan.name} (${targetPlan.speedMbps} Mbps @ ${formatCurrency(targetPlan.monthlyFee)}). Monthly fee difference: +${formatCurrency(diff)}/mo.`,
+      issueDescription: `PLAN UPGRADE REQUEST: Upgrade from ${displayPlanName}${resolvedSpeed > 0 ? ` (${resolvedSpeed} Mbps` : ' ('}@ ${formatCurrency(customer.monthlyFee)}) to ${targetPlan.name} (${targetPlan.speedMbps} Mbps @ ${formatCurrency(targetPlan.monthlyFee)}). Monthly fee difference: +${formatCurrency(diff)}/mo.`,
       diagnosisNotes: `Requested via Customer Portal. Target speed: ${targetPlan.speedMbps} Mbps. Pending Mikrotik profile rate-limit adjustment.`,
       technician: 'NOC Network Admin (Lagonoy)',
       partsUsed: [],
@@ -1093,10 +1093,12 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                   <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                     My Internet Plan
                   </span>
-                  <span className="px-2.5 py-0.5 rounded-full bg-cyan-950 text-cyan-300 font-mono font-bold text-xs border border-cyan-800/40 flex items-center gap-1">
-                    <Zap className="w-3 h-3 text-cyan-400" />
-                    <span>{resolvedSpeed} Mbps</span>
-                  </span>
+                  {resolvedSpeed > 0 && (
+                    <span className="px-2.5 py-0.5 rounded-full bg-cyan-950 text-cyan-300 font-mono font-bold text-xs border border-cyan-800/40 flex items-center gap-1">
+                      <Zap className="w-3 h-3 text-cyan-400" />
+                      <span>{resolvedSpeed} Mbps</span>
+                    </span>
+                  )}
                 </div>
 
                 <div>
@@ -2651,7 +2653,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                 Live Speed & Latency Test
               </h2>
               <p className="text-xs text-slate-400 mt-1">
-                Target Plan: <strong className="text-cyan-400">{displayPlanName} ({resolvedSpeed} Mbps Dedicated)</strong>
+                Target Plan: <strong className="text-cyan-400">{displayPlanName}{resolvedSpeed > 0 ? ` (${resolvedSpeed} Mbps Dedicated)` : ''}</strong>
               </p>
             </div>
 
@@ -2757,7 +2759,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                   <span className="text-[10px] text-slate-500 uppercase font-bold">Current Subscription</span>
                   <p className="font-bold text-slate-200 text-sm">{displayPlanName}</p>
                   <p className="text-cyan-400 font-mono font-semibold">
-                    {resolvedSpeed} Mbps Dedicated • {formatCurrency(customer.monthlyFee)}/mo
+                    {resolvedSpeed > 0 ? `${resolvedSpeed} Mbps Dedicated • ` : ''}{formatCurrency(customer.monthlyFee)}/mo
                   </p>
                 </div>
 

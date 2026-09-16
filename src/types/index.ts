@@ -423,6 +423,7 @@ export interface Customer {
   };
   planId: string;
   planName: string;
+  rawPlanName?: string;
   monthlyFee: number;
   billingDay: number;
   status: CustomerStatus;

@@ -867,6 +867,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const cleanName = formatCommercialPlanName(item.planName);
           uniqueList.push({
             ...item,
+            rawPlanName: item.rawPlanName || item.planName,
             planName: cleanName,
           });
         }

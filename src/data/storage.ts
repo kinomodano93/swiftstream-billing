@@ -41,7 +41,7 @@ import {
   initialCoverageAreas,
   initialStaffUsers,
 } from './initialData';
-import { resolveInvoicePlanDetails } from '../utils/formatters';
+import { resolveInvoicePlanDetails, isRouterProfileName } from '../utils/formatters';
 
 const STORAGE_KEYS = {
   BUSINESS_PROFILE: 'swiftstream_business_profile_v4',
@@ -179,12 +179,13 @@ export const loadStoredData = () => {
     ) as Customer[];
     const customers: Customer[] = rawCustomers.map((cust) => {
       const plan =
-        plans.find((p) => p.id === cust.planId) ||
-        plans.find((p) => p.name?.trim().toLowerCase() === cust.planName?.trim().toLowerCase()) ||
-        plans.find((p) => p.monthlyFee === cust.monthlyFee) ||
+        plans.find((p) => p.id === cust.planId && !isRouterProfileName(p.name)) ||
+        plans.find((p) => p.name?.trim().toLowerCase() === cust.planName?.trim().toLowerCase() && !isRouterProfileName(p.name)) ||
+        plans.find((p) => p.monthlyFee === cust.monthlyFee && !isRouterProfileName(p.name)) ||
         plans[0];
       return {
         ...cust,
+        rawPlanName: cust.rawPlanName || cust.planName,
         planId: plan ? plan.id : cust.planId,
         planName: plan ? plan.name : cust.planName,
         monthlyFee: plan ? plan.monthlyFee : cust.monthlyFee,

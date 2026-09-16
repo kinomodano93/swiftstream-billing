@@ -286,16 +286,7 @@ export const formatCommercialPlanName = (rawPlanName?: string, plan?: Plan | nul
     return plan.name.replace(/\s*\|\s*\d+\s*m(?:bps)?/i, '').trim();
   }
 
-  // If it was a router profile like "Plan-70M" or "plan-250m", extract speed
-  const textToScan = rawPlanName || plan?.name || '';
-  if (textToScan && isRouterProfileName(textToScan)) {
-    const speedMatch = textToScan.match(/(\d+)\s*(?:M|Mbps)?/i);
-    if (speedMatch) {
-      return `SwiftStream Fiber ${speedMatch[1]} Mbps`;
-    }
-  }
-
-  return cleanRaw || 'SwiftStream Pure Fiber';
+  return cleanRaw && !isRouterProfileName(cleanRaw) ? cleanRaw : 'SwiftStream Pure Fiber';
 };
 
 export interface CustomerPlanResolution {
@@ -327,33 +318,41 @@ export const resolveCustomerPlan = (
     return { plan: fallbackPlan, cleanName: defaultName, speedMbps: defaultSpeed };
   }
 
-  const allPlans = plans && plans.length > 0 ? plans : initialPlans;
-  const rawName = (customer.planName || '').trim();
+  // Always merge initialPlans with Firestore plans so hardcoded catalog entries (e.g. Gamer Pro)
+  // are always available for matching even if the Firestore plans collection hasn't fully loaded.
+  const firestorePlans = plans && plans.length > 0 ? plans : [];
+  const mergedPlanMap = new Map<string, Plan>();
+  for (const p of initialPlans) mergedPlanMap.set(p.id, p);
+  for (const p of firestorePlans) mergedPlanMap.set(p.id, p);
+  const allPlans = Array.from(mergedPlanMap.values());
+
+  const rawName = (customer.rawPlanName || customer.planName || '').trim();
 
   // Strip speed suffixes like "| 250mbps", "| 250 Mbps", "| 250M", etc.
   let cleanName = rawName.replace(/\s*\|\s*\d+\s*m(?:bps)?/i, '').trim();
 
-  // Extract explicit speed embedded in rawName (e.g. "250mbps" from "Gamer Pro | 250mbps")
+  // Extract explicit commercial speed embedded in rawName (e.g. "250mbps" from "Gamer Pro | 250mbps")
   let embeddedSpeed: number | null = null;
-  const speedMatch = rawName.match(/(\d+)\s*(?:m|mbps)/i);
-  if (speedMatch) {
-    embeddedSpeed = parseInt(speedMatch[1], 10);
+  if (!isRouterProfileName(rawName)) {
+    const speedMatch = rawName.match(/(\d+)\s*(?:m|mbps)/i);
+    if (speedMatch) {
+      embeddedSpeed = parseInt(speedMatch[1], 10);
+    }
   }
 
-  // If rawName is a router profile like "Plan-70M" or "plan-250m", format it
+  // If rawName is a router profile like "Plan-70M" or "plan-250m", reset cleanName to commercial default
   if (isRouterProfileName(cleanName)) {
-    const sp = cleanName.match(/(\d+)\s*(?:M|Mbps)?/i)?.[1];
-    cleanName = sp ? `SwiftStream Fiber ${sp} Mbps` : 'SwiftStream Pure Fiber';
+    cleanName = '';
   }
 
   let matchedPlan: Plan | undefined;
 
-  // 1. Match by customer's planId
+  // 1. Match by customer's planId (must be a valid commercial plan, not a router profile)
   if (customer.planId) {
     matchedPlan = allPlans.find((p) => p.id === customer.planId && !isRouterProfileName(p.name));
   }
 
-  // 2. Match by cleanName (exact)
+  // 2. Match by cleanName (exact match against commercial plan name in catalog)
   if (!matchedPlan && cleanName) {
     const lowerClean = cleanName.toLowerCase();
     matchedPlan = allPlans.find((p) => p.name.trim().toLowerCase() === lowerClean && !isRouterProfileName(p.name));
@@ -369,17 +368,21 @@ export const resolveCustomerPlan = (
     );
   }
 
-  // 4. Match by embedded speed (e.g. 250 Mbps from "Gamer Pro | 250mbps")
+  // 4. Match by embedded commercial speed (e.g. 250 Mbps from "Gamer Pro | 250mbps")
   if (!matchedPlan && embeddedSpeed) {
     matchedPlan = allPlans.find((p) => p.speedMbps === embeddedSpeed && !isRouterProfileName(p.name));
   }
 
-  // 5. Match by customer.speedMbps property if present
-  if (!matchedPlan && (customer as any)?.speedMbps) {
-    matchedPlan = allPlans.find((p) => p.speedMbps === (customer as any).speedMbps && !isRouterProfileName(p.name));
+  // 5. Match by MikroTik profile name — links subscriber's PPPoE profile back to commercial plan
+  //    e.g. customer.network.pppoeProfile = "Plan-70M" maps to Gamer Pro (250 Mbps)
+  if (!matchedPlan && customer.network?.pppoeProfile) {
+    const pppoeProfile = customer.network.pppoeProfile.trim().toLowerCase();
+    matchedPlan = allPlans.find(
+      (p) => p.mikrotikProfile && p.mikrotikProfile.trim().toLowerCase() === pppoeProfile && !isRouterProfileName(p.name)
+    );
   }
 
-  // 6. Match by monthlyFee
+  // 6. Match by monthlyFee against commercial plans
   if (!matchedPlan && customer.monthlyFee && customer.monthlyFee > 0) {
     matchedPlan = allPlans.find((p) => p.monthlyFee === customer.monthlyFee && !isRouterProfileName(p.name));
   }
@@ -391,13 +394,24 @@ export const resolveCustomerPlan = (
     }
   }
 
-  // Authoritative speed: get the speed data directly from the matched plan in Internet Plans
-  const speedMbps = (matchedPlan && matchedPlan.speedMbps > 0)
+  // Check customer's technical PPPoE profile name to ensure technical profile rate limits are NEVER exposed
+  const pppoeProfileName = (customer.network?.pppoeProfile || '').toLowerCase();
+  const pppoeSpeedMatch = pppoeProfileName.match(/(\d+)\s*(?:m|mbps)?/i);
+  const technicalProfileSpeed = pppoeSpeedMatch ? parseInt(pppoeSpeedMatch[1], 10) : null;
+
+  // Authoritative speed: strictly get the speed data from the commercial plan in Internet Plans or embedded commercial speed
+  let speedMbps = (matchedPlan && matchedPlan.speedMbps > 0)
     ? matchedPlan.speedMbps
-    : (embeddedSpeed || (customer as any)?.speedMbps || 50);
+    : (embeddedSpeed || 0);
+
+  // If the resolved speed inadvertently matches a technical router profile speed (e.g. 70 Mbps from Plan-70M),
+  // and does NOT come from an explicit commercial plan, suppress it so technical rate limits are never exposed:
+  if (technicalProfileSpeed && speedMbps === technicalProfileSpeed && (!matchedPlan || isRouterProfileName(matchedPlan.name))) {
+    speedMbps = 0;
+  }
 
   if (!cleanName) {
-    cleanName = matchedPlan ? matchedPlan.name : `SwiftStream Fiber ${speedMbps} Mbps`;
+    cleanName = matchedPlan ? matchedPlan.name : (speedMbps > 0 ? `SwiftStream Fiber ${speedMbps} Mbps` : 'SwiftStream Pure Fiber');
   }
 
   // Create an effective plan that always honors the subscriber's resolved speed and clean commercial name
@@ -408,17 +422,19 @@ export const resolveCustomerPlan = (
         speedMbps: speedMbps,
       }
     : {
-        id: customer.planId || `plan-${speedMbps}m`,
+        id: customer.planId || (speedMbps > 0 ? `plan-${speedMbps}m` : 'commercial-plan'),
         name: cleanName,
         speedMbps,
         monthlyFee: customer.monthlyFee || 0,
         installationFee: 0,
         category: 'residential',
-        description: `${cleanName} - High-Speed Fiber Internet (${speedMbps} Mbps)`,
-        features: [`${speedMbps} Mbps Dedicated Fiber`, 'Unlimited Bandwidth', 'Ultra-Low Latency Route', '24/7 Priority Support'],
+        description: speedMbps > 0 ? `${cleanName} (${speedMbps} Mbps)` : cleanName,
+        features: speedMbps > 0
+          ? [`${speedMbps} Mbps Dedicated Fiber`, 'Unlimited Bandwidth', 'Ultra-Low Latency Route', '24/7 Priority Support']
+          : ['Dedicated Fiber Connection', 'Unlimited Bandwidth', '24/7 Priority Support'],
         isActive: true,
         isPublic: true,
-        mikrotikProfile: `plan-${speedMbps}m`,
+        mikrotikProfile: customer.network?.pppoeProfile || undefined,
       };
 
   return {

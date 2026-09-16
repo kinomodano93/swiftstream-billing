@@ -519,15 +519,6 @@ export const PlanManager: React.FC = () => {
                         onChange={(e) => {
                           const chosen = e.target.value;
                           setMikrotikProfile(chosen);
-                          // If profile has rate limit like "100M/100M", auto-fill speedMbps if appropriate
-                          const matchedProf = formDeviceProfiles.find((p) => p.name === chosen);
-                          if (matchedProf?.rateLimit) {
-                            const speedMatch = matchedProf.rateLimit.match(/(\d+)[Mm]/);
-                            if (speedMatch && speedMatch[1]) {
-                              const parsed = parseInt(speedMatch[1], 10);
-                              if (parsed) setSpeedMbps(parsed);
-                            }
-                          }
                         }}
                         className="w-full px-3 py-2 bg-slate-900 border border-slate-700/80 rounded-xl text-slate-100 font-mono text-xs focus:outline-none focus:border-cyan-500"
                       >
