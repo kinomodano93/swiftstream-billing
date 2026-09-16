@@ -1185,10 +1185,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                     <span className="text-slate-500">Optical Signal:</span>
                     <span className="font-mono text-emerald-400 font-semibold">-18.5 dBm (Optimal)</span>
                   </div>
-                  <div className="flex justify-between py-1 border-b border-slate-800/80">
-                    <span className="text-slate-500">PPPoE User:</span>
-                    <span className="font-mono text-cyan-400">{customer.network.pppoeUsername}</span>
-                  </div>
+
                   <div className="flex justify-between py-1">
                     <span className="text-slate-500">Assigned IP:</span>
                     <span className="font-mono text-slate-300">{customer.network.ipAddress}</span>
