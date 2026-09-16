@@ -345,6 +345,12 @@ export const resolveCustomerPlan = (
     cleanName = '';
   }
 
+  // Compute technical PPPoE profile speed UPFRONT so it can be used to detect
+  // and reject matches where the resolved speed is just a router rate-limit.
+  const pppoeProfileName = (customer.network?.pppoeProfile || '').toLowerCase();
+  const pppoeSpeedMatch = pppoeProfileName.match(/(\d+)\s*(?:m|mbps)?/i);
+  const technicalProfileSpeed = pppoeSpeedMatch ? parseInt(pppoeSpeedMatch[1], 10) : null;
+
   let matchedPlan: Plan | undefined;
 
   // 1. Match by customer's planId (must be a valid commercial plan, not a router profile)
@@ -352,20 +358,45 @@ export const resolveCustomerPlan = (
     matchedPlan = allPlans.find((p) => p.id === customer.planId && !isRouterProfileName(p.name));
   }
 
-  // 2. Match by cleanName (exact match against commercial plan name in catalog)
-  if (!matchedPlan && cleanName) {
+  // CRITICAL: If planId matched a plan whose speed equals the technical PPPoE profile speed
+  // (e.g. Firestore has "Gamer Pro" with speedMbps:70 synced from MikroTik),
+  // override it by searching initialPlans (the authoritative commercial catalog) first.
+  if (matchedPlan && technicalProfileSpeed && matchedPlan.speedMbps === technicalProfileSpeed) {
     const lowerClean = cleanName.toLowerCase();
-    matchedPlan = allPlans.find((p) => p.name.trim().toLowerCase() === lowerClean && !isRouterProfileName(p.name));
+    const catalogOverride =
+      // Try matching by name in initialPlans
+      initialPlans.find(
+        (p) => p.name.trim().toLowerCase() === lowerClean && !isRouterProfileName(p.name) && p.speedMbps !== technicalProfileSpeed
+      ) ||
+      // Try matching by mikrotikProfile in initialPlans (e.g. Plan-70M → Gamer Pro 250)
+      (pppoeProfileName
+        ? initialPlans.find(
+            (p) => p.mikrotikProfile?.trim().toLowerCase() === pppoeProfileName && !isRouterProfileName(p.name) && p.speedMbps !== technicalProfileSpeed
+          )
+        : undefined);
+    if (catalogOverride) matchedPlan = catalogOverride;
   }
 
-  // 3. Match by partial plan name
+  // 2. Match by cleanName — search initialPlans first (authoritative), then all plans
   if (!matchedPlan && cleanName) {
     const lowerClean = cleanName.toLowerCase();
-    matchedPlan = allPlans.find(
-      (p) =>
-        !isRouterProfileName(p.name) &&
-        (p.name.toLowerCase().includes(lowerClean) || lowerClean.includes(p.name.toLowerCase()))
-    );
+    matchedPlan =
+      initialPlans.find((p) => p.name.trim().toLowerCase() === lowerClean && !isRouterProfileName(p.name)) ||
+      allPlans.find((p) => p.name.trim().toLowerCase() === lowerClean && !isRouterProfileName(p.name));
+  }
+
+  // 3. Match by partial plan name — initialPlans first
+  if (!matchedPlan && cleanName) {
+    const lowerClean = cleanName.toLowerCase();
+    matchedPlan =
+      initialPlans.find(
+        (p) => !isRouterProfileName(p.name) &&
+          (p.name.toLowerCase().includes(lowerClean) || lowerClean.includes(p.name.toLowerCase()))
+      ) ||
+      allPlans.find(
+        (p) => !isRouterProfileName(p.name) &&
+          (p.name.toLowerCase().includes(lowerClean) || lowerClean.includes(p.name.toLowerCase()))
+      );
   }
 
   // 4. Match by embedded commercial speed (e.g. 250 Mbps from "Gamer Pro | 250mbps")
@@ -374,12 +405,15 @@ export const resolveCustomerPlan = (
   }
 
   // 5. Match by MikroTik profile name — links subscriber's PPPoE profile back to commercial plan
-  //    e.g. customer.network.pppoeProfile = "Plan-70M" maps to Gamer Pro (250 Mbps)
-  if (!matchedPlan && customer.network?.pppoeProfile) {
-    const pppoeProfile = customer.network.pppoeProfile.trim().toLowerCase();
-    matchedPlan = allPlans.find(
-      (p) => p.mikrotikProfile && p.mikrotikProfile.trim().toLowerCase() === pppoeProfile && !isRouterProfileName(p.name)
-    );
+  //    e.g. customer.network.pppoeProfile = "Plan-70M" maps to Gamer Pro (250 Mbps) in initialPlans
+  if (!matchedPlan && pppoeProfileName) {
+    matchedPlan =
+      initialPlans.find(
+        (p) => p.mikrotikProfile && p.mikrotikProfile.trim().toLowerCase() === pppoeProfileName && !isRouterProfileName(p.name)
+      ) ||
+      allPlans.find(
+        (p) => p.mikrotikProfile && p.mikrotikProfile.trim().toLowerCase() === pppoeProfileName && !isRouterProfileName(p.name)
+      );
   }
 
   // 6. Match by monthlyFee against commercial plans
@@ -394,18 +428,13 @@ export const resolveCustomerPlan = (
     }
   }
 
-  // Check customer's technical PPPoE profile name to ensure technical profile rate limits are NEVER exposed
-  const pppoeProfileName = (customer.network?.pppoeProfile || '').toLowerCase();
-  const pppoeSpeedMatch = pppoeProfileName.match(/(\d+)\s*(?:m|mbps)?/i);
-  const technicalProfileSpeed = pppoeSpeedMatch ? parseInt(pppoeSpeedMatch[1], 10) : null;
-
-  // Authoritative speed: strictly get the speed data from the commercial plan in Internet Plans or embedded commercial speed
+  // Authoritative speed: strictly from the matched commercial plan or embedded commercial speed
   let speedMbps = (matchedPlan && matchedPlan.speedMbps > 0)
     ? matchedPlan.speedMbps
     : (embeddedSpeed || 0);
 
-  // If the resolved speed inadvertently matches a technical router profile speed (e.g. 70 Mbps from Plan-70M),
-  // and does NOT come from an explicit commercial plan, suppress it so technical rate limits are never exposed:
+  // Final guard: if resolved speed still equals technical profile speed and no authoritative
+  // commercial plan was found, suppress it so router rate limits are never exposed
   if (technicalProfileSpeed && speedMbps === technicalProfileSpeed && (!matchedPlan || isRouterProfileName(matchedPlan.name))) {
     speedMbps = 0;
   }
