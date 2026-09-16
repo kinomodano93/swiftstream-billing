@@ -1093,12 +1093,6 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                   <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                     My Internet Plan
                   </span>
-                  {resolvedSpeed > 0 && (
-                    <span className="px-2.5 py-0.5 rounded-full bg-cyan-950 text-cyan-300 font-mono font-bold text-xs border border-cyan-800/40 flex items-center gap-1">
-                      <Zap className="w-3 h-3 text-cyan-400" />
-                      <span>{resolvedSpeed} Mbps</span>
-                    </span>
-                  )}
                 </div>
 
                 <div>
