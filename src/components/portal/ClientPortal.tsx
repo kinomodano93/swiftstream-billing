@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Wifi,
   Radio,
@@ -42,6 +42,14 @@ import {
   Receipt,
   Eye,
   MessageSquare,
+  Bell,
+  Wallet,
+  History,
+  Filter,
+  ArrowDownRight,
+  ArrowUpRight,
+  Printer,
+  Info,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import confetti from 'canvas-confetti';
@@ -97,6 +105,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
     repairOrders,
     plans,
     businessProfile,
+    reminders,
     processIncomingPaymentWebhook,
     submitPaymentProof,
     addRepairOrder,
@@ -133,8 +142,16 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
 
   // Portal Navigation Tabs
   const [portalTab, setPortalTab] = useState<
-    'overview' | 'bills' | 'pay' | 'receipts' | 'support' | 'speedtest' | 'upgrade'
+    'overview' | 'bills' | 'pay' | 'receipts' | 'notifications' | 'support' | 'speedtest' | 'upgrade'
   >('overview');
+
+  // Billing History sub-view & search filter
+  const [billingHistoryTab, setBillingHistoryTab] = useState<'statements' | 'timeline'>('statements');
+  const [billingSearchQuery, setBillingSearchQuery] = useState<string>('');
+  const [billingStatusFilter, setBillingStatusFilter] = useState<'all' | 'unpaid' | 'paid'>('all');
+
+  // Notifications Filter
+  const [notificationFilter, setNotificationFilter] = useState<'all' | 'billing' | 'advisories' | 'payments'>('all');
 
   // Online Payment Form State
   const [payInvoiceId, setPayInvoiceId] = useState<string>('');
@@ -244,6 +261,141 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
   const unpaidInvoices = customerInvoices.filter((i) => i.status !== 'paid');
   const latestUnpaidInvoice = unpaidInvoices[0];
   const selectedPayInvoice = customerInvoices.find((i) => i.id === payInvoiceId);
+
+  // Credit, wallet, and balance calculations
+  const outstandingBalance = customer ? Math.max(0, customer.balance) : 0;
+  const advanceCredit = customer && customer.balance < 0 ? Math.abs(customer.balance) : 0;
+  const walletCredit = (customer && customer.walletBalance) || 0;
+  const totalAvailableCredit = advanceCredit + walletCredit;
+  const advanceDeposit = (customer && customer.advanceDeposit) || 0;
+
+  // Reminders / notifications for this subscriber
+  const customerReminders = useMemo(() => {
+    if (!customer) return [];
+    const list = reminders || [];
+    const cleanCustMobile = customer.mobile ? customer.mobile.replace(/\D/g, '').slice(-10) : '';
+    return list
+      .filter((r) => {
+        if (r.customerId === customer.id) return true;
+        if (cleanCustMobile && r.mobile && r.mobile.replace(/\D/g, '').endsWith(cleanCustMobile)) return true;
+        if (!r.customerId && r.type.includes('advisory')) return true;
+        return false;
+      })
+      .sort((a, b) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime());
+  }, [customer, reminders]);
+
+  // Count notifications in the last 7 days
+  const recentRemindersCount = useMemo(() => {
+    const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    return customerReminders.filter((r) => new Date(r.sentAt).getTime() > sevenDaysAgo).length;
+  }, [customerReminders]);
+
+  // Recent maintenance/outage advisory within last 48 hours for banner on overview
+  const recentAdvisory = useMemo(() => {
+    const fortyEightHoursAgo = Date.now() - 48 * 60 * 60 * 1000;
+    return customerReminders.find(
+      (r) =>
+        (r.type.includes('advisory') || r.type.includes('maintenance') || r.type.includes('restored') || r.type.includes('outage')) &&
+        new Date(r.sentAt).getTime() > fortyEightHoursAgo
+    );
+  }, [customerReminders]);
+
+  // Filtered notifications
+  const filteredReminders = useMemo(() => {
+    return customerReminders.filter((r) => {
+      if (notificationFilter === 'billing') {
+        return r.type.includes('due') || r.type.includes('warning') || r.type.includes('disconnection');
+      }
+      if (notificationFilter === 'advisories') {
+        return r.type.includes('advisory') || r.type.includes('maintenance') || r.type.includes('restored');
+      }
+      if (notificationFilter === 'payments') {
+        return r.type.includes('payment') || r.type.includes('confirmation');
+      }
+      return true;
+    });
+  }, [customerReminders, notificationFilter]);
+
+  // Lifetime billing stats
+  const totalBilledAmount = useMemo(() => {
+    return customerInvoices.reduce((sum, inv) => sum + (inv.totalAmount || 0), 0);
+  }, [customerInvoices]);
+
+  const totalPaidAmount = useMemo(() => {
+    return customerPayments.reduce((sum, pay) => sum + (pay.amount || 0), 0);
+  }, [customerPayments]);
+
+  // Filtered statements for Bills tab
+  const filteredInvoices = useMemo(() => {
+    return customerInvoices.filter((inv) => {
+      if (billingStatusFilter === 'unpaid' && inv.status === 'paid') return false;
+      if (billingStatusFilter === 'paid' && inv.status !== 'paid') return false;
+      if (billingSearchQuery.trim()) {
+        const q = billingSearchQuery.toLowerCase().trim();
+        const numMatch = inv.invoiceNumber?.toLowerCase().includes(q);
+        const periodMatch = inv.billingPeriodStart?.includes(q) || inv.billingPeriodEnd?.includes(q);
+        const planMatch = inv.planName?.toLowerCase().includes(q);
+        if (!numMatch && !periodMatch && !planMatch) return false;
+      }
+      return true;
+    });
+  }, [customerInvoices, billingStatusFilter, billingSearchQuery]);
+
+  // Unified chronological ledger / timeline
+  const unifiedTimeline = useMemo(() => {
+    if (!customer) return [];
+    const events: Array<{
+      id: string;
+      date: string;
+      type: 'invoice' | 'payment';
+      title: string;
+      subtitle: string;
+      amount: number;
+      isDebit: boolean;
+      statusBadge: { text: string; bg: string; textCol: string; border: string };
+      invoice?: Invoice;
+      payment?: Payment;
+    }> = [];
+
+    customerInvoices.forEach((inv) => {
+      const badge = getInvoiceStatusBadge(inv.status);
+      events.push({
+        id: `inv-${inv.id}`,
+        date: inv.issueDate || inv.createdAt,
+        type: 'invoice',
+        title: `Statement #${inv.invoiceNumber}`,
+        subtitle: `Billing: ${formatDate(inv.billingPeriodStart)} to ${formatDate(inv.billingPeriodEnd)} • Due: ${formatDate(inv.dueDate)}`,
+        amount: inv.totalAmount,
+        isDebit: true,
+        statusBadge: badge,
+        invoice: inv,
+      });
+    });
+
+    customerPayments.forEach((pay) => {
+      events.push({
+        id: `pay-${pay.id}`,
+        date: pay.paymentDate,
+        type: 'payment',
+        title: `Official Receipt #${pay.receiptNumber}`,
+        subtitle: `Method: ${getPaymentMethodLabel(pay.paymentMethod).label.toUpperCase()}${pay.referenceNumber ? ` • Ref: ${pay.referenceNumber}` : ''} • Processed by ${pay.cashierName}`,
+        amount: pay.amount,
+        isDebit: false,
+        statusBadge: { text: 'SETTLED', bg: 'bg-emerald-500/20', textCol: 'text-emerald-300', border: 'border-emerald-500/30' },
+        payment: pay,
+      });
+    });
+
+    if (billingSearchQuery.trim()) {
+      const q = billingSearchQuery.toLowerCase().trim();
+      return events
+        .filter((ev) => ev.title.toLowerCase().includes(q) || ev.subtitle.toLowerCase().includes(q))
+        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    }
+
+    return events.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [customer, customerInvoices, customerPayments, billingSearchQuery]);
+
 
   // Pre-fill payment amount when switching to Pay tab or selecting invoice
   useEffect(() => {
@@ -1050,6 +1202,13 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                 badge: customerPayments.length > 0 ? `${customerPayments.length}` : null,
                 badgeColor: 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30',
               },
+              {
+                id: 'notifications',
+                label: 'Notifications',
+                icon: Bell,
+                badge: recentRemindersCount > 0 ? `${recentRemindersCount}` : null,
+                badgeColor: 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30',
+              },
               { id: 'support', label: 'Report Trouble', icon: Wrench },
               { id: 'upgrade', label: 'WiFi & Upgrade', icon: Sparkles },
               { id: 'speedtest', label: 'Speed Test', icon: Gauge },
@@ -1085,6 +1244,36 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
         {/* ================= TAB 1: OVERVIEW ================= */}
         {portalTab === 'overview' && (
           <div className="space-y-6">
+            {/* Recent Network / Maintenance Advisory Banner */}
+            {recentAdvisory && (
+              <div className="p-4 rounded-3xl bg-gradient-to-r from-amber-500/15 via-amber-500/5 to-slate-900 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-lg animate-in fade-in">
+                <div className="flex items-start sm:items-center gap-3">
+                  <div className="p-2.5 rounded-2xl bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0">
+                    <AlertTriangle className="w-5 h-5 text-amber-400 animate-pulse" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-amber-300 uppercase tracking-wider text-[10px] px-2 py-0.5 rounded-full bg-amber-950 border border-amber-800/40">
+                        Network Advisory
+                      </span>
+                      <span className="text-[10px] text-slate-400">
+                        {formatDateTime(recentAdvisory.sentAt)}
+                      </span>
+                    </div>
+                    <p className="text-slate-200 mt-1 font-medium leading-relaxed">
+                      {recentAdvisory.messageText}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setPortalTab('notifications')}
+                  className="px-3.5 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 font-bold text-xs whitespace-nowrap transition-colors cursor-pointer border border-amber-500/40 shrink-0 self-start sm:self-center"
+                >
+                  All Notifications ({customerReminders.length}) ↗
+                </button>
+              </div>
+            )}
+
             {/* Top Cards Grid */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
               {/* Card 1: Internet Package */}
@@ -1121,43 +1310,110 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                 </div>
               </div>
 
-              {/* Card 2: Billing & Outstanding */}
+              {/* Card 2: Billing & Outstanding with Credit Balance Breakdown */}
               <div className="p-6 rounded-3xl bg-slate-900/80 border border-slate-800 shadow-card space-y-4 flex flex-col justify-between hover:border-slate-700 transition-all text-center sm:text-left">
                 <div>
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                       Current Ledger Balance
                     </span>
-                    <CreditCard className="w-4 h-4 text-emerald-400" />
+                    <div className="flex items-center gap-1.5">
+                      {customer.balance < 0 ? (
+                        <span className="px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800/50 text-[10px] font-bold">
+                          Advance Credit
+                        </span>
+                      ) : customer.balance > 0 ? (
+                        <span className="px-2 py-0.5 rounded-full bg-rose-950 text-rose-300 border border-rose-800/50 text-[10px] font-bold">
+                          Payment Due
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800/50 text-[10px] font-bold">
+                          Settled
+                        </span>
+                      )}
+                      <CreditCard className="w-4 h-4 text-emerald-400" />
+                    </div>
                   </div>
 
                   <h3
                     className={`text-2xl font-black font-mono mt-2 ${
-                      customer.balance > 0 ? 'text-rose-400' : 'text-emerald-400'
+                      customer.balance > 0
+                        ? 'text-rose-400'
+                        : customer.balance < 0
+                        ? 'text-emerald-400'
+                        : 'text-slate-100'
                     }`}
                   >
-                    {formatCurrency(customer.balance)}
+                    {customer.balance < 0
+                      ? `+${formatCurrency(advanceCredit)}`
+                      : formatCurrency(customer.balance)}
                   </h3>
 
                   <p className="text-xs text-slate-400 mt-1">
                     {hasPendingProof
                       ? `⏳ Payment proof of ${formatCurrency(pendingSubmissions[0].amount)} (Ref: ${pendingSubmissions[0].referenceNumber}) is awaiting cashier approval.`
+                      : customer.balance < 0
+                      ? '✓ Advance credit active. Upcoming invoices will automatically deduct from this balance.'
                       : customer.balance > 0
-                      ? 'Payment due to maintain continuous internet service.'
+                      ? 'Payment due to maintain continuous fiber internet service.'
                       : 'Your account is in good standing! No balance due.'}
                   </p>
+
+                  {/* Credit Balance & Deposit Breakdown */}
+                  <div className="mt-3 pt-3 border-t border-slate-800/80 space-y-1 text-xs">
+                    <div className="flex items-center justify-between text-slate-400">
+                      <span className="flex items-center gap-1">
+                        <Wallet className="w-3 h-3 text-cyan-400" />
+                        Prepaid Wallet:
+                      </span>
+                      <span className="font-mono font-semibold text-slate-200">
+                        {formatCurrency(walletCredit)}
+                      </span>
+                    </div>
+                    {advanceDeposit > 0 && (
+                      <div className="flex items-center justify-between text-slate-400">
+                        <span className="flex items-center gap-1">
+                          <ShieldCheck className="w-3 h-3 text-purple-400" />
+                          Security Deposit:
+                        </span>
+                        <span className="font-mono font-semibold text-slate-200">
+                          {formatCurrency(advanceDeposit)}
+                        </span>
+                      </div>
+                    )}
+                    {totalAvailableCredit > 0 && (
+                      <div className="pt-1.5 flex items-center justify-between text-emerald-400 font-semibold">
+                        <span className="text-[11px] flex items-center gap-1">
+                          ⚡ Usable Credit Total:
+                        </span>
+                        <span className="font-mono text-xs font-bold text-emerald-300">
+                          +{formatCurrency(totalAvailableCredit)}
+                        </span>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 <button
                   onClick={() => setPortalTab('pay')}
-                  className={`w-full flex items-center justify-center gap-1.5 py-2.5 rounded-2xl text-xs font-bold transition-all hover:scale-[1.02] cursor-pointer ${
+                  className={`w-full flex items-center justify-center gap-1.5 py-2.5 rounded-2xl text-xs font-bold transition-all hover:scale-[1.02] cursor-pointer mt-2 ${
                     hasPendingProof
                       ? 'bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/40'
                       : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-lg shadow-emerald-600/20'
                   }`}
                 >
-                  {hasPendingProof ? <Clock className="w-4 h-4 text-amber-400" /> : <CreditCard className="w-4 h-4" />}
-                  <span>{hasPendingProof ? 'View Pending Review Status' : customer.balance > 0 ? 'Pay Online Now (GCash/Maya)' : 'Make Advance Payment'}</span>
+                  {hasPendingProof ? (
+                    <Clock className="w-4 h-4 text-amber-400" />
+                  ) : (
+                    <CreditCard className="w-4 h-4" />
+                  )}
+                  <span>
+                    {hasPendingProof
+                      ? 'View Pending Review Status'
+                      : customer.balance > 0
+                      ? 'Pay Online Now (GCash/Maya)'
+                      : 'Top-up / Prepay Account'}
+                  </span>
                 </button>
               </div>
 
@@ -1377,154 +1633,383 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
         {/* ================= TAB 2: BILLS & SOA ================= */}
         {portalTab === 'bills' && (
           <div className="space-y-6">
-            <div className="text-center space-y-1">
-              <h2 className="text-xl font-bold text-slate-100 flex items-center justify-center gap-2">
-                <FileText className="w-5 h-5 text-cyan-400" />
-                <span>Statements of Account (SOA)</span>
-              </h2>
-              <p className="text-xs text-slate-400">
-                View itemized breakdown of monthly recurring subscription and download official PDF bills.
-              </p>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2">
+                  <FileText className="w-5 h-5 text-cyan-400" />
+                  <span>Statements & Billing History</span>
+                </h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Itemized monthly subscription statements, official receipts, and running account ledger.
+                </p>
+              </div>
+
+              {/* View Switcher: Statements vs Timeline */}
+              <div className="flex items-center bg-slate-900 border border-slate-800 rounded-2xl p-1 shrink-0 self-start sm:self-auto">
+                <button
+                  type="button"
+                  onClick={() => setBillingHistoryTab('statements')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                    billingHistoryTab === 'statements'
+                      ? 'bg-cyan-600 text-white shadow-sm'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>Statements ({customerInvoices.length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBillingHistoryTab('timeline')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                    billingHistoryTab === 'timeline'
+                      ? 'bg-cyan-600 text-white shadow-sm'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <History className="w-3.5 h-3.5" />
+                  <span>Ledger Timeline ({unifiedTimeline.length})</span>
+                </button>
+              </div>
             </div>
 
-            {customerInvoices.length === 0 ? (
-              <div className="p-12 text-center text-slate-500 bg-slate-900/80 rounded-3xl border border-slate-800 text-xs">
-                No billing statements found.
+            {/* Lifetime Financial Snapshot Grid */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
+              <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 shadow-sm space-y-1">
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                  Total Invoiced
+                </span>
+                <p className="text-lg font-mono font-bold text-slate-100">
+                  {formatCurrency(totalBilledAmount)}
+                </p>
+                <span className="text-[10px] text-slate-400 block">
+                  {customerInvoices.length} statement{customerInvoices.length === 1 ? '' : 's'} issued
+                </span>
               </div>
-            ) : (
-              <div className="space-y-4">
-                {customerInvoices.map((inv) => {
-                  const pendingSub = getPendingSubmissionForInvoice(inv.id);
-                  const badge = pendingSub
-                    ? { text: 'Pending Verification', bg: 'bg-amber-500/10', textCol: 'text-amber-400', border: 'border-amber-500/30' }
-                    : getInvoiceStatusBadge(inv.status);
-                  return (
-                    <div
-                      key={inv.id}
-                      className="p-6 rounded-3xl bg-slate-900/80 border border-slate-800 shadow-card space-y-4"
+
+              <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 shadow-sm space-y-1">
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                  Total Paid & Settled
+                </span>
+                <p className="text-lg font-mono font-bold text-emerald-400">
+                  {formatCurrency(totalPaidAmount)}
+                </p>
+                <span className="text-[10px] text-slate-400 block">
+                  {customerPayments.length} official receipt{customerPayments.length === 1 ? '' : 's'}
+                </span>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 shadow-sm space-y-1">
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                  Current Balance Due
+                </span>
+                <p
+                  className={`text-lg font-mono font-bold ${
+                    outstandingBalance > 0 ? 'text-rose-400' : 'text-emerald-400'
+                  }`}
+                >
+                  {formatCurrency(outstandingBalance)}
+                </p>
+                <span className="text-[10px] text-slate-400 block">
+                  {unpaidInvoices.length} unpaid statement{unpaidInvoices.length === 1 ? '' : 's'}
+                </span>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 shadow-sm space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                    Usable Credit
+                  </span>
+                  <Wallet className="w-3.5 h-3.5 text-cyan-400" />
+                </div>
+                <p className="text-lg font-mono font-bold text-cyan-400">
+                  {formatCurrency(totalAvailableCredit)}
+                </p>
+                <span className="text-[10px] text-slate-400 block">
+                  {walletCredit > 0 ? `Wallet: ${formatCurrency(walletCredit)}` : 'Auto-deducts next bill'}
+                </span>
+              </div>
+            </div>
+
+            {/* Filter & Search Bar */}
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-900/60 p-3 rounded-2xl border border-slate-800">
+              <div className="relative w-full sm:w-72">
+                <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Search statements or receipts..."
+                  value={billingSearchQuery}
+                  onChange={(e) => setBillingSearchQuery(e.target.value)}
+                  className="w-full pl-9 pr-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-500/50"
+                />
+              </div>
+
+              {billingHistoryTab === 'statements' && (
+                <div className="flex items-center gap-1.5 self-start sm:self-auto text-xs">
+                  <span className="text-[10px] text-slate-500 uppercase font-bold mr-1">Status:</span>
+                  {(['all', 'unpaid', 'paid'] as const).map((st) => (
+                    <button
+                      key={st}
+                      type="button"
+                      onClick={() => setBillingStatusFilter(st)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold capitalize transition-all cursor-pointer ${
+                        billingStatusFilter === st
+                          ? 'bg-cyan-600 text-white shadow-sm'
+                          : 'bg-slate-950 text-slate-400 hover:text-slate-200 border border-slate-800'
+                      }`}
                     >
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
-                        <div>
-                          <div className="flex items-center gap-3">
-                            <span className="font-mono font-bold text-base text-cyan-400">
-                              {inv.invoiceNumber}
-                            </span>
-                            <span
-                              className={`px-2.5 py-0.5 rounded-full text-xs font-semibold border ${badge.bg} ${badge.textCol} ${badge.border}`}
-                            >
-                              {badge.text}
-                            </span>
-                          </div>
-                          <p className="text-xs text-slate-400 mt-1">
-                            Billing Period: <strong className="text-slate-200">{formatDate(inv.billingPeriodStart)} to {formatDate(inv.billingPeriodEnd)}</strong>
-                          </p>
-                        </div>
+                      {st}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
 
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => {
-                              const pdf = generateInvoicePDF(inv, businessProfile, customer, plans);
-                              pdf.save(`${inv.invoiceNumber}_${customer.accountNo}.pdf`);
-                            }}
-                            className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-cyan-500/30 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
-                          >
-                            <Download className="w-3.5 h-3.5" />
-                            <span>Download PDF Bill</span>
-                          </button>
-
-                          {pendingSub ? (
-                            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-950/40 text-amber-300 border border-amber-800/40 rounded-xl text-xs font-semibold">
-                              <Clock className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
-                              <span>Proof Submitted (#{pendingSub.submissionNumber})</span>
+            {/* View 1: Statements of Account (Invoices) */}
+            {billingHistoryTab === 'statements' && (
+              <>
+                {filteredInvoices.length === 0 ? (
+                  <div className="p-12 text-center text-slate-500 bg-slate-900/80 rounded-3xl border border-slate-800 text-xs">
+                    {billingSearchQuery.trim() || billingStatusFilter !== 'all'
+                      ? 'No statements match your search/filter criteria.'
+                      : 'No billing statements found.'}
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {filteredInvoices.map((inv) => {
+                      const pendingSub = getPendingSubmissionForInvoice(inv.id);
+                      const badge = pendingSub
+                        ? { text: 'Pending Verification', bg: 'bg-amber-500/10', textCol: 'text-amber-400', border: 'border-amber-500/30' }
+                        : getInvoiceStatusBadge(inv.status);
+                      return (
+                        <div
+                          key={inv.id}
+                          className="p-6 rounded-3xl bg-slate-900/80 border border-slate-800 shadow-card space-y-4 hover:border-slate-700/80 transition-all"
+                        >
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+                            <div>
+                              <div className="flex items-center gap-3">
+                                <span className="font-mono font-bold text-base text-cyan-400">
+                                  {inv.invoiceNumber}
+                                </span>
+                                <span
+                                  className={`px-2.5 py-0.5 rounded-full text-xs font-semibold border ${badge.bg} ${badge.textCol} ${badge.border}`}
+                                >
+                                  {badge.text}
+                                </span>
+                                {inv.appliedCredit && inv.appliedCredit > 0 && (
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-800/40">
+                                    Wallet Credit: -{formatCurrency(inv.appliedCredit)}
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-xs text-slate-400 mt-1">
+                                Billing Period: <strong className="text-slate-200">{formatDate(inv.billingPeriodStart)} to {formatDate(inv.billingPeriodEnd)}</strong>
+                              </p>
                             </div>
-                          ) : inv.balanceDue > 0 ? (
-                            <button
-                              onClick={() => {
-                                setPayInvoiceId(inv.id);
-                                setPortalTab('pay');
-                              }}
-                              className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-600/20 transition-all hover:scale-105 cursor-pointer"
-                            >
-                              <CreditCard className="w-3.5 h-3.5" />
-                              <span>Pay {formatCurrency(inv.balanceDue)}</span>
-                            </button>
-                          ) : null}
-                        </div>
-                      </div>
 
-                      {/* Itemized Table */}
-                      <div className="border border-slate-800 rounded-2xl overflow-hidden text-xs">
-                        <table className="w-full text-left">
-                          <thead>
-                            <tr className="bg-slate-950 text-slate-400 border-b border-slate-800 font-semibold">
-                              <th className="py-2.5 px-4">Description of Services & Charges</th>
-                              <th className="py-2.5 px-4 text-center">Qty</th>
-                              <th className="py-2.5 px-4 text-right">Unit Rate</th>
-                              <th className="py-2.5 px-4 text-right">Amount</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-800/60">
-                            {inv.items.map((item, idx) => {
-                              const isPlanItem = item.type === 'plan' || (!item.type && idx === 0);
-                              const planDetails = resolveInvoicePlanDetails(inv, customer, plans);
-                              const displayDesc = item.description || (isPlanItem
-                                ? (inv.isProrated && inv.proratedDays
-                                    ? `Internet Plan: ${planDetails.planName} — Prorated (${inv.proratedDays} Days)`
-                                    : `Internet Plan: ${planDetails.planName} — Monthly Subscription`)
-                                : 'Service Item');
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => {
+                                  const pdf = generateInvoicePDF(inv, businessProfile, customer, plans);
+                                  pdf.save(`${inv.invoiceNumber}_${customer.accountNo}.pdf`);
+                                }}
+                                className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-cyan-500/30 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                              >
+                                <Download className="w-3.5 h-3.5" />
+                                <span>Download PDF Bill</span>
+                              </button>
 
-                              const unitPrice = isPlanItem && (item.unitPrice <= 0 || !inv.isProrated) ? planDetails.monthlyFee : item.unitPrice;
-                              const itemAmount = isPlanItem && (item.amount <= 0 || !inv.isProrated) ? planDetails.monthlyFee : item.amount;
+                              {pendingSub ? (
+                                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-950/40 text-amber-300 border border-amber-800/40 rounded-xl text-xs font-semibold">
+                                  <Clock className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+                                  <span>Proof Submitted (#{pendingSub.submissionNumber})</span>
+                                </div>
+                              ) : inv.balanceDue > 0 ? (
+                                <button
+                                  onClick={() => {
+                                    setPayInvoiceId(inv.id);
+                                    setPortalTab('pay');
+                                  }}
+                                  className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-600/20 transition-all hover:scale-105 cursor-pointer"
+                                >
+                                  <CreditCard className="w-3.5 h-3.5" />
+                                  <span>Pay {formatCurrency(inv.balanceDue)}</span>
+                                </button>
+                              ) : null}
+                            </div>
+                          </div>
 
-                              return (
-                                <tr key={item.id || idx}>
-                                  <td className="py-2.5 px-4 text-slate-200 font-medium">{displayDesc}</td>
-                                  <td className="py-2.5 px-4 text-center text-slate-400">{item.quantity}</td>
-                                  <td className="py-2.5 px-4 text-right font-mono text-slate-300">{formatCurrency(unitPrice)}</td>
-                                  <td className="py-2.5 px-4 text-right font-mono font-semibold text-slate-100">{formatCurrency(itemAmount)}</td>
+                          {/* Itemized Table */}
+                          <div className="border border-slate-800 rounded-2xl overflow-hidden text-xs">
+                            <table className="w-full text-left">
+                              <thead>
+                                <tr className="bg-slate-950 text-slate-400 border-b border-slate-800 font-semibold">
+                                  <th className="py-2.5 px-4">Description of Services & Charges</th>
+                                  <th className="py-2.5 px-4 text-center">Qty</th>
+                                  <th className="py-2.5 px-4 text-right">Unit Rate</th>
+                                  <th className="py-2.5 px-4 text-right">Amount</th>
                                 </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
+                              </thead>
+                              <tbody className="divide-y divide-slate-800/60">
+                                {inv.items.map((item, idx) => {
+                                  const isPlanItem = item.type === 'plan' || (!item.type && idx === 0);
+                                  const planDetails = resolveInvoicePlanDetails(inv, customer, plans);
+                                  const displayDesc = item.description || (isPlanItem
+                                    ? (inv.isProrated && inv.proratedDays
+                                        ? `Internet Plan: ${planDetails.planName} — Prorated (${inv.proratedDays} Days)`
+                                        : `Internet Plan: ${planDetails.planName} — Monthly Subscription`)
+                                    : 'Service Item');
 
-                      {/* Calculations Summary */}
-                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pt-2 text-xs">
-                        <div className="text-slate-400 space-y-0.5">
-                          <p>Due Date: <strong className="text-rose-400">{formatDate(inv.dueDate)}</strong></p>
-                          {pendingSub ? (
-                            <p className="text-amber-300 font-semibold flex items-center gap-1">
-                              <Clock className="w-3.5 h-3.5 text-amber-400" />
-                              <span>Payment Proof Queued: {formatCurrency(pendingSub.amount)} (Ref: {pendingSub.referenceNumber}) awaiting cashier approval.</span>
-                            </p>
-                          ) : inv.paidAt ? (
-                            <p className="text-emerald-400">
-                              Paid on: {formatDateTime(inv.paidAt)} ({inv.paymentMethodUsed?.toUpperCase()})
-                            </p>
-                          ) : null}
-                        </div>
+                                  const unitPrice = isPlanItem && (item.unitPrice <= 0 || !inv.isProrated) ? planDetails.monthlyFee : item.unitPrice;
+                                  const itemAmount = isPlanItem && (item.amount <= 0 || !inv.isProrated) ? planDetails.monthlyFee : item.amount;
 
-                        <div className="flex items-center gap-4 text-right">
-                          <div>
-                            <span className="text-[10px] text-slate-500 block">Total Invoiced:</span>
-                            <span className="font-mono text-slate-200 font-bold">{formatCurrency(inv.totalAmount)}</span>
+                                  return (
+                                    <tr key={item.id || idx}>
+                                      <td className="py-2.5 px-4 text-slate-200 font-medium">{displayDesc}</td>
+                                      <td className="py-2.5 px-4 text-center text-slate-400">{item.quantity}</td>
+                                      <td className="py-2.5 px-4 text-right font-mono text-slate-300">{formatCurrency(unitPrice)}</td>
+                                      <td className="py-2.5 px-4 text-right font-mono font-semibold text-slate-100">{formatCurrency(itemAmount)}</td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
                           </div>
-                          <div>
-                            <span className="text-[10px] text-slate-500 block">Balance Due:</span>
-                            <span
-                              className={`font-mono text-base font-black ${
-                                inv.balanceDue > 0 ? 'text-rose-400' : 'text-emerald-400'
-                              }`}
-                            >
-                              {formatCurrency(inv.balanceDue)}
-                            </span>
+
+                          {/* Calculations Summary */}
+                          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pt-2 text-xs">
+                            <div className="text-slate-400 space-y-0.5">
+                              <p>Due Date: <strong className="text-rose-400">{formatDate(inv.dueDate)}</strong></p>
+                              {pendingSub ? (
+                                <p className="text-amber-300 font-semibold flex items-center gap-1">
+                                  <Clock className="w-3.5 h-3.5 text-amber-400" />
+                                  <span>Payment Proof Queued: {formatCurrency(pendingSub.amount)} (Ref: {pendingSub.referenceNumber}) awaiting cashier approval.</span>
+                                </p>
+                              ) : inv.paidAt ? (
+                                <p className="text-emerald-400">
+                                  Paid on: {formatDateTime(inv.paidAt)} ({inv.paymentMethodUsed?.toUpperCase()})
+                                </p>
+                              ) : null}
+                            </div>
+
+                            <div className="flex items-center gap-4 text-right">
+                              <div>
+                                <span className="text-[10px] text-slate-500 block">Total Invoiced:</span>
+                                <span className="font-mono text-slate-200 font-bold">{formatCurrency(inv.totalAmount)}</span>
+                              </div>
+                              <div>
+                                <span className="text-[10px] text-slate-500 block">Balance Due:</span>
+                                <span
+                                  className={`font-mono text-base font-black ${
+                                    inv.balanceDue > 0 ? 'text-rose-400' : 'text-emerald-400'
+                                  }`}
+                                >
+                                  {formatCurrency(inv.balanceDue)}
+                                </span>
+                              </div>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    </div>
-                  );
-                })}
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* View 2: Chronological Ledger Timeline */}
+            {billingHistoryTab === 'timeline' && (
+              <div className="space-y-4">
+                {unifiedTimeline.length === 0 ? (
+                  <div className="p-12 text-center text-slate-500 bg-slate-900/80 rounded-3xl border border-slate-800 text-xs">
+                    No transactions or billing activities recorded yet.
+                  </div>
+                ) : (
+                  <div className="relative pl-6 sm:pl-8 space-y-4 before:absolute before:left-3 before:top-3 before:bottom-3 before:w-0.5 before:bg-slate-800">
+                    {unifiedTimeline.map((item) => {
+                      const isInvoice = item.type === 'invoice';
+                      return (
+                        <div key={item.id} className="relative group">
+                          {/* Timeline node icon */}
+                          <div
+                            className={`absolute -left-6 sm:-left-8 top-3 w-6 h-6 rounded-full flex items-center justify-center border text-[11px] shadow-sm ${
+                              isInvoice
+                                ? 'bg-rose-950/80 border-rose-500/50 text-rose-400'
+                                : 'bg-emerald-950/80 border-emerald-500/50 text-emerald-400'
+                            }`}
+                          >
+                            {isInvoice ? (
+                              <ArrowUpRight className="w-3 h-3" />
+                            ) : (
+                              <ArrowDownRight className="w-3 h-3" />
+                            )}
+                          </div>
+
+                          <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/80 border border-slate-800/90 shadow-sm hover:border-slate-700 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-bold text-slate-100">{item.title}</span>
+                                <span
+                                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${item.statusBadge.bg} ${item.statusBadge.textCol} ${item.statusBadge.border}`}
+                                >
+                                  {item.statusBadge.text}
+                                </span>
+                                <span className="text-[11px] text-slate-500 font-mono">
+                                  {formatDate(item.date)}
+                                </span>
+                              </div>
+                              <p className="text-slate-400 text-[11px]">{item.subtitle}</p>
+                            </div>
+
+                            <div className="flex items-center justify-between sm:justify-end gap-3 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-800">
+                              <div className="text-right">
+                                <span className="text-[10px] text-slate-500 uppercase block font-medium">
+                                  {isInvoice ? 'Statement Charge' : 'Payment Settled'}
+                                </span>
+                                <span
+                                  className={`font-mono text-base font-black ${
+                                    isInvoice ? 'text-rose-400' : 'text-emerald-400'
+                                  }`}
+                                >
+                                  {isInvoice ? `-${formatCurrency(item.amount)}` : `+${formatCurrency(item.amount)}`}
+                                </span>
+                              </div>
+
+                              {isInvoice && item.invoice && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const pdf = generateInvoicePDF(item.invoice!, businessProfile, customer, plans);
+                                    pdf.save(`${item.invoice!.invoiceNumber}_${customer.accountNo}.pdf`);
+                                  }}
+                                  className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 transition-colors cursor-pointer"
+                                  title="Download Statement PDF"
+                                >
+                                  <Download className="w-4 h-4" />
+                                </button>
+                              )}
+
+                              {!isInvoice && item.payment && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const pdf = generateOfficialReceiptPDF(item.payment!, businessProfile);
+                                    pdf.save(`${item.payment!.receiptNumber}.pdf`);
+                                  }}
+                                  className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-slate-700 transition-colors cursor-pointer"
+                                  title="Download Official Receipt PDF"
+                                >
+                                  <Download className="w-4 h-4" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1584,6 +2069,29 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                   >
                     View in Receipts Tab &rarr;
                   </button>
+                </div>
+              </div>
+            )}
+            {/* Usable Credit Balance Banner */}
+            {totalAvailableCredit > 0 && (
+              <div className="p-4 rounded-3xl bg-emerald-950/40 border border-emerald-500/30 flex items-start gap-3 text-xs shadow-sm">
+                <div className="p-2 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shrink-0">
+                  <Wallet className="w-5 h-5 text-emerald-400" />
+                </div>
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-2">
+                    <h4 className="font-bold text-emerald-300 text-sm">
+                      Usable Credit Balance: +{formatCurrency(totalAvailableCredit)}
+                    </h4>
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-900/60 text-emerald-300 text-[10px] font-bold border border-emerald-700/40">
+                      Auto-Deducts
+                    </span>
+                  </div>
+                  <p className="text-slate-300 text-xs leading-relaxed">
+                    {walletCredit > 0 ? `Prepaid Wallet: ${formatCurrency(walletCredit)}` : ''}
+                    {advanceCredit > 0 ? ` • Advance Overpayment: ${formatCurrency(advanceCredit)}` : ''}
+                    . Any newly generated monthly statement will automatically deduct from this credit pool first.
+                  </p>
                 </div>
               </div>
             )}
@@ -2104,6 +2612,31 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                           placeholder="1299.00"
                           className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 font-mono font-bold text-base focus:outline-none focus:border-cyan-500 text-center"
                         />
+                        <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                          {customer.balance > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => setPayAmount(customer.balance.toString())}
+                              className="px-2 py-0.5 rounded-lg bg-rose-950 text-rose-300 border border-rose-800/40 text-[10px] font-semibold hover:bg-rose-900/50 cursor-pointer"
+                            >
+                              Full Due: {formatCurrency(customer.balance)}
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => setPayAmount(customer.monthlyFee.toString())}
+                            className="px-2 py-0.5 rounded-lg bg-slate-800 text-slate-300 border border-slate-700 text-[10px] font-semibold hover:bg-slate-700 cursor-pointer"
+                          >
+                            1 Mo: {formatCurrency(customer.monthlyFee)}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setPayAmount((customer.monthlyFee * 2).toString())}
+                            className="px-2 py-0.5 rounded-lg bg-slate-800 text-slate-300 border border-slate-700 text-[10px] font-semibold hover:bg-slate-700 cursor-pointer"
+                          >
+                            2 Mo Advance: {formatCurrency(customer.monthlyFee * 2)}
+                          </button>
+                        </div>
                       </div>
 
                       <div>
@@ -2481,6 +3014,206 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
           </div>
         </div>
       )}
+
+        {/* ================= TAB: NOTIFICATIONS & ADVISORIES ================= */}
+        {portalTab === 'notifications' && (
+          <div className="space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2">
+                  <Bell className="w-5 h-5 text-cyan-400" />
+                  <span>Notifications & Network Advisories</span>
+                </h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Official SMS alerts, maintenance schedules, payment confirmations, and billing reminders dispatched to your account.
+                </p>
+              </div>
+
+              {/* Destination info pill */}
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-400 self-start sm:self-auto">
+                <Smartphone className="w-3.5 h-3.5 text-cyan-400" />
+                <span>SMS Target: <strong className="text-slate-200 font-mono">{customer.mobile}</strong></span>
+              </div>
+            </div>
+
+            {/* Notification Filter Chips */}
+            <div className="flex flex-wrap items-center gap-2">
+              {[
+                { id: 'all', label: 'All Notices', count: customerReminders.length },
+                {
+                  id: 'advisories',
+                  label: 'Outages & Maintenance',
+                  count: customerReminders.filter(
+                    (r) => r.type.includes('advisory') || r.type.includes('maintenance') || r.type.includes('restored') || r.type.includes('outage')
+                  ).length,
+                },
+                {
+                  id: 'billing',
+                  label: 'Billing & Due Dates',
+                  count: customerReminders.filter(
+                    (r) => r.type.includes('due') || r.type.includes('warning') || r.type.includes('disconnection')
+                  ).length,
+                },
+                {
+                  id: 'payments',
+                  label: 'Payment Confirmations',
+                  count: customerReminders.filter(
+                    (r) => r.type.includes('payment') || r.type.includes('confirmation')
+                  ).length,
+                },
+              ].map((filter) => (
+                <button
+                  key={filter.id}
+                  type="button"
+                  onClick={() => setNotificationFilter(filter.id as any)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                    notificationFilter === filter.id
+                      ? 'bg-cyan-600 text-white shadow-sm'
+                      : 'bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
+                  }`}
+                >
+                  <span>{filter.label}</span>
+                  <span
+                    className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                      notificationFilter === filter.id
+                        ? 'bg-cyan-700 text-white'
+                        : 'bg-slate-800 text-slate-300'
+                    }`}
+                  >
+                    {filter.count}
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            {/* Notifications List */}
+            {filteredReminders.length === 0 ? (
+              <div className="p-12 text-center text-slate-500 bg-slate-900/80 rounded-3xl border border-slate-800 space-y-3">
+                <div className="w-12 h-12 rounded-2xl bg-slate-800/80 border border-slate-700 flex items-center justify-center mx-auto text-slate-400">
+                  <Bell className="w-6 h-6" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-slate-300 text-sm">No Notifications Found</h4>
+                  <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
+                    {notificationFilter === 'all'
+                      ? 'You have no recorded SMS notices or network advisories at this time. When our NOC sends maintenance alerts or billing reminders, they will appear here.'
+                      : `No notifications found under the "${notificationFilter}" filter.`}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {filteredReminders.map((r) => {
+                  const isMaintenance =
+                    r.type.includes('maintenance') || r.type.includes('advisory') || r.type.includes('outage');
+                  const isRestored = r.type.includes('restored');
+                  const isOverdue =
+                    r.type.includes('overdue') || r.type.includes('disconnection');
+                  const isDue = r.type.includes('due');
+                  const isPayment = r.type.includes('payment');
+
+                  let badgeColor = 'bg-slate-800 text-slate-300 border-slate-700';
+                  let icon = <Info className="w-4 h-4 text-slate-400" />;
+                  let typeLabel = 'System Notice';
+
+                  if (isMaintenance) {
+                    badgeColor = 'bg-amber-500/20 text-amber-300 border-amber-500/40';
+                    icon = <AlertTriangle className="w-4 h-4 text-amber-400" />;
+                    typeLabel = 'Maintenance & Outage Advisory';
+                  } else if (isRestored) {
+                    badgeColor = 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40';
+                    icon = <CheckCircle2 className="w-4 h-4 text-emerald-400" />;
+                    typeLabel = 'Service Restored Announcement';
+                  } else if (isOverdue) {
+                    badgeColor = 'bg-rose-500/20 text-rose-300 border-rose-500/40';
+                    icon = <AlertCircle className="w-4 h-4 text-rose-400" />;
+                    typeLabel = 'Disconnection Warning';
+                  } else if (isDue) {
+                    badgeColor = 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40';
+                    icon = <Clock className="w-4 h-4 text-cyan-400" />;
+                    typeLabel = 'Bill Due Date Reminder';
+                  } else if (isPayment) {
+                    badgeColor = 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40';
+                    icon = <CheckCircle2 className="w-4 h-4 text-emerald-400" />;
+                    typeLabel = 'Official Payment Confirmation';
+                  }
+
+                  return (
+                    <div
+                      key={r.id}
+                      className="p-5 rounded-3xl bg-slate-900/90 border border-slate-800/90 hover:border-slate-700 shadow-sm transition-all space-y-3"
+                    >
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
+                        <div className="flex items-center gap-2.5">
+                          <div className="p-2 rounded-xl bg-slate-800/80 border border-slate-700 shrink-0">
+                            {icon}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-bold text-xs text-slate-100">{typeLabel}</span>
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${badgeColor}`}>
+                                {r.type.replace(/_/g, ' ').toUpperCase()}
+                              </span>
+                            </div>
+                            <span className="text-[11px] text-slate-400 block mt-0.5 font-mono">
+                              Dispatched: {formatDateTime(r.sentAt)}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 text-[11px] text-slate-400 self-start sm:self-auto font-mono">
+                          <span className="px-2 py-0.5 rounded-lg bg-slate-950 border border-slate-800">
+                            Channel: {r.channel.toUpperCase()}
+                          </span>
+                          <span className="px-2 py-0.5 rounded-lg bg-emerald-950/60 text-emerald-300 border border-emerald-800/40">
+                            ● Sent
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Message Body */}
+                      <div className="p-3.5 rounded-2xl bg-slate-950/70 border border-slate-800/80 text-xs text-slate-200 leading-relaxed font-sans whitespace-pre-line">
+                        {r.messageText}
+                      </div>
+
+                      {/* Footer Actions / References */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1 text-xs">
+                        <div className="text-slate-400 text-[11px]">
+                          {r.invoiceNumber && (
+                            <span>Ref Statement: <strong className="text-cyan-400 font-mono">{r.invoiceNumber}</strong></span>
+                          )}
+                          {r.amountDue !== undefined && r.amountDue > 0 && (
+                            <span className="ml-2">• Amount Due: <strong className="text-rose-400 font-mono">{formatCurrency(r.amountDue)}</strong></span>
+                          )}
+                        </div>
+
+                        {r.invoiceNumber && (
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const matchedInv = customerInvoices.find((i) => i.invoiceNumber === r.invoiceNumber);
+                                if (matchedInv && matchedInv.balanceDue > 0) {
+                                  setPayInvoiceId(matchedInv.id);
+                                  setPortalTab('pay');
+                                } else {
+                                  setPortalTab('bills');
+                                }
+                              }}
+                              className="px-3 py-1.5 bg-cyan-600/20 hover:bg-cyan-600 hover:text-white text-cyan-300 rounded-xl text-xs font-semibold transition-colors cursor-pointer border border-cyan-500/30"
+                            >
+                              View Statement &rarr;
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ================= TAB 5: SUPPORT & TICKETS ================= */}
         {portalTab === 'support' && (
