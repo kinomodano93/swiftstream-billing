@@ -183,10 +183,11 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
     );
   });
 
-  // Keep PPPoE profile in sync with selected plan when in create mode
+  // Keep PPPoE profile in sync with selected plan's mikrotikProfile when in create mode
   useEffect(() => {
     if (pppoeMode === 'create' && selectedPlan) {
-      setPppoeProfile(`Plan-${selectedPlan.speedMbps}M`);
+      // Use the plan's designated mikrotikProfile if available, otherwise derive conventionally
+      setPppoeProfile(selectedPlan.mikrotikProfile || `Plan-${selectedPlan.speedMbps}M`);
     }
   }, [selectedPlanId, pppoeMode]);
 
@@ -492,6 +493,7 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
           },
           planId: selectedPlan.id,
           planName: selectedPlan.name,
+          planSpeedMbps: selectedPlan.speedMbps,   // authoritative commercial speed from Internet Plans
           monthlyFee: selectedPlan.monthlyFee,
           billingDay,
           status,
@@ -554,6 +556,7 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
           },
           planId: selectedPlan.id,
           planName: selectedPlan.name,
+          planSpeedMbps: selectedPlan.speedMbps,   // authoritative commercial speed from Internet Plans
           monthlyFee: selectedPlan.monthlyFee,
           billingDay,
           status: 'active',

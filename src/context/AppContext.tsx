@@ -45,7 +45,7 @@ import {
   STORAGE_KEYS,
 } from '../data/storage';
 import { initialPlans, initialBusinessProfile, initialCoverageAreas, initialStaffUsers } from '../data/initialData';
-import { generateId, formatCurrency, formatCommercialPlanName, isRouterProfileName } from '../utils/formatters';
+import { generateId, formatCurrency, isRouterProfileName } from '../utils/formatters';
 import { findCustomerInvoiceForMonth, hasCustomerInvoiceForMonth } from '../utils/billingRules';
 import { generateReminderMessage, sendMockNotification } from '../utils/smsSender';
 import {
@@ -864,11 +864,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const key = item.email && item.email.includes('@') ? item.email.toLowerCase().trim() : (item.id || item.accountNo);
         if (!seen.has(key)) {
           seen.add(key);
-          const cleanName = formatCommercialPlanName(item.planName);
+          // Strip any legacy embedded speed suffix from planName (e.g. "Gamer Pro | 250mbps" → "Gamer Pro")
+          const cleanedPlanName = (item.planName || '').replace(/\s*\|\s*\d+\s*m(?:bps)?/i, '').trim() || item.planName;
           uniqueList.push({
             ...item,
-            rawPlanName: item.rawPlanName || item.planName,
-            planName: cleanName,
+            planName: cleanedPlanName,
+            // planSpeedMbps is written at save time — preserve it if already set, otherwise leave for resolveCustomerPlan to fill
           });
         }
       }

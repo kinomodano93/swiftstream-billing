@@ -178,16 +178,17 @@ export const loadStoredData = () => {
       localStorage.getItem(STORAGE_KEYS.CUSTOMERS) || JSON.stringify(initialCustomers)
     ) as Customer[];
     const customers: Customer[] = rawCustomers.map((cust) => {
+      const cleanedPlanName = (cust.planName || '').replace(/\s*\|\s*\d+\s*m(?:bps)?/i, '').trim() || cust.planName;
       const plan =
         plans.find((p) => p.id === cust.planId && !isRouterProfileName(p.name)) ||
-        plans.find((p) => p.name?.trim().toLowerCase() === cust.planName?.trim().toLowerCase() && !isRouterProfileName(p.name)) ||
+        plans.find((p) => p.name?.trim().toLowerCase() === cleanedPlanName?.trim().toLowerCase() && !isRouterProfileName(p.name)) ||
         plans.find((p) => p.monthlyFee === cust.monthlyFee && !isRouterProfileName(p.name)) ||
         plans[0];
       return {
         ...cust,
-        rawPlanName: cust.rawPlanName || cust.planName,
         planId: plan ? plan.id : cust.planId,
-        planName: plan ? plan.name : cust.planName,
+        planName: plan ? plan.name : cleanedPlanName,
+        planSpeedMbps: cust.planSpeedMbps ?? (plan ? plan.speedMbps : undefined), // resolve from catalog if not already set
         monthlyFee: plan ? plan.monthlyFee : cust.monthlyFee,
       };
     });

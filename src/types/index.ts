@@ -422,8 +422,8 @@ export interface Customer {
     coordinates?: { lat: number; lng: number };
   };
   planId: string;
-  planName: string;
-  rawPlanName?: string;
+  planName: string;           // Clean display name only — never embed speed here (e.g. "Gamer Pro", not "Gamer Pro | 250mbps")
+  planSpeedMbps?: number;     // Commercial speed from Internet Plans catalog — written at save time, authoritative source of truth
   monthlyFee: number;
   billingDay: number;
   status: CustomerStatus;
