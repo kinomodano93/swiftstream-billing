@@ -12,6 +12,7 @@ import {
   RefreshCw,
   Server,
   CheckCircle2,
+  Star,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { Plan } from '../../types';
@@ -24,7 +25,7 @@ import {
 } from '../../services/mikrotikApiService';
 
 export const PlanManager: React.FC = () => {
-  const { plans, customers, addPlan, updatePlan, deletePlan, hasPermission, mikrotikDevices } = useApp();
+  const { plans, customers, addPlan, updatePlan, deletePlan, hasPermission, mikrotikDevices, showToast } = useApp();
   const canManage = hasPermission('canManagePlans');
 
   const [showModal, setShowModal] = useState<boolean>(false);
@@ -39,6 +40,8 @@ export const PlanManager: React.FC = () => {
   const [category, setCategory] = useState<'residential' | 'business' | 'enterprise' | 'piso_wifi' | 'internal'>('residential');
   const [mikrotikProfile, setMikrotikProfile] = useState<string>('');
   const [isPublic, setIsPublic] = useState<boolean>(true);
+  const [isPopular, setIsPopular] = useState<boolean>(false);
+  const [badgeText, setBadgeText] = useState<string>('Most Popular Family Choice');
   const [description, setDescription] = useState('');
   const [featuresText, setFeaturesText] = useState('');
   const [formError, setFormError] = useState<string>('');
@@ -117,6 +120,8 @@ export const PlanManager: React.FC = () => {
     setIsManualProfileInput(false);
     setFormProfilesNotice('');
     setIsPublic(true);
+    setIsPopular(false);
+    setBadgeText('Most Popular Family Choice');
     setDescription('');
     setFeaturesText('Unlimited High-Speed Fiber\nDual-Band Gigabit ONU Included\n24/7 Hotline Support');
     setFormError('');
@@ -137,11 +142,39 @@ export const PlanManager: React.FC = () => {
     setIsManualProfileInput(false);
     setFormProfilesNotice('');
     setIsPublic(plan.isPublic !== false && plan.category !== 'internal');
+    setIsPopular(Boolean(plan.isPopular));
+    setBadgeText(plan.badgeText || 'Most Popular Family Choice');
     setDescription(plan.description);
     setFeaturesText(plan.features.join('\n'));
     setFormError('');
     setShowModal(true);
     fetchProfilesForDevice(targetDevId);
+  };
+
+  const handleTogglePopular = (plan: Plan) => {
+    if (!canManage) return;
+    const nextPopular = !plan.isPopular;
+    if (nextPopular) {
+      // Clear popular badge on any other plan
+      plans.forEach((p) => {
+        if (p.id !== plan.id && p.isPopular) {
+          updatePlan(p.id, { isPopular: false });
+        }
+      });
+      const chosenBadge = plan.badgeText?.trim() || 'Most Popular Family Choice';
+      updatePlan(plan.id, {
+        isPopular: true,
+        badgeText: chosenBadge,
+      });
+      showToast(
+        'success',
+        'Featured Plan Updated',
+        `"${plan.name}" is now marked as "${chosenBadge}" on the public website.`
+      );
+    } else {
+      updatePlan(plan.id, { isPopular: false });
+      showToast('info', 'Popular Badge Removed', `"${plan.name}" is no longer marked as popular.`);
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -175,6 +208,17 @@ export const PlanManager: React.FC = () => {
     // If category is internal, force isPublic to false for absolute public privacy
     const effectiveIsPublic = category === 'internal' ? false : isPublic;
 
+    // If marked as popular, clear isPopular from all other plans so only this one is featured
+    if (isPopular) {
+      plans.forEach((p) => {
+        if (p.id !== editingPlan?.id && p.isPopular) {
+          updatePlan(p.id, { isPopular: false });
+        }
+      });
+    }
+
+    const effectiveBadge = isPopular ? (badgeText.trim() || 'Most Popular Family Choice') : undefined;
+
     if (editingPlan) {
       updatePlan(editingPlan.id, {
         name: trimmedName,
@@ -185,6 +229,8 @@ export const PlanManager: React.FC = () => {
         mikrotikProfile: mikrotikProfile.trim() || undefined,
         mikrotikDeviceId: selectedFormDeviceId || undefined,
         isPublic: effectiveIsPublic,
+        isPopular,
+        badgeText: effectiveBadge,
         description,
         features,
       });
@@ -198,6 +244,8 @@ export const PlanManager: React.FC = () => {
         mikrotikProfile: mikrotikProfile.trim() || undefined,
         mikrotikDeviceId: selectedFormDeviceId || undefined,
         isPublic: effectiveIsPublic,
+        isPopular,
+        badgeText: effectiveBadge,
         description,
         features,
         isActive: true,
@@ -260,15 +308,27 @@ export const PlanManager: React.FC = () => {
           return (
             <div
               key={plan.id}
-              className="p-6 rounded-3xl bg-slate-900/80 border border-slate-800 hover:border-cyan-500/40 shadow-card flex flex-col justify-between transition-all group"
+              className={`p-6 rounded-3xl bg-slate-900/80 border flex flex-col justify-between transition-all group relative ${
+                plan.isPopular
+                  ? 'border-amber-500/70 shadow-xl shadow-amber-500/10 ring-1 ring-amber-400/30'
+                  : 'border-slate-800 hover:border-cyan-500/40 shadow-card'
+              }`}
             >
               <div>
-                {/* Category & Subscriber Count */}
+                {/* Category, Popular Badge & Subscriber Count */}
                 <div className="flex items-center justify-between gap-2 mb-3">
-                  <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-lg bg-slate-800 text-cyan-400 border border-slate-700">
-                    {plan.category.replace('_', ' ')}
-                  </span>
-                  <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-cyan-950/80 text-cyan-300 border border-cyan-800/40 font-mono">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-lg bg-slate-800 text-cyan-400 border border-slate-700">
+                      {plan.category.replace('_', ' ')}
+                    </span>
+                    {plan.isPopular && (
+                      <span className="text-[10px] font-black uppercase tracking-wide px-2.5 py-1 rounded-lg bg-gradient-to-r from-amber-500/20 to-orange-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1 shadow-sm">
+                        <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
+                        <span>{plan.badgeText || 'Most Popular Family Choice'}</span>
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-cyan-950/80 text-cyan-300 border border-cyan-800/40 font-mono shrink-0">
                     {subscriberCount} Subs
                   </span>
                 </div>
@@ -316,7 +376,19 @@ export const PlanManager: React.FC = () => {
                 </div>
 
                 {canManage && (
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => handleTogglePopular(plan)}
+                      className={`p-1.5 rounded-lg transition-all cursor-pointer ${
+                        plan.isPopular
+                          ? 'bg-amber-500/20 text-amber-300 border border-amber-500/50 hover:bg-amber-500/30 shadow-sm'
+                          : 'bg-slate-800 text-slate-400 hover:text-amber-300 hover:bg-slate-700'
+                      }`}
+                      title={plan.isPopular ? 'Unset Most Popular badge' : 'Set as Most Popular Family Choice'}
+                    >
+                      <Star className={`w-3.5 h-3.5 ${plan.isPopular ? 'fill-amber-400 text-amber-400' : ''}`} />
+                    </button>
+
                     <button
                       onClick={() => handleOpenEdit(plan)}
                       className="p-1.5 bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 rounded-lg transition-colors cursor-pointer"
@@ -592,6 +664,48 @@ export const PlanManager: React.FC = () => {
                       : 'Hidden from public homepage and signup forms. Only ISP staff and cashiers can assign it.'}
                   </span>
                 </label>
+              </div>
+
+              {/* Most Popular Family Choice Featured Toggle */}
+              <div className="p-3.5 bg-slate-950/70 border border-slate-800 rounded-2xl space-y-3">
+                <div className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    id="isPopularToggle"
+                    checked={isPopular}
+                    onChange={(e) => setIsPopular(e.target.checked)}
+                    className="mt-0.5 rounded border-slate-700 text-amber-500 focus:ring-amber-500 focus:ring-offset-slate-900"
+                  />
+                  <label htmlFor="isPopularToggle" className="cursor-pointer flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <Star className={`w-3.5 h-3.5 ${isPopular ? 'fill-amber-400 text-amber-400' : 'text-slate-400'}`} />
+                      <span className="font-semibold text-slate-200 text-xs">
+                        Mark as "Most Popular Family Choice" on Public Website
+                      </span>
+                    </div>
+                    <span className="text-slate-400 text-[11px] block mt-0.5 leading-normal">
+                      Highlights this plan with a glowing border and prominent ribbon on the homepage pricing grid. Marking this plan will automatically make it the single featured choice.
+                    </span>
+                  </label>
+                </div>
+
+                {isPopular && (
+                  <div className="pt-2.5 border-t border-slate-800/80 space-y-1.5 animate-in fade-in">
+                    <label className="block text-[11px] text-slate-400 font-medium">
+                      Custom Ribbon / Badge Text
+                    </label>
+                    <input
+                      type="text"
+                      value={badgeText}
+                      onChange={(e) => setBadgeText(e.target.value)}
+                      placeholder="Most Popular Family Choice"
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-700/80 rounded-xl text-slate-100 text-xs focus:outline-none focus:border-amber-500 font-medium"
+                    />
+                    <span className="text-[10px] text-slate-500 block">
+                      Default: "Most Popular Family Choice". You can customize this to "Best Value", "Top Family Choice", etc.
+                    </span>
+                  </div>
+                )}
               </div>
 
               <div>

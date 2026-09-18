@@ -22,6 +22,7 @@ import {
   Terminal,
   ShieldCheck,
   Wrench,
+  Globe,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { SystemRole, SYSTEM_ROLES_CONFIG } from '../../types';
@@ -207,6 +208,17 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="font-bold text-[11px]">{currentRoleMeta.badge}</span>
           </div>
         </div>
+
+        {/* Public Website Home Page Button */}
+        <button
+          type="button"
+          onClick={() => setActiveTab('home')}
+          className="hidden md:flex items-center gap-1.5 px-3 py-1.5 bg-slate-950 hover:bg-slate-800 text-slate-300 hover:text-cyan-300 border border-slate-800 hover:border-slate-700 rounded-xl text-xs font-semibold transition-all shadow-sm cursor-pointer"
+          title="Visit Public Website Home Page"
+        >
+          <Globe className="w-3.5 h-3.5 text-cyan-400" />
+          <span>Home Page</span>
+        </button>
 
         {/* Theme Toggle (Dark / Light Mode) */}
         <button

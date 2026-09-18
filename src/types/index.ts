@@ -388,6 +388,8 @@ export interface Plan {
   mikrotikProfile?: string;
   mikrotikDeviceId?: string;
   isPublic?: boolean;
+  isPopular?: boolean;
+  badgeText?: string;
 }
 
 export interface CustomerNetwork {

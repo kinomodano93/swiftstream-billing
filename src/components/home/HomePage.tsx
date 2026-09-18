@@ -35,6 +35,7 @@ import {
   Minus,
   Plus,
   Activity,
+  Star,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { Plan } from '../../types';
@@ -106,7 +107,7 @@ export const HomePage: React.FC<HomePageProps> = ({
     return false;
   };
 
-  // Filter & sort plans: prioritize residential plans first, and sort by monthly fee ascending
+  // Filter & sort plans: strictly use only the user's configured plans
   const filteredPlans = useMemo(() => {
     return plans
       .filter((p) => {
@@ -118,6 +119,10 @@ export const HomePage: React.FC<HomePageProps> = ({
         if (selectedCategory === 'piso_wifi') return p.category === 'piso_wifi';
         return true;
       })
+      .map((p) => ({
+        ...p,
+        name: formatCommercialPlanName(p.name, p),
+      }))
       .sort((a, b) => {
         if (selectedCategory === 'all') {
           const aPriority = a.category === 'residential' ? 0 : 1;
@@ -127,11 +132,34 @@ export const HomePage: React.FC<HomePageProps> = ({
         return a.monthlyFee - b.monthlyFee;
       });
   }, [plans, selectedCategory]);
+
+  // Dynamic Category Filter Tabs — only show tabs that actually have public plans
+  const availableCategories = useMemo(() => {
+    const publicPlans = plans.filter((p) => !isExcludedFromPublic(p) && p.isActive !== false);
+    const hasResidential = publicPlans.some((p) => p.category === 'residential');
+    const hasBusiness = publicPlans.some((p) => p.category === 'business' || p.category === 'enterprise');
+    const hasPisoWifi = publicPlans.some((p) => p.category === 'piso_wifi');
+
+    const totalActiveCategories = [hasResidential, hasBusiness, hasPisoWifi].filter(Boolean).length;
+    if (totalActiveCategories <= 1) return []; // If only one category exists (e.g. only Residential), tabs are redundant
+
+    const tabs: { id: string; label: string }[] = [{ id: 'all', label: 'All Packages' }];
+    if (hasResidential) tabs.push({ id: 'residential', label: 'Home Fiber' });
+    if (hasBusiness) tabs.push({ id: 'business', label: 'Commercial & WFH' });
+    if (hasPisoWifi) tabs.push({ id: 'piso_wifi', label: 'Piso-WiFi Feeders' });
+    return tabs;
+  }, [plans]);
+
   // Interactive Speed Matcher Calculator & Capacity Telemetry
   const speedCalculation = useMemo(() => {
-    const activePlans = plans.filter(
-      (p) => p.isActive !== false && !isExcludedFromPublic(p)
-    );
+    // Strictly evaluate against the operator's actual public plans
+    const activePlans = plans
+      .filter((p) => p.isActive !== false && !isExcludedFromPublic(p))
+      .map((p) => ({
+        ...p,
+        name: formatCommercialPlanName(p.name, p),
+      }));
+
     const sortedPlans = [...activePlans].sort(
       (a, b) => a.speedMbps - b.speedMbps || a.monthlyFee - b.monthlyFee
     );
@@ -174,14 +202,21 @@ export const HomePage: React.FC<HomePageProps> = ({
 
     if (primaryActivity === 'business') {
       const bizPlans = sortedPlans.filter(
-        (p) => p.category === 'business' || p.category === 'enterprise' || p.category === 'piso_wifi'
+        (p) => p.category === 'business' || p.category === 'enterprise'
       );
       matched = bizPlans.find((p) => p.speedMbps >= estimatedDemand) || bizPlans[bizPlans.length - 1];
     } else {
       const resPlans = sortedPlans.filter((p) => p.category === 'residential');
       if (primaryActivity === 'gaming') {
-        // Guarantee at least 50 Mbps for gaming QoS buffer
-        matched = resPlans.find((p) => p.speedMbps >= Math.max(50, estimatedDemand));
+        // Prioritize dedicated low-latency gaming plan (e.g. Gamer Pro)
+        const dedicatedGamerPlan = resPlans.find(
+          (p) => p.name.toLowerCase().includes('gamer') || p.id.includes('gamer')
+        );
+        if (dedicatedGamerPlan && (deviceCount <= 12 || dedicatedGamerPlan.speedMbps >= estimatedDemand)) {
+          matched = dedicatedGamerPlan;
+        } else {
+          matched = resPlans.find((p) => p.speedMbps >= Math.max(100, estimatedDemand)) || dedicatedGamerPlan || resPlans[resPlans.length - 1];
+        }
       } else {
         matched = resPlans.find((p) => p.speedMbps >= estimatedDemand);
       }
@@ -221,6 +256,7 @@ export const HomePage: React.FC<HomePageProps> = ({
   }, [plans, deviceCount, primaryActivity]);
 
   const recommendedPlan = speedCalculation.matchedPlan;
+  const recommendedPlanSpeed = recommendedPlan?.speedMbps || 50;
 
   const handleOpenSignUp = (planId?: string, defaultBarangay?: string, defaultMunicipality?: string) => {
     openAuthModal('signup', '', {
@@ -269,21 +305,33 @@ export const HomePage: React.FC<HomePageProps> = ({
     <div className="min-h-screen bg-slate-950 text-slate-100 selection:bg-cyan-500 selection:text-white font-sans">
       {/* ================= 1. PUBLIC NAVBAR ================= */}
       <header className="h-20 bg-slate-950/90 border-b border-slate-800/80 px-4 sm:px-12 flex items-center justify-between sticky top-0 z-40 backdrop-blur-xl">
-        <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => {
+            const homeRoot = document.getElementById('home-root');
+            if (homeRoot) {
+              homeRoot.scrollTo({ top: 0, behavior: 'smooth' });
+            } else {
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+          }}
+          className="flex items-center gap-3 text-left group cursor-pointer focus:outline-none transition-transform active:scale-95"
+          title="Go to Home Page"
+        >
           {businessProfile.logoUrl ? (
             <img
               src={businessProfile.logoUrl}
               alt={businessProfile.tradeName || businessProfile.name || 'Company Logo'}
-              className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl object-contain bg-slate-900 border border-slate-700/60 p-1 shadow-lg shadow-cyan-500/20 shrink-0"
+              className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl object-contain bg-slate-900 border border-slate-700/60 p-1 shadow-lg shadow-cyan-500/20 shrink-0 group-hover:border-cyan-500/60 transition-colors"
             />
           ) : (
-            <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-gradient-to-tr from-cyan-600 via-sky-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/25 ring-1 ring-white/20 shrink-0">
+            <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-gradient-to-tr from-cyan-600 via-sky-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/25 ring-1 ring-white/20 shrink-0 group-hover:ring-cyan-400 transition-all">
               <Radio className="w-5 h-5 sm:w-6 sm:h-6 text-white animate-pulse" />
             </div>
           )}
           <div>
             <div className="flex items-center gap-2">
-              <span className="font-black text-base sm:text-lg text-slate-100 tracking-tight">
+              <span className="font-black text-base sm:text-lg text-slate-100 tracking-tight group-hover:text-cyan-300 transition-colors">
                 {businessProfile.tradeName || businessProfile.name || 'SwiftStream'}
               </span>
               <span className="text-[10px] font-bold uppercase tracking-wider bg-cyan-950 text-cyan-300 px-2 py-0.5 rounded-full border border-cyan-800/50">
@@ -294,7 +342,7 @@ export const HomePage: React.FC<HomePageProps> = ({
               {businessProfile.address.city}, {businessProfile.address.province} Node
             </p>
           </div>
-        </div>
+        </button>
 
         {/* Center Nav Links (Desktop) */}
         <nav className="hidden lg:flex items-center gap-6 text-xs font-semibold text-slate-300">
@@ -633,103 +681,132 @@ export const HomePage: React.FC<HomePageProps> = ({
               All plans include standard ₱1,500 optical line installation, a high-performance Dual-Band Gigabit ONU WiFi modem, and zero data caps.
             </p>
 
-            {/* Category Filter Pills */}
-            <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
-              {[
-                { id: 'all', label: 'All Plans' },
-                { id: 'residential', label: 'Residential Homes' },
-                { id: 'business', label: 'Commercial & WFH' },
-                { id: 'piso_wifi', label: 'Piso-WiFi Feeders' },
-              ].map((tab) => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setSelectedCategory(tab.id)}
-                  className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
-                    selectedCategory === tab.id
-                      ? 'bg-cyan-600 text-white shadow-lg shadow-cyan-600/30'
-                      : 'bg-slate-950/80 text-slate-400 hover:text-slate-200 border border-slate-800'
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
+            {/* Category Filter Pills (only shown when operator has multiple plan categories) */}
+            {availableCategories.length > 0 && (
+              <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
+                {availableCategories.map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setSelectedCategory(tab.id)}
+                    className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                      selectedCategory === tab.id
+                        ? 'bg-cyan-600 text-white shadow-lg shadow-cyan-600/30'
+                        : 'bg-slate-950/80 text-slate-400 hover:text-slate-200 border border-slate-800'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Pricing Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {filteredPlans.map((plan, idx) => {
-              const isPopular = idx === 1 || plan.speedMbps === 50;
-              return (
-                <div
-                  key={plan.id}
-                  className={`relative p-6 sm:p-8 rounded-3xl flex flex-col justify-between transition-all hover:scale-[1.02] duration-300 ${
-                    isPopular
-                      ? 'bg-gradient-to-b from-slate-900 via-slate-900 to-cyan-950/40 border-2 border-cyan-500/80 shadow-2xl shadow-cyan-950/40'
-                      : 'bg-slate-900/80 border border-slate-800 hover:border-slate-700'
-                  }`}
-                >
-                  {isPopular && (
-                    <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 px-3.5 py-1 rounded-full bg-gradient-to-r from-cyan-500 to-blue-500 text-white text-[10px] font-black uppercase tracking-wider shadow-md">
-                      Most Popular Family Choice
-                    </div>
-                  )}
+          <div id="pricing-grid" className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {(() => {
+              const hasExplicitPopular = filteredPlans.some((p) => p.isPopular === true);
+              return filteredPlans.map((plan, idx) => {
+                const isMatchedByCalculator = Boolean(
+                  recommendedPlan &&
+                    (recommendedPlan.id === plan.id ||
+                      recommendedPlan.name.trim().toLowerCase() === plan.name.trim().toLowerCase())
+                );
+                // Respect operator selection if configured; otherwise fallback gracefully
+                const isPlanPopular = plan.isPopular === true || (!hasExplicitPopular && (idx === 1 || plan.speedMbps === 50));
+                const popularBadgeLabel = plan.badgeText?.trim() || 'Most Popular Family Choice';
 
-                  <div className="space-y-4">
-                    <div>
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">
-                        {plan.category.toUpperCase()} PACKAGE
-                      </span>
-                      <h3 className="text-xl font-bold text-slate-100 mt-0.5">{plan.name}</h3>
-                      <p className="text-xs text-slate-400 mt-1">{plan.description}</p>
-                    </div>
-
-
-                    {/* Price */}
-                    <div>
-                      <div className="flex items-baseline gap-1">
-                        <span className="text-3xl font-black font-mono text-slate-100">
-                          {formatCurrency(plan.monthlyFee)}
-                        </span>
-                        <span className="text-xs text-slate-400 font-medium">/ month</span>
+                return (
+                  <div
+                    key={plan.id}
+                    id={`plan-card-${plan.id}`}
+                    className={`relative p-6 sm:p-8 rounded-3xl flex flex-col justify-between transition-all hover:scale-[1.02] duration-300 ${
+                      isMatchedByCalculator
+                        ? 'bg-gradient-to-b from-slate-900 via-slate-900 to-cyan-950/50 border-2 border-cyan-400 shadow-2xl shadow-cyan-950/60 ring-2 ring-cyan-500/30'
+                        : isPlanPopular
+                        ? 'bg-gradient-to-b from-slate-900 via-slate-900 to-cyan-950/40 border-2 border-cyan-500/80 shadow-2xl shadow-cyan-950/40'
+                        : 'bg-slate-900/80 border border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    {isMatchedByCalculator ? (
+                      <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 px-3.5 py-1 rounded-full bg-gradient-to-r from-emerald-400 via-cyan-400 to-blue-500 text-slate-950 text-[10px] font-black uppercase tracking-wider shadow-lg flex items-center gap-1.5 whitespace-nowrap">
+                        <Sparkles className="w-3.5 h-3.5 text-slate-950 fill-current" />
+                        <span>Speed Matcher Choice</span>
                       </div>
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className="text-[11px] font-semibold text-cyan-400">
-                          Installation: {formatCurrency(plan.installationFee || 1500)}
-                        </span>
-                        <span className="text-[10px] text-slate-500">• VAT inclusive</span>
+                    ) : isPlanPopular ? (
+                      <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 px-3.5 py-1 rounded-full bg-gradient-to-r from-cyan-500 to-blue-500 text-white text-[10px] font-black uppercase tracking-wider shadow-md whitespace-nowrap flex items-center gap-1.5">
+                        <Star className="w-3 h-3 fill-amber-300 text-amber-300" />
+                        <span>{popularBadgeLabel}</span>
                       </div>
-                    </div>
+                    ) : null}
 
-                    {/* Feature List */}
-                    <div className="space-y-2.5 pt-2 text-xs">
-                      {plan.features.map((feat, fidx) => (
-                        <div key={fidx} className="flex items-center gap-2.5 text-slate-300">
-                          <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-                          <span>{feat}</span>
+                    <div className="space-y-4">
+                      <div>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">
+                          {plan.category.toUpperCase()} PACKAGE
+                        </span>
+                        <h3 className="text-xl font-bold text-slate-100 mt-0.5">{plan.name}</h3>
+                        <p className="text-xs text-slate-400 mt-1">{plan.description}</p>
+                      </div>
+
+                      {/* Allocated Speed Badge */}
+                      <div className="p-3 rounded-2xl bg-slate-950/80 border border-slate-800 flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Wifi className="w-4 h-4 text-cyan-400" />
+                          <span className="text-xs font-semibold text-slate-300">Plan Speed:</span>
                         </div>
-                      ))}
+                        <span className="font-mono text-xl font-black text-cyan-400">
+                          {plan.speedMbps} Mbps
+                        </span>
+                      </div>
+
+                      {/* Price */}
+                      <div>
+                        <div className="flex items-baseline gap-1">
+                          <span className="text-3xl font-black font-mono text-slate-100">
+                            {formatCurrency(plan.monthlyFee)}
+                          </span>
+                          <span className="text-xs text-slate-400 font-medium">/ month</span>
+                        </div>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className="text-[11px] font-semibold text-cyan-400">
+                            Installation: {formatCurrency(plan.installationFee || 1500)}
+                          </span>
+                          <span className="text-[10px] text-slate-500">• VAT inclusive</span>
+                        </div>
+                      </div>
+
+                      {/* Feature List */}
+                      <div className="space-y-2.5 pt-2 text-xs">
+                        {plan.features.map((feat, fidx) => (
+                          <div key={fidx} className="flex items-center gap-2.5 text-slate-300">
+                            <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                            <span>{feat}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="pt-6 border-t border-slate-800/80 mt-6">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenSignUp(plan.id)}
+                        className={`w-full py-3.5 rounded-2xl text-xs font-bold flex items-center justify-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer ${
+                          isMatchedByCalculator
+                            ? 'bg-gradient-to-r from-emerald-500 via-cyan-500 to-blue-500 text-slate-950 font-black shadow-lg shadow-cyan-600/30'
+                            : isPlanPopular
+                            ? 'bg-cyan-600 hover:bg-cyan-500 text-white shadow-lg shadow-cyan-600/25'
+                            : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
+                        }`}
+                      >
+                        <span>Apply for {plan.name}</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   </div>
-
-                  <div className="pt-6 border-t border-slate-800/80 mt-6">
-                    <button
-                      type="button"
-                      onClick={() => handleOpenSignUp(plan.id)}
-                      className={`w-full py-3.5 rounded-2xl text-xs font-bold flex items-center justify-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer ${
-                        isPopular
-                          ? 'bg-cyan-600 hover:bg-cyan-500 text-white shadow-lg shadow-cyan-600/25'
-                          : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
-                      }`}
-                    >
-                      <span>Apply for {plan.name}</span>
-                      <ArrowRight className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
+                );
+              });
+            })()}
           </div>
         </div>
       </section>
@@ -918,7 +995,7 @@ export const HomePage: React.FC<HomePageProps> = ({
               <div className="space-y-1">
                 <div className="flex items-center justify-between gap-2">
                   <h3 className="text-xl font-black text-slate-100 tracking-tight">
-                    {recommendedPlan?.name}
+                    {formatCommercialPlanName(recommendedPlan?.name, recommendedPlan)}
                   </h3>
                   <span className="text-[10px] uppercase font-bold font-mono px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800">
                     {recommendedPlan?.category}
@@ -934,7 +1011,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                 <div>
                   <span className="text-[10px] uppercase font-bold text-slate-500 block">Plan Speed</span>
                   <span className="font-mono text-3xl font-black text-cyan-400">
-                    {recommendedPlan?.speedMbps} Mbps
+                    {recommendedPlanSpeed} Mbps
                   </span>
                 </div>
                 <div className="text-right">
@@ -1002,17 +1079,37 @@ export const HomePage: React.FC<HomePageProps> = ({
                   onClick={() => handleOpenSignUp(recommendedPlan?.id)}
                   className="w-full py-3.5 bg-gradient-to-r from-cyan-600 via-cyan-500 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold rounded-xl text-xs shadow-lg shadow-cyan-600/30 transition-all hover:scale-[1.02] cursor-pointer flex items-center justify-center gap-2"
                 >
-                  <span>Apply for {recommendedPlan?.name}</span>
+                  <span>Apply for {formatCommercialPlanName(recommendedPlan?.name, recommendedPlan)}</span>
                   <ArrowRight className="w-4 h-4" />
                 </button>
-                <div className="flex items-center justify-between text-[11px] text-slate-400 px-1">
-                  <span className="flex items-center gap-1 text-cyan-400 font-medium">
-                    <Check className="w-3 h-3" /> Standard Installation: ₱1,500
-                  </span>
+                <div className="flex items-center justify-between text-[11px] text-slate-400 px-1 pt-0.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (recommendedPlan) {
+                        if (recommendedPlan.category === 'residential') {
+                          setSelectedCategory('residential');
+                        } else if (recommendedPlan.category === 'business' || recommendedPlan.category === 'enterprise') {
+                          setSelectedCategory('business');
+                        } else if (recommendedPlan.category === 'piso_wifi') {
+                          setSelectedCategory('piso_wifi');
+                        } else {
+                          setSelectedCategory('all');
+                        }
+                      }
+                      setTimeout(() => {
+                        const card = document.getElementById(`plan-card-${recommendedPlan?.id}`) || document.getElementById('pricing-grid');
+                        card?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                      }, 50);
+                    }}
+                    className="text-cyan-400 hover:text-cyan-300 font-bold underline underline-offset-2 transition-colors cursor-pointer flex items-center gap-1"
+                  >
+                    <span>View Matched Plan Card Above &uarr;</span>
+                  </button>
                   <button
                     type="button"
                     onClick={() => scrollToSection('coverage')}
-                    className="text-cyan-400 hover:text-cyan-300 underline underline-offset-2 transition-colors cursor-pointer"
+                    className="text-slate-400 hover:text-slate-200 underline underline-offset-2 transition-colors cursor-pointer"
                   >
                     Check Barangay Coverage &darr;
                   </button>
@@ -1345,23 +1442,35 @@ export const HomePage: React.FC<HomePageProps> = ({
         <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-8 pb-12 border-b border-slate-800/80 text-xs">
           {/* Col 1: Business Identity */}
           <div className="space-y-3 md:col-span-2">
-            <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                const homeRoot = document.getElementById('home-root');
+                if (homeRoot) {
+                  homeRoot.scrollTo({ top: 0, behavior: 'smooth' });
+                } else {
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }
+              }}
+              className="flex items-center gap-3 text-left group cursor-pointer focus:outline-none transition-transform active:scale-95"
+              title="Return to top of Home Page"
+            >
               {businessProfile.logoUrl ? (
                 <img
                   src={businessProfile.logoUrl}
                   alt={businessProfile.tradeName || businessProfile.name || 'Company Logo'}
-                  className="w-10 h-10 rounded-xl object-contain bg-slate-900 border border-slate-700/60 p-1 shrink-0 shadow-md"
+                  className="w-10 h-10 rounded-xl object-contain bg-slate-900 border border-slate-700/60 p-1 shrink-0 shadow-md group-hover:border-cyan-500/60 transition-colors"
                 />
               ) : (
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-600 to-blue-600 flex items-center justify-center shrink-0">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-600 to-blue-600 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
                   <Radio className="w-5 h-5 text-white" />
                 </div>
               )}
               <div>
-                <h4 className="font-extrabold text-sm text-slate-100">{businessProfile.name}</h4>
+                <h4 className="font-extrabold text-sm text-slate-100 group-hover:text-cyan-300 transition-colors">{businessProfile.name}</h4>
                 <p className="text-[10px] text-cyan-400">{businessProfile.tradeName}</p>
               </div>
-            </div>
+            </button>
 
             <p className="text-slate-400 max-w-md leading-relaxed">
               Legitimate and registered telecommunications fiber internet provider in Lagonoy, Camarines Sur. Serving homes, schools, and commercial enterprises with uncompromised optical broadband.

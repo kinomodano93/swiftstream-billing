@@ -909,7 +909,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           });
         }
 
-        const legitimatePlans = data.filter((p) => !isImportedRouterProfile(p));
+        const legitimatePlans = data
+          .filter((p) => !isImportedRouterProfile(p))
+          .map((p) => {
+            // Guard: Only repair the specific historical bug where Gamer Pro was corrupted by MikroTik's 70M rate limit profile
+            if (p.name.toLowerCase().includes('gamer') && p.speedMbps === 70) {
+              const updated = { ...p, speedMbps: 250 };
+              saveFirestoreDoc(COLLECTIONS.PLANS, updated);
+              return updated;
+            }
+            // Ensure speed is a positive valid number
+            if (!p.speedMbps || p.speedMbps <= 0) {
+              const authPlan = initialPlans.find(
+                (ip) => ip.id === p.id || ip.name.trim().toLowerCase() === p.name.trim().toLowerCase()
+              );
+              const fallbackSpeed = authPlan?.speedMbps || 25;
+              const updated = { ...p, speedMbps: fallbackSpeed };
+              saveFirestoreDoc(COLLECTIONS.PLANS, updated);
+              return updated;
+            }
+            return p;
+          });
         setPlans(legitimatePlans.length > 0 ? legitimatePlans : initialPlans);
       }
     });

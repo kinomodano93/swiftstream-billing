@@ -50,6 +50,8 @@ import {
   ArrowUpRight,
   Printer,
   Info,
+  Home,
+  MoreHorizontal,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import confetti from 'canvas-confetti';
@@ -166,6 +168,11 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
   const [justPaidPaymentId, setJustPaidPaymentId] = useState<string | null>(null);
   const [qrDisplayMode, setQrDisplayMode] = useState<'merchant' | 'dynamic'>('merchant');
   const [previewQrModal, setPreviewQrModal] = useState<string | null>(null);
+
+  // Mobile-First Navigation & Express Pay Drawer States
+  const [isExpressPayOpen, setIsExpressPayOpen] = useState<boolean>(false);
+  const [isMobileMoreOpen, setIsMobileMoreOpen] = useState<boolean>(false);
+  const [guestWifiQrModal, setGuestWifiQrModal] = useState<boolean>(false);
 
   // Instant AI Receipt Settlement & Auto-Reconnection (10s) State
   const [isAiVerifying, setIsAiVerifying] = useState<boolean>(false);
@@ -919,20 +926,25 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
         {/* Top Navbar */}
         <header className="h-16 bg-slate-900/90 border-b border-slate-800 px-6 sticky top-0 z-30 backdrop-blur-md">
           <div className="max-w-5xl mx-auto h-full flex items-center justify-between">
-            <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={onExitToHome}
+              className="flex items-center gap-3 text-left group cursor-pointer focus:outline-none transition-transform active:scale-95"
+              title="Return to Home Page"
+            >
               {businessProfile.logoUrl ? (
                 <img
                   src={businessProfile.logoUrl}
                   alt={businessProfile.tradeName || 'Logo'}
-                  className="w-10 h-10 rounded-2xl object-contain bg-slate-900 border border-slate-700/60 p-1 shadow-lg shadow-cyan-500/20 shrink-0"
+                  className="w-10 h-10 rounded-2xl object-contain bg-slate-900 border border-slate-700/60 p-1 shadow-lg shadow-cyan-500/20 shrink-0 group-hover:border-cyan-500/60 transition-colors"
                 />
               ) : (
-                <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-cyan-600 via-sky-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20 shrink-0">
+                <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-cyan-600 via-sky-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20 shrink-0 group-hover:scale-105 transition-transform">
                   <Radio className="w-5 h-5 text-white animate-pulse" />
                 </div>
               )}
               <div>
-                <h1 className="font-black text-sm text-slate-100 tracking-tight flex items-center gap-1.5">
+                <h1 className="font-black text-sm text-slate-100 tracking-tight flex items-center gap-1.5 group-hover:text-cyan-300 transition-colors">
                   <span>{businessProfile.tradeName || businessProfile.name || 'SwiftStream'}</span>
                   <span className="text-[10px] bg-cyan-950 text-cyan-400 font-mono px-2 py-0.5 rounded-full border border-cyan-800/60 font-normal">
                     PORTAL
@@ -942,7 +954,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                   Fiber Subscriber Self-Service Hub
                 </p>
               </div>
-            </div>
+            </button>
 
             <div className="flex items-center gap-2">
               <button
@@ -1072,6 +1084,16 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
 
           <div className="flex items-center gap-2.5">
             <button
+              type="button"
+              onClick={onExitToHome}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-semibold border border-slate-700 transition-colors cursor-pointer"
+              title="Return to Public Home Page"
+            >
+              <Globe className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="hidden sm:inline">Home Page</span>
+            </button>
+
+            <button
               onClick={() => {
                 setCurrentCustomerId(null);
                 logout();
@@ -1133,7 +1155,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
               </div>
             </div>
             <button
-              onClick={() => setPortalTab('pay')}
+              onClick={() => setIsExpressPayOpen(true)}
               className="flex-shrink-0 px-4 py-2 bg-gradient-to-r from-white to-rose-100 hover:from-white hover:to-white text-rose-900 rounded-xl text-xs font-black shadow-lg transition-all hover:scale-105 cursor-pointer flex items-center gap-1.5"
             >
               <span>Pay Overdue Balance &rarr;</span>
@@ -1154,7 +1176,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
               </span>
             </div>
             <button
-              onClick={() => setPortalTab('pay')}
+              onClick={() => setIsExpressPayOpen(true)}
               className="px-3.5 py-1 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-bold shadow-md transition-all hover:scale-105 cursor-pointer"
             >
               Pay Bill Now &rarr;
@@ -1175,8 +1197,8 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
         </div>
       )}
 
-      {/* Centered Segmented Navigation Tabs */}
-      <div className="border-b border-slate-800 bg-slate-900/70 px-4 sm:px-6 sticky top-16 z-20 backdrop-blur-md">
+      {/* Desktop Navigation Tabs (Hidden on mobile; mobile uses native bottom nav bar) */}
+      <div className="hidden md:block border-b border-slate-800 bg-slate-900/70 px-4 sm:px-6 sticky top-16 z-20 backdrop-blur-md">
         <div className="max-w-5xl mx-auto flex justify-center items-center overflow-x-auto py-2 scrollbar-none">
           <div className="flex space-x-1 sm:space-x-2 text-xs">
             {[
@@ -1239,8 +1261,8 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
         </div>
       </div>
 
-      {/* Centered Main Content Container */}
-      <main className="flex-1 p-4 sm:p-6 max-w-5xl mx-auto w-full space-y-6">
+      {/* Centered Main Content Container (pb-28 on mobile for safe clearance above bottom nav) */}
+      <main className="flex-1 p-4 sm:p-6 max-w-5xl mx-auto w-full space-y-6 pb-28 md:pb-8">
         {/* ================= TAB 1: OVERVIEW ================= */}
         {portalTab === 'overview' && (
           <div className="space-y-6">
@@ -1395,7 +1417,13 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                 </div>
 
                 <button
-                  onClick={() => setPortalTab('pay')}
+                  onClick={() => {
+                    if (hasPendingProof) {
+                      setPortalTab('pay');
+                    } else {
+                      setIsExpressPayOpen(true);
+                    }
+                  }}
                   className={`w-full flex items-center justify-center gap-1.5 py-2.5 rounded-2xl text-xs font-bold transition-all hover:scale-[1.02] cursor-pointer mt-2 ${
                     hasPendingProof
                       ? 'bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/40'
@@ -1411,40 +1439,49 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                     {hasPendingProof
                       ? 'View Pending Review Status'
                       : customer.balance > 0
-                      ? 'Pay Online Now (GCash/Maya)'
+                      ? 'Pay Online Now (GCash / Maya)'
                       : 'Top-up / Prepay Account'}
                   </span>
                 </button>
               </div>
 
-              {/* Card 3: Line & Network Status */}
-              <div className="p-6 rounded-3xl bg-slate-900/80 border border-slate-800 shadow-card space-y-4 hover:border-slate-700 transition-all text-center sm:text-left">
+              {/* Card 3: Line & Network Status with Glowing Beacon */}
+              <div className="p-6 rounded-3xl bg-slate-900/90 border border-slate-800/90 shadow-card space-y-4 hover:border-slate-700 transition-all text-center sm:text-left relative overflow-hidden group">
                 <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                    Network Line Health
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <Activity className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Line Health Beacon</span>
                   </span>
-                  <Activity className="w-4 h-4 text-cyan-400" />
+                  <span
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${
+                      customer.network.isMikrotikSynced
+                        ? 'bg-emerald-950/80 text-emerald-300 border-emerald-800/50'
+                        : 'bg-rose-950/80 text-rose-300 border-rose-800/50'
+                    }`}
+                  >
+                    <span
+                      className={`w-2 h-2 rounded-full ${
+                        customer.network.isMikrotikSynced
+                          ? 'bg-emerald-400 animate-pulse shadow-sm shadow-emerald-400/50'
+                          : 'bg-rose-400'
+                      }`}
+                    />
+                    {customer.network.isMikrotikSynced ? 'Active & Online' : 'Disconnected'}
+                  </span>
                 </div>
 
                 <div className="space-y-2 text-xs">
                   <div className="flex justify-between py-1 border-b border-slate-800/80">
-                    <span className="text-slate-500">Fiber Line Status:</span>
-                    <span
-                      className={`font-semibold ${
-                        customer.network.isMikrotikSynced ? 'text-emerald-400' : 'text-rose-400'
-                      }`}
-                    >
-                      {customer.network.isMikrotikSynced ? '● Active & Online' : '● Disconnected'}
-                    </span>
+                    <span className="text-slate-500">Optical Signal:</span>
+                    <span className="font-mono text-emerald-400 font-bold">-18.5 dBm (Optimal)</span>
                   </div>
                   <div className="flex justify-between py-1 border-b border-slate-800/80">
-                    <span className="text-slate-500">Optical Signal:</span>
-                    <span className="font-mono text-emerald-400 font-semibold">-18.5 dBm (Optimal)</span>
-                  </div>
-
-                  <div className="flex justify-between py-1">
                     <span className="text-slate-500">Assigned IP:</span>
-                    <span className="font-mono text-slate-300">{customer.network.ipAddress}</span>
+                    <span className="font-mono text-slate-300">{customer.network.ipAddress || '10.10.20.15'}</span>
+                  </div>
+                  <div className="flex justify-between py-1">
+                    <span className="text-slate-500">Service Gateway:</span>
+                    <span className="font-mono text-slate-300">Lagonoy Core Node</span>
                   </div>
                 </div>
               </div>
@@ -1455,10 +1492,11 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
               {[
                 {
                   id: 'pay',
-                  title: 'Pay Bill Online',
-                  desc: 'GCash / Maya QR',
+                  title: 'Express Pay',
+                  desc: 'GCash / Maya QR Ph',
                   icon: CreditCard,
                   color: 'text-emerald-400 bg-emerald-600/20 border-emerald-500/30',
+                  action: () => setIsExpressPayOpen(true),
                 },
                 {
                   id: 'speedtest',
@@ -1466,13 +1504,15 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                   desc: 'Check live bandwidth',
                   icon: Gauge,
                   color: 'text-cyan-400 bg-cyan-600/20 border-cyan-500/30',
+                  action: () => setPortalTab('speedtest'),
                 },
                 {
-                  id: 'upgrade',
-                  title: 'WiFi & Upgrade',
-                  desc: 'Change SSID & password',
-                  icon: Wifi,
-                  color: 'text-purple-400 bg-purple-600/20 border-purple-500/30',
+                  id: 'guest_wifi',
+                  title: 'Guest WiFi QR',
+                  desc: 'Scan to join network',
+                  icon: QrCode,
+                  color: 'text-sky-400 bg-sky-600/20 border-sky-500/30',
+                  action: () => setGuestWifiQrModal(true),
                 },
                 {
                   id: 'support',
@@ -1480,14 +1520,15 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                   desc: 'Fast repair dispatch',
                   icon: Wrench,
                   color: 'text-amber-400 bg-amber-600/20 border-amber-500/30',
+                  action: () => setPortalTab('support'),
                 },
               ].map((act) => {
                 const Icon = act.icon;
                 return (
                   <button
                     key={act.id}
-                    onClick={() => setPortalTab(act.id as any)}
-                    className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 hover:border-cyan-500/50 hover:bg-cyan-950/20 text-center transition-all group flex flex-col items-center justify-between space-y-2 cursor-pointer shadow-sm"
+                    onClick={act.action}
+                    className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 hover:border-cyan-500/50 hover:bg-cyan-950/20 text-center transition-all group flex flex-col items-center justify-between space-y-2 cursor-pointer shadow-sm active:scale-98"
                   >
                     <div className={`w-10 h-10 rounded-xl flex items-center justify-center border ${act.color}`}>
                       <Icon className="w-5 h-5" />
@@ -3768,6 +3809,591 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
             setSelectedChatTicket((prev) => (prev && prev.id === ticketId ? { ...prev, ...updates } : prev));
           }}
         />
+      )}
+
+      {/* ========================================================================= */}
+      {/* MOBILE-FIRST BOTTOM NAVIGATION BAR (Visible on mobile screens < md)        */}
+      {/* ========================================================================= */}
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-900/95 backdrop-blur-xl border-t border-slate-800/90 px-3 py-2 shadow-2xl safe-area-bottom">
+        <div className="flex items-center justify-around max-w-lg mx-auto">
+          {/* Home / Overview */}
+          <button
+            type="button"
+            onClick={() => setPortalTab('overview')}
+            className={`flex flex-col items-center gap-1 transition-all cursor-pointer ${
+              portalTab === 'overview' ? 'text-cyan-400 font-bold' : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Home className="w-5 h-5" />
+            <span className="text-[10px]">Home</span>
+          </button>
+
+          {/* Bills */}
+          <button
+            type="button"
+            onClick={() => setPortalTab('bills')}
+            className={`flex flex-col items-center gap-1 relative transition-all cursor-pointer ${
+              portalTab === 'bills' ? 'text-cyan-400 font-bold' : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <FileText className="w-5 h-5" />
+            <span className="text-[10px]">Bills</span>
+            {(hasPendingProof || unpaidInvoices.length > 0) && (
+              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-rose-500 ring-2 ring-slate-900 animate-pulse" />
+            )}
+          </button>
+
+          {/* Center Floating Express Pay Action Button */}
+          <button
+            type="button"
+            onClick={() => setIsExpressPayOpen(true)}
+            className="flex flex-col items-center -mt-5 transition-all cursor-pointer group"
+          >
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-600 via-teal-500 to-cyan-500 p-0.5 shadow-lg shadow-emerald-500/30 group-active:scale-95 transition-transform">
+              <div className="w-full h-full bg-slate-950/20 rounded-[14px] flex items-center justify-center text-white">
+                <CreditCard className="w-6 h-6 text-white" />
+              </div>
+            </div>
+            <span className="text-[10px] font-bold text-emerald-400 mt-0.5">Pay Now</span>
+          </button>
+
+          {/* Support */}
+          <button
+            type="button"
+            onClick={() => setPortalTab('support')}
+            className={`flex flex-col items-center gap-1 relative transition-all cursor-pointer ${
+              portalTab === 'support' ? 'text-cyan-400 font-bold' : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Wrench className="w-5 h-5" />
+            <span className="text-[10px]">Support</span>
+            {customerTickets.some((t) => t.status === 'open' || t.status === 'in_progress') && (
+              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-amber-500 ring-2 ring-slate-900" />
+            )}
+          </button>
+
+          {/* More Drawer */}
+          <button
+            type="button"
+            onClick={() => setIsMobileMoreOpen(true)}
+            className={`flex flex-col items-center gap-1 relative transition-all cursor-pointer ${
+              isMobileMoreOpen || ['receipts', 'notifications', 'speedtest', 'upgrade'].includes(portalTab)
+                ? 'text-cyan-400 font-bold'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <MoreHorizontal className="w-5 h-5" />
+            <span className="text-[10px]">More</span>
+            {recentRemindersCount > 0 && (
+              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-cyan-400 ring-2 ring-slate-900" />
+            )}
+          </button>
+        </div>
+      </nav>
+
+      {/* ========================================================================= */}
+      {/* EXPRESS PAY BOTTOM SHEET / DRAWER                                         */}
+      {/* ========================================================================= */}
+      {isExpressPayOpen && customer && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/80 backdrop-blur-md animate-in fade-in p-0 sm:p-4">
+          <div
+            className="fixed inset-0"
+            onClick={() => setIsExpressPayOpen(false)}
+          />
+          <div className="relative w-full sm:max-w-lg bg-slate-900 border-t sm:border border-slate-700/80 rounded-t-[28px] sm:rounded-3xl shadow-2xl z-10 max-h-[92vh] flex flex-col animate-in slide-in-from-bottom-8">
+            {/* Grab Handle & Header */}
+            <div className="pt-3 pb-2.5 px-6 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 rounded-xl bg-emerald-500/20 text-emerald-400">
+                  <CreditCard className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm text-slate-100 flex items-center gap-1.5">
+                    <span>Express Pay</span>
+                    <span className="text-[10px] px-2 py-0.2 rounded-full bg-emerald-950 text-emerald-300 font-bold border border-emerald-800/40">
+                      QR Ph Instant
+                    </span>
+                  </h3>
+                  <p className="text-[10px] text-slate-400">Instant Settlement for {customer.accountNo}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsExpressPayOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Scrollable Body */}
+            <div className="overflow-y-auto p-5 space-y-4 text-xs">
+              {/* Channel Selector */}
+              <div className="flex rounded-2xl bg-slate-950 p-1 border border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setPayMethod('gcash')}
+                  className={`flex-1 py-1.5 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                    payMethod === 'gcash'
+                      ? 'bg-blue-600 text-white shadow-md'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Smartphone className="w-3.5 h-3.5" />
+                  <span>GCash QR</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPayMethod('maya')}
+                  className={`flex-1 py-1.5 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                    payMethod === 'maya'
+                      ? 'bg-emerald-600 text-white shadow-md'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Smartphone className="w-3.5 h-3.5" />
+                  <span>Maya QR</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsExpressPayOpen(false);
+                    setPortalTab('pay');
+                    setPayMethod('xendit');
+                  }}
+                  className="flex-1 py-1.5 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 text-slate-400 hover:text-cyan-300 hover:bg-slate-900 cursor-pointer"
+                >
+                  <Zap className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>Xendit</span>
+                </button>
+              </div>
+
+              {/* Amount Quick Selector */}
+              <div>
+                <div className="flex items-center justify-between text-xs mb-1.5">
+                  <span className="text-slate-400 font-medium">Payment Amount:</span>
+                  <span className="font-mono font-bold text-cyan-300 text-sm">
+                    ₱{Number(payAmount || (customer.balance > 0 ? customer.balance : customer.monthlyFee)).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-xs">
+                  {customer.balance > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setPayAmount(String(customer.balance))}
+                      className={`py-1.5 px-2 rounded-xl font-bold border transition-all text-[11px] cursor-pointer ${
+                        payAmount === String(customer.balance)
+                          ? 'bg-emerald-600/20 text-emerald-300 border-emerald-500/50'
+                          : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
+                      }`}
+                    >
+                      Due: {formatCurrency(customer.balance)}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setPayAmount(String(customer.monthlyFee))}
+                    className={`py-1.5 px-2 rounded-xl font-bold border transition-all text-[11px] cursor-pointer ${
+                      payAmount === String(customer.monthlyFee)
+                        ? 'bg-cyan-600/20 text-cyan-300 border-cyan-500/50'
+                        : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    1 Mo: {formatCurrency(customer.monthlyFee)}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPayAmount(String(customer.monthlyFee * 2))}
+                    className={`py-1.5 px-2 rounded-xl font-bold border transition-all text-[11px] cursor-pointer ${
+                      payAmount === String(customer.monthlyFee * 2)
+                        ? 'bg-purple-600/20 text-purple-300 border-purple-500/50'
+                        : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    2 Mos: {formatCurrency(customer.monthlyFee * 2)}
+                  </button>
+                </div>
+              </div>
+
+              {/* Dynamic QR Ph Code Render */}
+              <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 flex flex-col items-center justify-center space-y-3">
+                <div className="p-2.5 bg-white rounded-2xl shadow-md">
+                  <QRCodeSVG
+                    id="express-pay-qr-svg"
+                    value={generateDynamicQrPhPayload({
+                      merchantName: businessProfile.tradeName || 'SWIFTSTREAM TELECOM',
+                      merchantCity: businessProfile.address.city || 'LAGONOY',
+                      accountNumber: customer.accountNo,
+                      amount: Number(payAmount) || (customer.balance > 0 ? customer.balance : customer.monthlyFee),
+                      invoiceNumber: latestUnpaidInvoice?.invoiceNumber || 'BILL-2026',
+                      mobileNumber: (payMethod === 'maya' ? businessProfile.paymentGateways.mayaNumber : businessProfile.paymentGateways.gcashNumber) || '09624171684',
+                      serviceProvider: payMethod === 'gcash' ? 'gcash' : payMethod === 'maya' ? 'maya' : 'qrph_national',
+                    })}
+                    size={160}
+                    level="M"
+                  />
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const svg = document.getElementById('express-pay-qr-svg');
+                      if (svg) {
+                        const svgData = new XMLSerializer().serializeToString(svg);
+                        const canvas = document.createElement('canvas');
+                        const ctx = canvas.getContext('2d');
+                        const img = new Image();
+                        img.onload = () => {
+                          canvas.width = img.width || 200;
+                          canvas.height = img.height || 200;
+                          ctx?.drawImage(img, 0, 0);
+                          const pngFile = canvas.toDataURL('image/png');
+                          const downloadLink = document.createElement('a');
+                          downloadLink.download = `SwiftStream_QR_${customer.accountNo}.png`;
+                          downloadLink.href = pngFile;
+                          downloadLink.click();
+                        };
+                        img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
+                      }
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs font-semibold text-slate-200 transition-colors cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Download QR</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleCopy(
+                        (payMethod === 'maya'
+                          ? businessProfile.paymentGateways.mayaNumber
+                          : businessProfile.paymentGateways.gcashNumber) || '09624171684',
+                        'express_num'
+                      )
+                    }
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs font-semibold text-slate-200 transition-colors cursor-pointer"
+                  >
+                    {copiedField === 'express_num' ? (
+                      <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    ) : (
+                      <Copy className="w-3.5 h-3.5 text-slate-400" />
+                    )}
+                    <span>{copiedField === 'express_num' ? 'Copied Number' : 'Copy Number'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Reference Number & Receipt Upload */}
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                    Enter GCash / Maya Reference Number:
+                  </label>
+                  <input
+                    type="text"
+                    value={payReference}
+                    onChange={(e) => setPayReference(e.target.value)}
+                    placeholder="e.g. 100982347891"
+                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 font-mono placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                    Attach Payment Receipt Screenshot:
+                  </label>
+                  {receiptImageBase64 ? (
+                    <div className="p-3 rounded-2xl bg-slate-950 border border-slate-800 flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2.5">
+                        <img
+                          src={receiptImageBase64}
+                          alt="Receipt"
+                          className="w-12 h-12 object-cover rounded-xl border border-slate-700 shrink-0"
+                        />
+                        <div className="text-xs">
+                          <span className="text-emerald-400 font-bold flex items-center gap-1">
+                            <CheckCircle className="w-3 h-3" />
+                            Screenshot Attached
+                          </span>
+                          <span className="text-[10px] text-slate-400 block">Ready for verification</span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setReceiptImageBase64(null)}
+                        className="text-xs text-rose-400 hover:text-rose-300 font-semibold p-1 cursor-pointer"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ) : (
+                    <label className="flex flex-col items-center justify-center p-3.5 rounded-2xl border-2 border-dashed border-slate-800 hover:border-cyan-500/50 bg-slate-950/60 cursor-pointer transition-colors group">
+                      <Upload className="w-5 h-5 text-slate-400 group-hover:text-cyan-400 mb-1" />
+                      <span className="text-xs text-slate-300 font-semibold">Tap to select or snap photo of receipt</span>
+                      <span className="text-[10px] text-slate-500">PNG, JPG up to 10MB</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            try {
+                              const compressed = await compressImageFile(file, 1200, 0.82);
+                              setReceiptImageBase64(compressed);
+                            } catch {
+                              const reader = new FileReader();
+                              reader.onload = () => setReceiptImageBase64(reader.result as string);
+                              reader.readAsDataURL(file);
+                            }
+                          }
+                        }}
+                      />
+                    </label>
+                  )}
+                </div>
+
+                {/* Instant AI Auto-Reconnection button if screenshot attached */}
+                {receiptImageBase64 && (
+                  <button
+                    type="button"
+                    disabled={isAiVerifying}
+                    onClick={async () => {
+                      await handleInstantAiSettlement();
+                      setIsExpressPayOpen(false);
+                    }}
+                    className="w-full flex items-center justify-center gap-2 py-3 bg-gradient-to-r from-cyan-600 via-sky-500 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-2xl text-xs font-black shadow-lg shadow-cyan-500/20 transition-all cursor-pointer"
+                  >
+                    {isAiVerifying ? (
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Sparkles className="w-4 h-4 text-cyan-200" />
+                    )}
+                    <span>{isAiVerifying ? 'Gemini AI Verifying...' : '⚡ Instant AI Auto-Verify & Reconnect (10s)'}</span>
+                  </button>
+                )}
+
+                {/* Manual Submit Button */}
+                <button
+                  type="button"
+                  disabled={isSubmittingPayment || !payReference.trim()}
+                  onClick={async (e) => {
+                    await handleConfirmOnlinePayment(e);
+                    setIsExpressPayOpen(false);
+                  }}
+                  className="w-full flex items-center justify-center gap-2 py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-50 text-white rounded-2xl text-xs font-bold shadow-lg shadow-emerald-600/20 transition-all cursor-pointer"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  <span>Submit Proof for Cashier Audit</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MOBILE MORE SHEET / DRAWER (Services & Tools)                             */}
+      {/* ========================================================================= */}
+      {isMobileMoreOpen && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/80 backdrop-blur-sm animate-in fade-in p-0 sm:p-4">
+          <div
+            className="fixed inset-0"
+            onClick={() => setIsMobileMoreOpen(false)}
+          />
+          <div className="relative w-full sm:max-w-md bg-slate-900 border-t sm:border border-slate-800 rounded-t-[28px] sm:rounded-3xl shadow-2xl z-10 p-5 space-y-4 animate-in slide-in-from-bottom-6">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+              <h3 className="font-bold text-sm text-slate-100 flex items-center gap-2">
+                <Layers className="w-4 h-4 text-cyan-400" />
+                <span>Subscriber Services & Tools</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIsMobileMoreOpen(false)}
+                className="p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2.5 text-xs">
+              <button
+                type="button"
+                onClick={() => {
+                  setPortalTab('speedtest');
+                  setIsMobileMoreOpen(false);
+                }}
+                className="p-3.5 rounded-2xl bg-slate-950/60 border border-slate-800 hover:border-cyan-500/50 flex flex-col items-center gap-2 text-center transition-all cursor-pointer active:scale-98"
+              >
+                <div className="w-9 h-9 rounded-xl bg-cyan-500/20 text-cyan-300 flex items-center justify-center">
+                  <Gauge className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="font-bold text-slate-100">Speed Test</div>
+                  <div className="text-[10px] text-slate-400 mt-0.5">Live fiber bandwidth test</div>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setPortalTab('upgrade');
+                  setIsMobileMoreOpen(false);
+                }}
+                className="p-3.5 rounded-2xl bg-slate-950/60 border border-slate-800 hover:border-purple-500/50 flex flex-col items-center gap-2 text-center transition-all cursor-pointer active:scale-98"
+              >
+                <div className="w-9 h-9 rounded-xl bg-purple-500/20 text-purple-300 flex items-center justify-center">
+                  <Wifi className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="font-bold text-slate-100">WiFi & Upgrade</div>
+                  <div className="text-[10px] text-slate-400 mt-0.5">SSID & plan upgrades</div>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setPortalTab('receipts');
+                  setIsMobileMoreOpen(false);
+                }}
+                className="p-3.5 rounded-2xl bg-slate-950/60 border border-slate-800 hover:border-emerald-500/50 flex flex-col items-center gap-2 text-center transition-all cursor-pointer active:scale-98"
+              >
+                <div className="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-300 flex items-center justify-center">
+                  <CheckCircle2 className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="font-bold text-slate-100">Official Receipts</div>
+                  <div className="text-[10px] text-slate-400 mt-0.5">{customerPayments.length} Issued Receipts</div>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setPortalTab('notifications');
+                  setIsMobileMoreOpen(false);
+                }}
+                className="p-3.5 rounded-2xl bg-slate-950/60 border border-slate-800 hover:border-amber-500/50 flex flex-col items-center gap-2 text-center transition-all cursor-pointer active:scale-98"
+              >
+                <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-300 flex items-center justify-center relative">
+                  <Bell className="w-4 h-4" />
+                  {recentRemindersCount > 0 && (
+                    <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-cyan-400" />
+                  )}
+                </div>
+                <div>
+                  <div className="font-bold text-slate-100">Notifications</div>
+                  <div className="text-[10px] text-slate-400 mt-0.5">SMS & advisories</div>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setGuestWifiQrModal(true);
+                  setIsMobileMoreOpen(false);
+                }}
+                className="p-3.5 rounded-2xl bg-slate-950/60 border border-slate-800 hover:border-sky-500/50 flex flex-col items-center gap-2 text-center transition-all cursor-pointer active:scale-98"
+              >
+                <div className="w-9 h-9 rounded-xl bg-sky-500/20 text-sky-300 flex items-center justify-center">
+                  <QrCode className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="font-bold text-slate-100">Guest WiFi QR</div>
+                  <div className="text-[10px] text-slate-400 mt-0.5">Scan to connect guests</div>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setPortalTab('pay');
+                  setIsMobileMoreOpen(false);
+                }}
+                className="p-3.5 rounded-2xl bg-slate-950/60 border border-slate-800 hover:border-teal-500/50 flex flex-col items-center gap-2 text-center transition-all cursor-pointer active:scale-98"
+              >
+                <div className="w-9 h-9 rounded-xl bg-teal-500/20 text-teal-300 flex items-center justify-center">
+                  <Receipt className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="font-bold text-slate-100">Full Payment Hub</div>
+                  <div className="text-[10px] text-slate-400 mt-0.5">Xendit, Cash, History</div>
+                </div>
+              </button>
+            </div>
+
+            {customer && (
+              <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
+                <span>Account: <strong className="font-mono text-cyan-300">{customer.accountNo}</strong></span>
+                <span>{customer.address.barangay}, Lagonoy</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* GUEST WIFI QR MODAL                                                       */}
+      {/* ========================================================================= */}
+      {guestWifiQrModal && customer && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 animate-in fade-in">
+          <div
+            className="fixed inset-0"
+            onClick={() => setGuestWifiQrModal(false)}
+          />
+          <div className="relative w-full max-w-sm bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl z-10 p-6 space-y-4 text-center">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-800 text-left">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-xl bg-sky-500/20 text-sky-400">
+                  <Wifi className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm text-slate-100">Guest WiFi Connect</h3>
+                  <p className="text-[10px] text-slate-400">Scan to join without typing password</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setGuestWifiQrModal(false)}
+                className="p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-4 bg-white rounded-2xl inline-block shadow-md mx-auto">
+              <QRCodeSVG
+                value={`WIFI:T:WPA;S:${customer.network.pppoeUsername || 'SwiftStream_Fiber'};P:swift1234;;`}
+                size={180}
+                level="M"
+              />
+            </div>
+
+            <div className="space-y-1.5 text-xs text-left bg-slate-950 p-3 rounded-2xl border border-slate-800">
+              <div className="flex justify-between">
+                <span className="text-slate-400">WiFi SSID:</span>
+                <span className="font-mono font-bold text-slate-200">
+                  {customer.network.pppoeUsername || 'SwiftStream_Fiber'}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">Security:</span>
+                <span className="font-semibold text-slate-300">WPA2 Personal</span>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setGuestWifiQrModal(false)}
+              className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+            >
+              Close
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
