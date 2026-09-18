@@ -59,10 +59,10 @@ export const RepairOrderList: React.FC<RepairOrderListProps> = ({
         <div>
           <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2">
             <Wrench className="w-5 h-5 text-cyan-400" />
-            <span>Repair Shop & Field Technical Job Orders</span>
+            <span>Support Tickets & Field Technical Job Orders</span>
           </h2>
           <p className="text-xs text-slate-400 mt-1">
-            Track hardware diagnostics, fiber splicing repairs, parts replacement, and bill directly to subscribers.
+            Track customer support tickets, fiber line troubleshooting, hardware diagnostics, and lineman dispatch.
           </p>
         </div>
 
@@ -80,11 +80,11 @@ export const RepairOrderList: React.FC<RepairOrderListProps> = ({
         <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800">
           <p className="text-xs text-slate-400">Total Active Service Orders</p>
           <h4 className="text-xl font-bold text-cyan-400 mt-1">{pendingCount} Open Jobs</h4>
-          <span className="text-[11px] text-slate-500">In shop & field technician queues</span>
+          <span className="text-[11px] text-slate-500">In NOC & field technician queues</span>
         </div>
 
         <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800">
-          <p className="text-xs text-slate-400">Total Repair Shop Volume</p>
+          <p className="text-xs text-slate-400">Total Billed Service Volume</p>
           <h4 className="text-xl font-bold text-emerald-400 mt-1">{formatCurrency(totalRepairRevenue)}</h4>
           <span className="text-[11px] text-slate-500">{repairOrders.length} all-time work orders</span>
         </div>

@@ -126,7 +126,7 @@ export const Sidebar: React.FC = () => {
         },
         {
           id: 'repairs',
-          label: 'Repair Shop Orders',
+          label: 'Support Tickets & Repairs',
           icon: Wrench,
           badge: openRepairsCount > 0 ? `${openRepairsCount}` : null,
           badgeColor: 'bg-cyan-500/20 text-cyan-300',

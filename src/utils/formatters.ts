@@ -375,7 +375,7 @@ export const resolveCustomerPlan = (
   }
 
   // Priority 4: mikrotikProfile match — links PPPoE profile back to commercial plan
-  //   e.g. customer.network.pppoeProfile = "Plan-70M" → Gamer Pro (250 Mbps) in initialPlans
+  //   e.g. customer.network.pppoeProfile = "plan-400m" → Gamer Pro (400 Mbps) in initialPlans
   if (!matchedPlan && pppoeProfileName) {
     matchedPlan =
       initialPlans.find(

@@ -587,22 +587,21 @@ ${
       )
       .join('\n\n');
 
-    const recommendedPlan = plans.find((p) => p.speedMbps === 50) || plans[0];
+    const recommendedPlan = plans.find((p) => p.isPopular) || plans.find((p) => p.speedMbps === 100) || plans[0];
 
     return {
       content: `### ⚡ SwiftStream Pure Fiber Internet Plans
 
-We offer symmetrical, uncapped fiber optic connections tailored for homes, remote workers, and businesses:
+We offer symmetrical, uncapped fiber optic connections tailored for homes, remote workers, and gamers:
 
 ${plansText}
 
-💡 **Recommendation**:
-* **Home Turbo 50M (₱1,299/mo)**: Most popular for families, Netflix 4K, Zoom calls, and online gaming.
-* **Pro Fiber 100M (₱1,699/mo)**: Ideal for content creators, heavy downloads, and multi-user households.
-* **Starter 25M (₱799/mo)**: Best value entry-level fiber.
-* **Flexibix 500M (₱6,000/mo)**: Enterprise symmetric link with 99.9% uptime SLA for computer shops and offices.`,
+💡 **Official Recommendations**:
+* **Basic Connect (₱799/mo)**: 50 Mbps high-speed fiber for everyday browsing, online classes, and HD video streaming.
+* **Family Streamer (₱1,000/mo)**: Most Popular Family Choice (100 Mbps) for simultaneous 4K streaming, Zoom meetings, and remote work.
+* **Gamer Pro (₱1,500/mo)**: 400 Mbps dedicated optical line with ultra-low latency routing for competitive gaming and heavy downloads.`,
       suggestedActions: [
-        { label: `Apply for ${recommendedPlan?.name || 'Home Turbo 50M'}`, action: 'apply', payload: { planId: recommendedPlan?.id } },
+        { label: `Apply for ${recommendedPlan?.name || 'Family Streamer'}`, action: 'apply', payload: { planId: recommendedPlan?.id } },
         { label: 'Open Speed Calculator', action: 'scroll', payload: { sectionId: 'calculator' } },
         { label: 'Check Barangay Coverage', action: 'scroll', payload: { sectionId: 'coverage' } },
       ],

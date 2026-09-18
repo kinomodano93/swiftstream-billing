@@ -44,10 +44,10 @@ import {
   setStoredStaffUsers,
   STORAGE_KEYS,
 } from '../data/storage';
-import { initialPlans, initialBusinessProfile, initialCoverageAreas, initialStaffUsers } from '../data/initialData';
+import { initialPlans, initialBusinessProfile, initialCoverageAreas, initialStaffUsers, initialAddonCatalog } from '../data/initialData';
 import { generateId, formatCurrency, isRouterProfileName } from '../utils/formatters';
 import { findCustomerInvoiceForMonth, hasCustomerInvoiceForMonth } from '../utils/billingRules';
-import { generateReminderMessage, sendMockNotification } from '../utils/smsSender';
+import { generateReminderMessage, sendMockNotification, dispatchSmsGateway } from '../utils/smsSender';
 import {
   fetchFullRouterTelemetry,
   isolateOverdueSubscriber,
@@ -902,6 +902,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             p.features?.some((f) => f.toLowerCase().includes('routeros profile'))
           );
 
+        // Automatically purge obsolete legacy template plans from Firestore
+        const LEGACY_TEMPLATE_PLAN_IDS = new Set([
+          'plan-flexibix-6000',
+          'plan-fiber-pro-100',
+          'plan-home-turbo-50',
+          'plan-starter-25',
+          'plan-biz-giga-200',
+          'plan-piso-wifi',
+          'plan-gamer-pro-250',
+        ]);
+        const LEGACY_TEMPLATE_PLAN_NAMES = new Set([
+          'flexibix peak 6000',
+          'swiftstream pro fiber 100m',
+          'swiftstream home turbo 50m',
+          'swiftstream starter fiber 25m',
+          'swiftstream commercial gig 200m',
+          'community vendo piso-wifi feed',
+        ]);
+        const isLegacyTemplatePlan = (p: Plan) =>
+          LEGACY_TEMPLATE_PLAN_IDS.has(p.id) ||
+          LEGACY_TEMPLATE_PLAN_NAMES.has((p.name || '').trim().toLowerCase());
+
         const routerProfiles = data.filter(isImportedRouterProfile);
         if (routerProfiles.length > 0) {
           routerProfiles.forEach((rp) => {
@@ -909,12 +931,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           });
         }
 
+        const legacyPlans = data.filter(isLegacyTemplatePlan);
+        if (legacyPlans.length > 0) {
+          legacyPlans.forEach((lp) => {
+            deleteFirestoreDoc(COLLECTIONS.PLANS, lp.id);
+          });
+        }
+
         const legitimatePlans = data
-          .filter((p) => !isImportedRouterProfile(p))
+          .filter((p) => !isImportedRouterProfile(p) && !isLegacyTemplatePlan(p))
           .map((p) => {
-            // Guard: Only repair the specific historical bug where Gamer Pro was corrupted by MikroTik's 70M rate limit profile
-            if (p.name.toLowerCase().includes('gamer') && p.speedMbps === 70) {
-              const updated = { ...p, speedMbps: 250 };
+            // Guard: Upgrade Gamer Pro to 400 Mbps if it has old rate limit profile speeds (70M or 250M)
+            if (p.name.toLowerCase().includes('gamer') && (p.speedMbps === 70 || p.speedMbps === 250)) {
+              const updated = { ...p, speedMbps: 400, mikrotikProfile: 'plan-400m' };
               saveFirestoreDoc(COLLECTIONS.PLANS, updated);
               return updated;
             }
@@ -923,7 +952,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               const authPlan = initialPlans.find(
                 (ip) => ip.id === p.id || ip.name.trim().toLowerCase() === p.name.trim().toLowerCase()
               );
-              const fallbackSpeed = authPlan?.speedMbps || 25;
+              const fallbackSpeed = authPlan?.speedMbps || 50;
               const updated = { ...p, speedMbps: fallbackSpeed };
               saveFirestoreDoc(COLLECTIONS.PLANS, updated);
               return updated;
@@ -989,7 +1018,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (data && data.length > 0) setReminders(data);
     });
     const unsubAddonCatalog = subscribeToCollection<AddonCatalogItem>(COLLECTIONS.ADDON_CATALOG, (data) => {
-      if (data && data.length > 0) setAddonCatalog(data);
+      setAddonCatalog(data && data.length > 0 ? data : initialAddonCatalog);
     });
     const unsubOltNodes = subscribeToCollection<OltPopNode>(COLLECTIONS.OLT_NODES, (data) => {
       if (data && data.length > 0) setOltNode(data[0]);
@@ -3141,7 +3170,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     if (channel === 'sms' || channel === 'both') {
-      await sendMockNotification('sms', { mobile: customer.mobile, email: customer.email, name: customer.fullName }, message);
+      if (businessProfile.smsGateway?.enabled && businessProfile.smsGateway?.apiKey) {
+        await dispatchSmsGateway(customer.mobile, message, businessProfile.smsGateway);
+      } else {
+        await sendMockNotification('sms', { mobile: customer.mobile, email: customer.email, name: customer.fullName }, message);
+      }
     }
 
     const newReminder: ReminderLog = {

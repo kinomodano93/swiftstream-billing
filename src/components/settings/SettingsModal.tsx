@@ -982,7 +982,7 @@ export const SettingsModal: React.FC = () => {
 
             <div className="space-y-4 pt-4 border-t border-slate-800">
               <h4 className="font-bold text-slate-200 uppercase tracking-wider text-[11px] text-cyan-400">
-                Operations & Repair Shop Address
+                Operations & Headend Office Address
               </h4>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

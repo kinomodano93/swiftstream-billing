@@ -13,6 +13,7 @@ import {
   Server,
   CheckCircle2,
   Star,
+  Package,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { Plan } from '../../types';
@@ -25,7 +26,7 @@ import {
 } from '../../services/mikrotikApiService';
 
 export const PlanManager: React.FC = () => {
-  const { plans, customers, addPlan, updatePlan, deletePlan, hasPermission, mikrotikDevices, showToast } = useApp();
+  const { plans, customers, addPlan, updatePlan, deletePlan, hasPermission, mikrotikDevices, showToast, addonCatalog } = useApp();
   const canManage = hasPermission('canManagePlans');
 
   const [showModal, setShowModal] = useState<boolean>(false);
@@ -91,6 +92,7 @@ export const PlanManager: React.FC = () => {
           { id: 'p-2', name: 'plan-50m', rateLimit: '50M/50M', rateLimitRx: '50M', rateLimitTx: '50M', comment: 'SwiftStream Fiber 50M' },
           { id: 'p-3', name: 'plan-100m', rateLimit: '100M/100M', rateLimitRx: '100M', rateLimitTx: '100M', comment: 'SwiftStream Fiber 100M' },
           { id: 'p-4', name: 'plan-200m', rateLimit: '200M/200M', rateLimitRx: '200M', rateLimitTx: '200M', comment: 'SwiftStream Fiber 200M' },
+          { id: 'p-400', name: 'plan-400m', rateLimit: '400M/400M', rateLimitRx: '400M', rateLimitTx: '400M', comment: 'SwiftStream Fiber 400M Gamer Pro' },
           { id: 'p-5', name: 'plan-500m', rateLimit: '500M/500M', rateLimitRx: '500M', rateLimitTx: '500M', comment: 'SwiftStream Fiber 500M' },
           { id: 'p-6', name: 'plan-80m-vendo', rateLimit: '80M/80M', rateLimitRx: '80M', rateLimitTx: '80M', comment: 'SwiftStream Vendo Hotspot' },
           { id: 'p-7', name: 'default', rateLimit: 'unlimited', comment: 'RouterOS Default Profile' },
@@ -412,6 +414,76 @@ export const PlanManager: React.FC = () => {
         })}
       </div>
 
+      {/* Optional Add-on Services & Hardware Catalog */}
+      <div className="pt-6 border-t border-slate-800 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div>
+            <h3 className="text-lg font-bold text-slate-100 flex items-center gap-2">
+              <Package className="w-5 h-5 text-indigo-400" />
+              <span>Optional Add-on Services & Hardware Catalog</span>
+            </h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Approved subscriber accessories, hardware upgrades, and field lineman services billable via invoices or recurring subscriptions.
+            </p>
+          </div>
+          <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-indigo-950/80 text-indigo-300 border border-indigo-800/40 font-mono w-fit">
+            {addonCatalog.length} Active Services
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {addonCatalog.map((addon) => (
+            <div
+              key={addon.id}
+              className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800/80 hover:border-indigo-500/40 transition-all flex flex-col justify-between group"
+            >
+              <div>
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md ${
+                    addon.category === 'hardware'
+                      ? 'bg-blue-950/80 text-blue-300 border border-blue-800/40'
+                      : addon.category === 'static_ip'
+                      ? 'bg-purple-950/80 text-purple-300 border border-purple-800/40'
+                      : addon.category === 'service'
+                      ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-800/40'
+                      : 'bg-slate-800 text-slate-300 border border-slate-700'
+                  }`}>
+                    {addon.category === 'hardware' ? 'Hardware' : addon.category === 'static_ip' ? 'Network / IP' : 'Lineman Service'}
+                  </span>
+                  <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${
+                    addon.isRecurring
+                      ? 'bg-cyan-950 text-cyan-300 border border-cyan-800/40'
+                      : 'bg-slate-800 text-slate-400'
+                  }`}>
+                    {addon.isRecurring ? 'Monthly Recurring' : 'One-Time Charge'}
+                  </span>
+                </div>
+
+                <h4 className="text-sm font-bold text-slate-100 mb-1 group-hover:text-indigo-300 transition-colors">
+                  {addon.name}
+                </h4>
+                <p className="text-xs text-slate-400 leading-relaxed mb-3">
+                  {addon.description}
+                </p>
+              </div>
+
+              <div className="pt-3 border-t border-slate-800/60 flex items-center justify-between">
+                <div>
+                  <span className="text-[10px] text-slate-500 block">Catalog Price</span>
+                  <span className="text-base font-bold font-mono text-indigo-300">
+                    {formatCurrency(addon.price)}
+                    {addon.isRecurring ? <span className="text-xs font-normal text-slate-400">/mo</span> : ''}
+                  </span>
+                </div>
+                <span className="text-[10px] text-slate-400 bg-slate-950 px-2 py-1 rounded border border-slate-800">
+                  Ready for Invoicing
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* Plan Create / Edit Modal */}
       {showModal && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
@@ -443,7 +515,7 @@ export const PlanManager: React.FC = () => {
                   required
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. SwiftStream Pro Fiber 100M"
+                  placeholder="e.g. Family Streamer"
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500"
                 />
               </div>
@@ -624,7 +696,7 @@ export const PlanManager: React.FC = () => {
                   {/* Quick suggestions chips */}
                   <div className="flex items-center gap-1.5 flex-wrap pt-2 border-t border-slate-900 mt-2">
                     <span className="text-[10px] text-slate-500">Suggestions:</span>
-                    {[`plan-${speedMbps}m`, 'plan-25m', 'plan-50m', 'plan-100m', 'plan-200m', 'default'].map((s) => (
+                    {[`plan-${speedMbps}m`, 'plan-50m', 'plan-100m', 'plan-400m', 'default'].map((s) => (
                       <button
                         key={s}
                         type="button"

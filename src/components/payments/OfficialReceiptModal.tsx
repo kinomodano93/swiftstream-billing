@@ -147,7 +147,7 @@ export const OfficialReceiptModal: React.FC<OfficialReceiptModalProps> = ({ paym
           <div className="text-center text-[10px] text-slate-500 space-y-0.5 pt-1">
             <p className="font-bold text-slate-700">Thank you for your business!</p>
             <p>Your high-speed fiber connection is active.</p>
-            <p className="text-[9px]">SwiftStream Telecommunication & Repair Shop</p>
+            <p className="text-[9px]">{businessProfile.name || 'SwiftStream Telecommunications'}</p>
           </div>
         </div>
       </div>

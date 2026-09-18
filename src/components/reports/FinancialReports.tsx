@@ -134,7 +134,7 @@ export const FinancialReports: React.FC = () => {
   const totalCollections = payments.reduce((sum, p) => sum + p.amount, 0);
   const totalBilled = invoices.reduce((sum, i) => sum + i.totalAmount, 0);
 
-  // Subscription vs Repair Shop breakdown
+  // Subscription vs Technical Services & Field Repairs breakdown
   const subscriptionCollections = payments
     .filter((p) => {
       const inv = invoices.find((i) => i.id === p.invoiceId);
@@ -291,7 +291,7 @@ export const FinancialReports: React.FC = () => {
       ['1. PROFIT & LOSS (P&L) INCOME STATEMENT SUMMARY'],
       ['========================================================================'],
       ['Gross Subscription Inflow (Collections)', subscriptionCollections],
-      ['Electronics & Repair Shop Inflow', repairCollections],
+      ['Technical Services & Repairs Inflow', repairCollections],
       ['TOTAL GROSS OPERATING INFLOW (REVENUE)', totalCollections],
       [''],
       ['Total Billed Invoices', totalBilled],

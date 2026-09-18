@@ -3321,7 +3321,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                       <option value="Desktop/Laptop">Device / PC Repair Service</option>
                       <option value="Switch/AP">WiFi Router / Access Point Setting</option>
                       <option value="Power Adapter">Power Supply / Adapter Replacement</option>
-                      <option value="Other">Other ISP or Shop Request</option>
+                      <option value="Other">Other Telecom / Lineman Service Request</option>
                     </select>
                   </div>
 

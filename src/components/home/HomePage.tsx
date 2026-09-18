@@ -1017,7 +1017,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                 <div className="text-right">
                   <span className="text-[10px] uppercase font-bold text-slate-500 block">Monthly Rate</span>
                   <span className="text-lg font-black font-mono text-slate-100">
-                    {formatCurrency(recommendedPlan?.monthlyFee || 1299)}
+                    {formatCurrency(recommendedPlan?.monthlyFee || 1000)}
                     <span className="text-xs text-slate-400 font-normal"> / mo</span>
                   </span>
                 </div>

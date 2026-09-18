@@ -11,6 +11,18 @@ import {
   getBusinessInvoiceAddress,
   resolveInvoicePlanDetails,
 } from './formatters';
+const resolveBillingCoverage = (invoice: Invoice): string => {
+  if (invoice.billingPeriodStart && invoice.billingPeriodEnd) {
+    return `${formatDate(invoice.billingPeriodStart)} – ${formatDate(invoice.billingPeriodEnd)}`;
+  }
+  const issue = new Date(invoice.issueDate);
+  if (!isNaN(issue.getTime())) {
+    const startOfMonth = new Date(issue.getFullYear(), issue.getMonth(), 1);
+    const endOfMonth = new Date(issue.getFullYear(), issue.getMonth() + 1, 0);
+    return `${formatDate(startOfMonth.toISOString())} – ${formatDate(endOfMonth.toISOString())}`;
+  }
+  return formatDate(invoice.issueDate);
+};
 
 export const generateInvoicePDF = (
   invoice: Invoice,
@@ -77,8 +89,12 @@ export const generateInvoicePDF = (
   if (invoiceAddr) {
     doc.text(invoiceAddr, 14, 23.5);
   }
+  const rawTin = (business.tin || '468975349000').replace(/[^0-9]/g, '');
+  const formattedTin = rawTin.length === 12
+    ? `${rawTin.slice(0, 3)}-${rawTin.slice(3, 6)}-${rawTin.slice(6, 9)}-${rawTin.slice(9)} (Non-VAT)`
+    : `${business.tin || '468-975-349-000'} (Non-VAT)`;
   doc.text(
-    `BIR Reg. TIN: ${business.tin} | Hotline: ${business.representative.mobile} | Email: ${business.representative.email}`,
+    `BIR Reg. TIN: ${formattedTin} | Hotline: ${business.representative.mobile} | Email: ${business.representative.email}`,
     14,
     29.5
   );
@@ -142,7 +158,7 @@ export const generateInvoicePDF = (
 
   // 4. Subscriber Billing Details Card (Full Width)
   const infoY = 54;
-  const infoH = 21;
+  const infoH = 24;
 
   doc.setFillColor(248, 250, 252);
   doc.setDrawColor(226, 232, 240);
@@ -151,33 +167,46 @@ export const generateInvoicePDF = (
   doc.setFontSize(7.5);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(100, 116, 139);
-  doc.text('SUBSCRIBER BILLING DETAILS', 18, infoY + 5);
+  doc.text('SUBSCRIBER BILLING DETAILS', 18, infoY + 4.8);
 
-  // Left: Customer Name & Account Number
+  const cleanPlanName = planDetails.planName.replace(/\s*\|\s*\d+\s*mbps/i, '').trim();
+
+  // Left: Customer Name, Account Number, Subscribed Plan
   doc.setFontSize(9.5);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(15, 23, 42);
-  doc.text(invoice.customerName, 18, infoY + 10.5);
+  doc.text(invoice.customerName, 18, infoY + 10.2);
 
   doc.setFontSize(7.5);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(71, 85, 105);
-  doc.text('Account No: ', 18, infoY + 15.5);
+  doc.text('Account No: ', 18, infoY + 15.2);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(2, 132, 199);
-  doc.text(invoice.accountNo, 36, infoY + 15.5);
+  doc.text(invoice.accountNo, 36, infoY + 15.2);
 
-  // Right: Service Address & Mobile
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(71, 85, 105);
-  const truncatedAddress = invoice.customerAddress.length > 70
-    ? invoice.customerAddress.slice(0, 68) + '...'
+  doc.text('Subscribed Plan: ', 18, infoY + 19.8);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(15, 23, 42);
+  doc.text(`${cleanPlanName || 'SwiftStream Fiber'} (${planDetails.speedMbps} Mbps Unlimited)`, 41, infoY + 19.8);
+
+  // Right: Service Address, Mobile, Billing Coverage
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(71, 85, 105);
+  const truncatedAddress = invoice.customerAddress.length > 55
+    ? invoice.customerAddress.slice(0, 52) + '...'
     : invoice.customerAddress;
-  doc.text(`Service Address: ${truncatedAddress}`, 100, infoY + 10.5);
-  doc.text(`Mobile: ${invoice.customerMobile}`, 100, infoY + 15.5);
+  doc.text(`Service Address: ${truncatedAddress}`, 106, infoY + 10.2);
+  doc.text(`Mobile: ${invoice.customerMobile}`, 106, infoY + 15.2);
+
+  doc.text('Billing Coverage: ', 106, infoY + 19.8);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(2, 132, 199);
+  doc.text(resolveBillingCoverage(invoice), 131, infoY + 19.8);
 
   // 5. Itemized Table
-  const cleanPlanName = planDetails.planName.replace(/\s*\|\s*\d+\s*mbps/i, '').trim();
   const tableData = serviceItems.map((item, index) => {
     const isPlanItem = item.type === 'plan' || (!item.type && index === 0);
     let description = item.description;
@@ -204,7 +233,7 @@ export const generateInvoicePDF = (
   });
 
   autoTable(doc, {
-    startY: 79,
+    startY: 83,
     head: [['#', 'Description of Services & Charges', 'Qty', 'Unit Rate (PHP)', 'Amount (PHP)']],
     body: tableData,
     theme: 'grid',
@@ -352,49 +381,133 @@ export const generateInvoicePDF = (
   doc.setTextColor(6, 182, 212); // Cyan
   doc.text(formatCurrencyPdf(computedTotalAmount), 194, calcY + 2.5, { align: 'right' });
 
-  // 7. Footer Notes (Important Subscriber Notices)
-  const bottomOfContent = Math.max(postTableY + payH, calcY + 8);
-  const footerY = Math.max(246, bottomOfContent + 5);
+  // Official Verified Paid Stamp (Rendered if invoice is paid)
+  let stampBottomY = calcY + 8;
+  if (isPaid) {
+    const stampX = rightX + 6;
+    const stampY = calcY + 8.5;
+    const stampW = 76;
+    const stampH = 21;
+    stampBottomY = stampY + stampH;
+
+    doc.setDrawColor(22, 163, 74); // Green-600
+    doc.setLineWidth(0.9);
+    doc.roundedRect(stampX, stampY, stampW, stampH, 2, 2, 'D');
+    doc.setLineWidth(0.3);
+    doc.roundedRect(stampX + 1, stampY + 1, stampW - 2, stampH - 2, 1.2, 1.2, 'D');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7);
+    doc.setTextColor(22, 163, 74);
+    doc.text('SWIFTSTREAM VERIFIED PAYMENT', stampX + stampW / 2, stampY + 5.2, { align: 'center' });
+
+    doc.setFontSize(12);
+    doc.text('★ OFFICIALLY PAID ★', stampX + stampW / 2, stampY + 11.2, { align: 'center' });
+
+    doc.setFontSize(6.2);
+    doc.setFont('helvetica', 'normal');
+    const paidDateStr = invoice.paidAt ? formatDate(invoice.paidAt) : formatDate(invoice.issueDate);
+    doc.text(`POSTED: ${paidDateStr}  |  STATUS: SETTLED`, stampX + stampW / 2, stampY + 15.8, { align: 'center' });
+    doc.text('ELECTRONIC TELECOM SETTLEMENT VALIDATED', stampX + stampW / 2, stampY + 19, { align: 'center' });
+  }
+
+  const bottomOfContent = Math.max(postTableY + payH, stampBottomY);
+
+  // 7. Cashier & Field Collector Endorsement Box (Signatures)
+  const sigBoxY = Math.max(bottomOfContent + 5, 172);
+  const sigBoxH = 24;
+
+  doc.setFillColor(250, 250, 250);
+  doc.setDrawColor(226, 232, 240);
+  doc.roundedRect(14, sigBoxY, 182, sigBoxH, 1.5, 1.5, 'FD');
+
+  // Left: Prepared & Certified By
+  doc.setFontSize(6.8);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(100, 116, 139);
+  doc.text('PREPARED & CERTIFIED CORRECT:', 18, sigBoxY + 5);
+
+  doc.setDrawColor(203, 213, 225);
+  doc.setLineWidth(0.3);
+  doc.line(18, sigBoxY + 15, 85, sigBoxY + 15);
+
+  doc.setFontSize(7.5);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(15, 23, 42);
+  doc.text('SWIFTSTREAM NOC & BILLING SYSTEM', 18, sigBoxY + 19);
+
+  doc.setFontSize(6.2);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(100, 116, 139);
+  doc.text('Automated Electronic Billing Generation', 18, sigBoxY + 22.2);
+
+  // Right: Cashier / Collector Acknowledgement
+  doc.setFontSize(6.8);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(100, 116, 139);
+  doc.text('PAYMENT RECEIVED & VALIDATED BY:', 106, sigBoxY + 5);
+
+  doc.line(106, sigBoxY + 15, 188, sigBoxY + 15);
+
+  doc.setFontSize(7.5);
+  doc.setFont('helvetica', 'bold');
+  if (isPaid) {
+    doc.setTextColor(22, 163, 74);
+    doc.text('AUTHORIZED CASHIER / COLLECTOR (VERIFIED)', 106, sigBoxY + 19);
+    doc.setFontSize(6.2);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(100, 116, 139);
+    doc.text(`Official Collection Validated  |  Settled: ${invoice.paidAt ? formatDate(invoice.paidAt) : formatDate(invoice.issueDate)}`, 106, sigBoxY + 22.2);
+  } else {
+    doc.setTextColor(15, 23, 42);
+    doc.text('CASHIER / FIELD COLLECTOR (SIGNATURE OVER NAME)', 106, sigBoxY + 19);
+    doc.setFontSize(6.2);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(100, 116, 139);
+    doc.text('Date Collected: ______________  |  OR / Ref No: ______________', 106, sigBoxY + 22.2);
+  }
+
+  // 8. Footer Notes (Important Subscriber Notices & BIR Compliance)
+  const footerY = sigBoxY + sigBoxH + 4;
 
   doc.setDrawColor(226, 232, 240);
   doc.setLineWidth(0.3);
   doc.line(14, footerY, 196, footerY);
 
-  doc.setFontSize(7.5);
+  doc.setFontSize(7.2);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(71, 85, 105);
-  doc.text('IMPORTANT SUBSCRIBER NOTICES:', 14, footerY + 5);
+  doc.text('IMPORTANT SUBSCRIBER NOTICES & BIR COMPLIANCE:', 14, footerY + 4.5);
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(6.8);
+  doc.setFontSize(6.6);
   doc.setTextColor(100, 116, 139);
-
-  const officeNoticeSummary = getBusinessInvoiceAddress(business.address);
 
   let settlementNotice = '';
   if (isPaid) {
-    settlementNotice = `2. Payment received in full${invoice.paidAt ? ` on ${formatDate(invoice.paidAt)}` : ''}. Thank you for keeping your account updated and active.`;
+    settlementNotice = `2. Payment received in full${invoice.paidAt ? ` on ${formatDate(invoice.paidAt)}` : ''}. Thank you for keeping your account active and in good standing.`;
   } else if (isOverdue) {
-    settlementNotice = `2. Payment was due on ${formatDate(invoice.dueDate)}. Please settle immediately to restore or maintain uninterrupted service connectivity.`;
+    settlementNotice = `2. Payment was due on ${formatDate(invoice.dueDate)}. Please settle immediately to restore or maintain uninterrupted fiber internet connectivity.`;
   } else if (paidAmount > 0 && computedBalanceDue > 0) {
-    settlementNotice = `2. Partial payment received. Please settle remaining balance of ${formatCurrencyPdf(computedBalanceDue)} on or before ${formatDate(invoice.dueDate)} to maintain uninterrupted service connectivity.`;
+    settlementNotice = `2. Partial payment received. Please settle remaining balance of ${formatCurrencyPdf(computedBalanceDue)} on or before ${formatDate(invoice.dueDate)} to maintain uninterrupted connectivity.`;
   } else {
-    settlementNotice = `2. Settle on or before ${formatDate(invoice.dueDate)} to maintain uninterrupted service connectivity.`;
+    settlementNotice = `2. Settle on or before ${formatDate(invoice.dueDate)} to maintain continuous, uninterrupted high-speed internet service.`;
   }
 
   const notices: string[] = [
-    `1. Please include your Account No. (${invoice.accountNo}) in payment notes when paying via online channels.`,
+    `1. PAYMENT REFERENCE: When paying via GCash, Maya, or Bank, please indicate Account No. ${invoice.accountNo} in the payment notes/remarks.`,
     settlementNotice,
-    `3. Hotline: ${business.representative.mobile} | Email: ${business.representative.email}${officeNoticeSummary ? ` | Office: ${officeNoticeSummary}` : ''}.`,
-    '4. This document serves as an official Statement of Account for telecommunications services.',
+    `3. CUSTOMER SERVICE & CASHIER: Shop #4, Arcade Bldg., National Highway, Binauahan, Lagonoy, Camarines Sur (Mon–Sat 8:00 AM – 5:00 PM). Hotline: ${business.representative.mobile} | Email: ${business.representative.email}.`,
+    '4. RECONNECTION: Disconnected lines settled after cut-off are restored automatically within 5 to 15 minutes upon system payment validation.',
+    '5. BIR NON-VAT NOTICE: This Statement of Account (SOA) is an official billing document and is not valid for claiming input VAT. An Official Receipt (OR) is issued upon receipt of payment.',
   ];
 
-  let currentNoticeY = footerY + 9.5;
+  let currentNoticeY = footerY + 8.5;
   notices.forEach((notice) => {
     const wrappedLines: string[] = doc.splitTextToSize(notice, 182);
     wrappedLines.forEach((line) => {
       doc.text(line, 14, currentNoticeY);
-      currentNoticeY += 3.8;
+      currentNoticeY += 3.5;
     });
   });
 

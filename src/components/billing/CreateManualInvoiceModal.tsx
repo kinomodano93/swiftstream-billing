@@ -45,10 +45,8 @@ export const CreateManualInvoiceModal: React.FC<CreateManualInvoiceModalProps> =
   preselectedCustomerId,
   onInvoiceCreated,
 }) => {
-  const { customers, invoices, plans, businessProfile, createInvoice, showToast, hasPermission, systemRole } = useApp();
+  const { customers, invoices, plans, addonCatalog, businessProfile, createInvoice, showToast, hasPermission, systemRole } = useApp();
   const canDirectPay = hasPermission('canAccessFinancials');
-
-
 
   const now = new Date();
   const currentMonthNum = String(now.getMonth() + 1).padStart(2, '0');
@@ -61,6 +59,8 @@ export const CreateManualInvoiceModal: React.FC<CreateManualInvoiceModalProps> =
   const [billingMonth, setBillingMonth] = useState<string>(currentMonthNum);
   const [billingYear, setBillingYear] = useState<string>(currentYearStr);
   const [invoiceType, setInvoiceType] = useState<'regular' | 'installation' | 'prorated' | 'addon'>('regular');
+  const [selectedAddonId, setSelectedAddonId] = useState<string>('');
+  const [addonQuantity, setAddonQuantity] = useState<number>(1);
   const [initialStatus, setInitialStatus] = useState<'unpaid' | 'paid'>('unpaid');
   const [customDueDate, setCustomDueDate] = useState<string>('');
   const [isProrated, setIsProrated] = useState<boolean>(false);
@@ -102,9 +102,21 @@ export const CreateManualInvoiceModal: React.FC<CreateManualInvoiceModalProps> =
     return new Date(y, m, 0).getDate();
   }, [billingYear, billingMonth, now]);
 
-  const effectiveMonthlyFee = authoritativePlan?.monthlyFee || selectedCustomer?.monthlyFee || 1299;
+  const effectiveMonthlyFee = authoritativePlan?.monthlyFee || selectedCustomer?.monthlyFee || 799;
+
+  const selectedAddon = useMemo(() => {
+    return addonCatalog.find((a) => a.id === selectedAddonId);
+  }, [addonCatalog, selectedAddonId]);
+
+  const addonCharge = useMemo(() => {
+    if (invoiceType === 'addon' && selectedAddon) {
+      return selectedAddon.price * addonQuantity;
+    }
+    return 0;
+  }, [invoiceType, selectedAddon, addonQuantity]);
 
   const planCharge = useMemo(() => {
+    if (invoiceType === 'addon') return 0;
     if (isProrated || invoiceType === 'prorated') {
       const days = Math.min(daysInSelectedMonth, Math.max(1, proratedDays));
       return Math.round((days / daysInSelectedMonth) * effectiveMonthlyFee);
@@ -113,7 +125,7 @@ export const CreateManualInvoiceModal: React.FC<CreateManualInvoiceModalProps> =
   }, [isProrated, invoiceType, proratedDays, daysInSelectedMonth, effectiveMonthlyFee]);
 
   const installationFee = invoiceType === 'installation' ? (authoritativePlan?.installationFee ?? 1500) : 0;
-  const subtotal = planCharge + installationFee;
+  const subtotal = planCharge + installationFee + addonCharge;
 
   // Verify whether customer actually has open unpaid invoices in the system
   const customerUnpaidInvoices = useMemo(() => {
@@ -170,8 +182,13 @@ export const CreateManualInvoiceModal: React.FC<CreateManualInvoiceModalProps> =
       return;
     }
 
-    // CRITICAL: If customer already has an invoice this month, skip & block duplicate!
-    if (existingInvoiceForMonth) {
+    if (invoiceType === 'addon' && !selectedAddon) {
+      showToast('error', 'Add-on Required', 'Please select an add-on or service item from the catalog.');
+      return;
+    }
+
+    // CRITICAL: If customer already has a subscription invoice this month, skip & block duplicate!
+    if (invoiceType !== 'addon' && existingInvoiceForMonth) {
       showToast(
         'warning',
         'Duplicate Invoice Skipped',
@@ -190,7 +207,7 @@ export const CreateManualInvoiceModal: React.FC<CreateManualInvoiceModalProps> =
 
     // Business rule: Prorated days validation
     const proratedActive = isProrated || invoiceType === 'prorated';
-    if (proratedActive && (proratedDays < 1 || proratedDays > daysInSelectedMonth)) {
+    if (invoiceType !== 'addon' && proratedActive && (proratedDays < 1 || proratedDays > daysInSelectedMonth)) {
       showToast('error', 'Invalid Prorated Days', `Prorated days must be between 1 and ${daysInSelectedMonth} for ${billingYear}-${billingMonth}.`);
       return;
     }
@@ -204,30 +221,40 @@ export const CreateManualInvoiceModal: React.FC<CreateManualInvoiceModalProps> =
 
       const items: InvoiceItem[] = [];
 
-
-      // Primary Plan Item
-      const proratedActive = isProrated || invoiceType === 'prorated';
-      items.push({
-        id: generateId('ITEM'),
-        description: proratedActive
-          ? `Internet Plan: ${authoritativePlan.name} (${authoritativePlan.speedMbps} Mbps) — Prorated Subscription (${proratedDays}/${daysInSelectedMonth} Days)`
-          : `Internet Plan: ${authoritativePlan.name} (${authoritativePlan.speedMbps} Mbps) — Monthly Subscription`,
-        quantity: 1,
-        unitPrice: proratedActive ? planCharge : authoritativePlan.monthlyFee,
-        amount: planCharge,
-        type: 'plan',
-      });
-
-      // Installation Fee Item (if selected)
-      if (invoiceType === 'installation') {
+      if (invoiceType === 'addon' && selectedAddon) {
+        // Add-on or Hardware Item
         items.push({
           id: generateId('ITEM'),
-          description: 'Installation & Setup Fee',
-          quantity: 1,
-          unitPrice: installationFee,
-          amount: installationFee,
-          type: 'installation',
+          description: `${selectedAddon.name} (Qty: ${addonQuantity})`,
+          quantity: addonQuantity,
+          unitPrice: selectedAddon.price,
+          amount: addonCharge,
+          type: 'addon',
         });
+      } else {
+        // Primary Plan Item
+        items.push({
+          id: generateId('ITEM'),
+          description: proratedActive
+            ? `Internet Plan: ${authoritativePlan.name} (${authoritativePlan.speedMbps} Mbps) — Prorated Subscription (${proratedDays}/${daysInSelectedMonth} Days)`
+            : `Internet Plan: ${authoritativePlan.name} (${authoritativePlan.speedMbps} Mbps) — Monthly Subscription`,
+          quantity: 1,
+          unitPrice: proratedActive ? planCharge : authoritativePlan.monthlyFee,
+          amount: planCharge,
+          type: 'plan',
+        });
+
+        // Installation Fee Item (if selected)
+        if (invoiceType === 'installation') {
+          items.push({
+            id: generateId('ITEM'),
+            description: 'Installation & Setup Fee',
+            quantity: 1,
+            unitPrice: installationFee,
+            amount: installationFee,
+            type: 'installation',
+          });
+        }
       }
 
       // Previous Balance (if any)
@@ -509,7 +536,61 @@ export const CreateManualInvoiceModal: React.FC<CreateManualInvoiceModalProps> =
             </div>
           </div>
 
-          {/* 4. Due Date & Prorate Checkbox */}
+          {/* 4. Add-on Item Selection (when invoiceType === 'addon') */}
+          {invoiceType === 'addon' && (
+            <div className="p-3.5 rounded-xl bg-blue-950/30 border border-blue-500/30 space-y-3 animate-in fade-in">
+              <div className="flex items-center gap-2 text-xs font-semibold text-blue-300">
+                <Layers className="w-4 h-4 text-blue-400" />
+                <span>Select Add-on Hardware / Technical Service</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="sm:col-span-2">
+                  <fieldset className="border border-blue-500/40 rounded-xl px-3 pb-2 pt-0.5 bg-slate-950/60 focus-within:border-blue-500 transition-all">
+                    <legend className="px-1.5 text-[11px] font-medium text-blue-300">
+                      Catalog Item *
+                    </legend>
+                    <select
+                      value={selectedAddonId}
+                      onChange={(e) => setSelectedAddonId(e.target.value)}
+                      className="w-full bg-transparent text-slate-100 text-xs py-1 focus:outline-none cursor-pointer"
+                    >
+                      <option value="" className="bg-slate-900 text-slate-400">-- Choose Add-on Service or Item --</option>
+                      {addonCatalog.map((item) => (
+                        <option key={item.id} value={item.id} className="bg-slate-900 text-slate-100">
+                          {item.name} ({formatCurrency(item.price)}{item.isRecurring ? '/mo' : ''})
+                        </option>
+                      ))}
+                    </select>
+                  </fieldset>
+                </div>
+                <div>
+                  <fieldset className="border border-blue-500/40 rounded-xl px-3 pb-2 pt-0.5 bg-slate-950/60 focus-within:border-blue-500 transition-all">
+                    <legend className="px-1.5 text-[11px] font-medium text-blue-300">
+                      Quantity
+                    </legend>
+                    <input
+                      type="number"
+                      min={1}
+                      max={100}
+                      value={addonQuantity}
+                      onChange={(e) => setAddonQuantity(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                      className="w-full bg-transparent text-slate-100 text-xs py-1 focus:outline-none font-mono"
+                    />
+                  </fieldset>
+                </div>
+              </div>
+              {selectedAddon && (
+                <div className="text-[11px] text-slate-300 bg-slate-900/60 p-2.5 rounded-lg border border-slate-800 flex justify-between items-center">
+                  <span>{selectedAddon.description}</span>
+                  <span className="text-emerald-400 font-mono font-semibold shrink-0 ml-2">
+                    {formatCurrency(selectedAddon.price * addonQuantity)}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 5. Due Date & Prorate Checkbox */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-start">
             <div>
               <fieldset className="border border-slate-700/90 rounded-xl px-3 pb-1.5 pt-0.5 bg-slate-950/60 focus-within:border-blue-500 transition-all">
@@ -532,43 +613,45 @@ export const CreateManualInvoiceModal: React.FC<CreateManualInvoiceModalProps> =
               </p>
             </div>
 
-            <div className="pt-2">
-              <label className="flex items-center gap-2.5 text-xs text-slate-200 font-medium cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={isProrated}
-                  onChange={(e) => setIsProrated(e.target.checked)}
-                  className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-blue-500"
-                />
-                <span>Prorate</span>
-              </label>
+            {invoiceType !== 'addon' && (
+              <div className="pt-2">
+                <label className="flex items-center gap-2.5 text-xs text-slate-200 font-medium cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={isProrated}
+                    onChange={(e) => setIsProrated(e.target.checked)}
+                    className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span>Prorate</span>
+                </label>
 
-              {isProrated && (
-                <div className="mt-2 pl-6 animate-in fade-in space-y-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[11px] text-slate-400">Days:</span>
-                    <input
-                      type="number"
-                      min={1}
-                      max={daysInSelectedMonth}
-                      value={proratedDays}
-                      onChange={(e) => setProratedDays(parseInt(e.target.value, 10) || 1)}
-                      className="w-16 px-2 py-1 bg-slate-950 border border-slate-700 rounded text-center text-slate-100 font-mono text-xs focus:outline-none focus:border-blue-500"
-                    />
-                    <span className="text-[10px] text-slate-400 font-mono">
-                      / {daysInSelectedMonth} days
-                    </span>
+                {isProrated && (
+                  <div className="mt-2 pl-6 animate-in fade-in space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] text-slate-400">Days:</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={daysInSelectedMonth}
+                        value={proratedDays}
+                        onChange={(e) => setProratedDays(parseInt(e.target.value, 10) || 1)}
+                        className="w-16 px-2 py-1 bg-slate-950 border border-slate-700 rounded text-center text-slate-100 font-mono text-xs focus:outline-none focus:border-blue-500"
+                      />
+                      <span className="text-[10px] text-slate-400 font-mono">
+                        / {daysInSelectedMonth} days
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-amber-400 font-mono">
+                      Prorated Fee: {formatCurrency(planCharge)}
+                    </p>
                   </div>
-                  <p className="text-[10px] text-amber-400 font-mono">
-                    Prorated Fee: {formatCurrency(planCharge)}
-                  </p>
-                </div>
-              )}
-            </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Notice Banner: Already Invoiced for Selected Month */}
-          {existingInvoiceForMonth && (
+          {invoiceType !== 'addon' && existingInvoiceForMonth && (
             <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs space-y-1 animate-in fade-in">
               <div className="flex items-center gap-2 font-semibold text-amber-400">
                 <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
@@ -587,10 +670,17 @@ export const CreateManualInvoiceModal: React.FC<CreateManualInvoiceModalProps> =
 
           {/* Charges Summary Box */}
           <div className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800 space-y-1.5">
-            <div className="flex items-center justify-between text-xs text-slate-400">
-              <span>Internet Service ({authoritativePlan?.name || 'Plan'}):</span>
-              <span className="font-mono text-slate-200">{formatCurrency(planCharge)}</span>
-            </div>
+            {invoiceType === 'addon' ? (
+              <div className="flex items-center justify-between text-xs text-slate-300">
+                <span>Add-on Item ({selectedAddon?.name || 'Item'} x {addonQuantity}):</span>
+                <span className="font-mono font-semibold text-emerald-400">{formatCurrency(addonCharge)}</span>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between text-xs text-slate-400">
+                <span>Internet Service ({authoritativePlan?.name || 'Plan'}):</span>
+                <span className="font-mono text-slate-200">{formatCurrency(planCharge)}</span>
+              </div>
+            )}
             {installationFee > 0 && (
               <div className="flex items-center justify-between text-xs text-slate-400">
                 <span>Standard Installation Fee:</span>
@@ -626,15 +716,26 @@ export const CreateManualInvoiceModal: React.FC<CreateManualInvoiceModalProps> =
 
             <button
               type="submit"
-              disabled={isSubmitting || !selectedCustomerId || Boolean(existingInvoiceForMonth)}
-              title={existingInvoiceForMonth ? 'Subscriber is already invoiced for this period' : undefined}
+              disabled={
+                isSubmitting ||
+                !selectedCustomerId ||
+                (invoiceType !== 'addon' && Boolean(existingInvoiceForMonth)) ||
+                (invoiceType === 'addon' && !selectedAddonId)
+              }
+              title={
+                invoiceType !== 'addon' && existingInvoiceForMonth
+                  ? 'Subscriber is already invoiced for this period'
+                  : invoiceType === 'addon' && !selectedAddonId
+                  ? 'Please select an add-on item'
+                  : undefined
+              }
               className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold rounded-lg text-xs flex items-center gap-1.5 shadow-md shadow-blue-600/20 transition-all hover:scale-105 cursor-pointer"
             >
               <Save className="w-3.5 h-3.5" />
               <span>
                 {isSubmitting
                   ? 'Saving...'
-                  : existingInvoiceForMonth
+                  : invoiceType !== 'addon' && existingInvoiceForMonth
                   ? 'Already Invoiced (Skipped)'
                   : 'Save Changes'}
               </span>

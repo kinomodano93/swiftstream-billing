@@ -166,7 +166,44 @@ export const loadStoredData = () => {
     const rawPlans = JSON.parse(
       localStorage.getItem(STORAGE_KEYS.PLANS) || JSON.stringify(initialPlans)
     ) as Plan[];
-    const plans: Plan[] = rawPlans.map((p) => ({
+
+    const LEGACY_TEMPLATE_PLAN_IDS = new Set([
+      'plan-flexibix-6000',
+      'plan-fiber-pro-100',
+      'plan-home-turbo-50',
+      'plan-starter-25',
+      'plan-biz-giga-200',
+      'plan-piso-wifi',
+      'plan-gamer-pro-250',
+    ]);
+    const LEGACY_TEMPLATE_PLAN_NAMES = new Set([
+      'flexibix peak 6000',
+      'swiftstream pro fiber 100m',
+      'swiftstream home turbo 50m',
+      'swiftstream starter fiber 25m',
+      'swiftstream commercial gig 200m',
+      'community vendo piso-wifi feed',
+    ]);
+
+    const sanitizedPlans = rawPlans
+      .filter((p) => !LEGACY_TEMPLATE_PLAN_IDS.has(p.id) && !LEGACY_TEMPLATE_PLAN_NAMES.has((p.name || '').trim().toLowerCase()))
+      .map((p) => {
+        if (p.name?.toLowerCase().includes('gamer') && (p.speedMbps === 70 || p.speedMbps === 250)) {
+          return { ...p, speedMbps: 400, mikrotikProfile: 'plan-400m' };
+        }
+        return p;
+      });
+
+    const activePlans = sanitizedPlans.length > 0 ? sanitizedPlans : initialPlans;
+    if (sanitizedPlans.length !== rawPlans.length) {
+      try {
+        localStorage.setItem(STORAGE_KEYS.PLANS, JSON.stringify(activePlans));
+      } catch (e) {
+        console.warn('Could not update plans in localStorage', e);
+      }
+    }
+
+    const plans: Plan[] = activePlans.map((p) => ({
       ...p,
       installationFee: 1500,
       features: (p.features || []).map((f) =>
@@ -274,9 +311,10 @@ export const loadStoredData = () => {
       localStorage.getItem(STORAGE_KEYS.DAILY_REMITTANCES) || JSON.stringify(initialDailyRemittances)
     ) as DailyRemittanceRecord[];
 
-    const addonCatalog = JSON.parse(
+    const rawAddonCatalog = JSON.parse(
       localStorage.getItem(STORAGE_KEYS.ADDON_CATALOG) || JSON.stringify(initialAddonCatalog)
     ) as AddonCatalogItem[];
+    const addonCatalog = rawAddonCatalog && rawAddonCatalog.length > 0 ? rawAddonCatalog : initialAddonCatalog;
 
     const paymentSubmissions = JSON.parse(
       localStorage.getItem(STORAGE_KEYS.PAYMENT_SUBMISSIONS) || JSON.stringify(initialPaymentSubmissions)

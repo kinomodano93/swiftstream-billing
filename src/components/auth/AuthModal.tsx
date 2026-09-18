@@ -95,7 +95,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [selectedPlanId, setSelectedPlanId] = useState<string>(
     initialPlanId ||
       plans.find((p) => p.isActive !== false && !isExcludedFromPublic(p))?.id ||
-      'plan-home-turbo-50'
+      'plan-basic-connect-50'
   );
   const [installationDate, setInstallationDate] = useState<string>(
     new Date().toISOString().slice(0, 10)
@@ -273,9 +273,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           province: 'Camarines Sur',
           landmark: landmark.trim(),
         },
-        planId: selectedPlan?.id || 'plan-50m',
-        planName: selectedPlan?.name || 'Fiber Power 50 Mbps',
-        monthlyFee: selectedPlan?.monthlyFee || 1299,
+        planId: selectedPlan?.id || 'plan-basic-connect-50',
+        planName: selectedPlan?.name || 'Basic Connect',
+        monthlyFee: selectedPlan?.monthlyFee || 799,
         billingDay: 1,
         status: 'pending_approval',
         installationDate: installationDate || new Date().toISOString().slice(0, 10),
@@ -304,10 +304,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         city: targetCity,
         province: 'Camarines Sur',
         landmark: landmark.trim(),
-        preferredPlanId: selectedPlan?.id || 'plan-50m',
-        preferredPlanName: selectedPlan?.name || 'Fiber Power 50 Mbps',
+        preferredPlanId: selectedPlan?.id || 'plan-basic-connect-50',
+        preferredPlanName: selectedPlan?.name || 'Basic Connect',
         preferredSpeedMbps: selectedPlan?.speedMbps || 50,
-        monthlyFee: selectedPlan?.monthlyFee || 1299,
+        monthlyFee: selectedPlan?.monthlyFee || 799,
         status: 'pending',
         notes: `Applied online via website (${targetCity}). Preferred date: ${installationDate || 'Earliest available'}`,
         surveyDate: installationDate,

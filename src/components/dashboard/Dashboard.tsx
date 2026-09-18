@@ -93,7 +93,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <h2 className="text-lg font-bold text-slate-100">Operations Control Center</h2>
           </div>
           <p className="text-xs text-slate-400 mt-1">
-            SwiftStream Telecommunication & Repair Shop • Lagonoy, Camarines Sur Node
+            SwiftStream Telecommunications • Lagonoy, Camarines Sur Headend Node
           </p>
         </div>
 
