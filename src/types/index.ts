@@ -252,6 +252,7 @@ export interface BusinessProfile {
     bankName: string;
     bankAccountName: string;
     bankAccountNumber: string;
+    bankQrImage?: string;
     isXenditEnabled?: boolean;
     xenditMode?: 'test' | 'live';
     xenditSecretKey?: string;

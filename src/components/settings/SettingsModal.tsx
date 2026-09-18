@@ -149,6 +149,7 @@ export const SettingsModal: React.FC = () => {
     setBankName(businessProfile.paymentGateways.bankName || '');
     setBankAccountName(businessProfile.paymentGateways.bankAccountName || '');
     setBankAccountNumber(businessProfile.paymentGateways.bankAccountNumber || '');
+    setBankQrImage(businessProfile.paymentGateways.bankQrImage || '');
     setInvoiceGracePeriodDays(businessProfile.invoiceGracePeriodDays ?? 5);
     setGracePeriodCutoffTime(businessProfile.gracePeriodCutoffTime || '23:59');
     setDailyAuditScheduleTime(businessProfile.dailyAuditScheduleTime || '00:00');
@@ -191,6 +192,7 @@ export const SettingsModal: React.FC = () => {
   const [bankName, setBankName] = useState(businessProfile.paymentGateways.bankName);
   const [bankAccountName, setBankAccountName] = useState(businessProfile.paymentGateways.bankAccountName);
   const [bankAccountNumber, setBankAccountNumber] = useState(businessProfile.paymentGateways.bankAccountNumber);
+  const [bankQrImage, setBankQrImage] = useState<string>(businessProfile.paymentGateways.bankQrImage || '');
   const [paymentGatewaySubTab, setPaymentGatewaySubTab] = useState<'xendit' | 'manual'>('xendit');
   const [isXenditEnabled, setIsXenditEnabled] = useState<boolean>(businessProfile.paymentGateways.isXenditEnabled ?? true);
   const [xenditMode, setXenditMode] = useState<'test' | 'live'>(businessProfile.paymentGateways.xenditMode || 'test');
@@ -537,6 +539,7 @@ export const SettingsModal: React.FC = () => {
         bankName,
         bankAccountName,
         bankAccountNumber,
+        bankQrImage,
         isXenditEnabled,
         xenditMode,
         xenditSecretKey,
@@ -1509,6 +1512,72 @@ export const SettingsModal: React.FC = () => {
                       className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-mono"
                       required
                     />
+                  </div>
+                </div>
+
+                {/* Bank QR Upload Box */}
+                <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-16 h-16 rounded-2xl bg-white border border-slate-700 p-1 flex items-center justify-center shrink-0 shadow-md">
+                        {bankQrImage ? (
+                          <img
+                            src={bankQrImage}
+                            alt="Bank QR Preview"
+                            className="w-full h-full object-contain rounded-xl"
+                          />
+                        ) : (
+                          <div className="flex flex-col items-center justify-center text-slate-400">
+                            <QrCode className="w-7 h-7 text-indigo-500 mb-0.5" />
+                            <span className="text-[8px] font-bold text-slate-600 font-mono">NO QR</span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div>
+                        <span className="font-bold text-slate-200 block text-xs">Bank Transfer / QR Ph Code</span>
+                        <p className="text-[11px] text-slate-400 mt-0.5">
+                          Upload your official Bank QR Code or QR Ph standee. This will be displayed in Express Pay and the Subscriber Portal.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <label className="flex items-center gap-1.5 px-3 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold transition-colors cursor-pointer shadow-md shadow-indigo-600/20">
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>{bankQrImage ? 'Change Bank QR' : 'Upload Bank QR'}</span>
+                        <input
+                          type="file"
+                          accept="image/png, image/jpeg, image/webp, image/svg+xml"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              if (file.size > 2 * 1024 * 1024) {
+                                alert('Please select an image smaller than 2MB.');
+                                return;
+                              }
+                              const reader = new FileReader();
+                              reader.onload = () => {
+                                setBankQrImage(reader.result as string);
+                              };
+                              reader.readAsDataURL(file);
+                            }
+                          }}
+                        />
+                      </label>
+
+                      {bankQrImage && (
+                        <button
+                          type="button"
+                          onClick={() => setBankQrImage('')}
+                          className="flex items-center gap-1.5 px-3 py-2 bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/40 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Remove</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>

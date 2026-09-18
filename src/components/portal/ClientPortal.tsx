@@ -52,6 +52,7 @@ import {
   Info,
   Home,
   MoreHorizontal,
+  Building2,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import confetti from 'canvas-confetti';
@@ -2502,10 +2503,23 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                           ? businessProfile.paymentGateways.gcashQrImage
                           : payMethod === 'maya'
                           ? businessProfile.paymentGateways.mayaQrImage
+                          : payMethod === 'bank_transfer'
+                          ? businessProfile.paymentGateways.bankQrImage
                           : undefined;
 
-                      const hasCustomQr = Boolean(customQr && customQr.trim());
+                      const hasCustomQr = Boolean(
+                        customQr &&
+                        customQr.trim() &&
+                        !customQr.includes('images.unsplash.com')
+                      );
                       const isShowingCustom = hasCustomQr && qrDisplayMode === 'merchant';
+
+                      const channelTitle =
+                        payMethod === 'gcash'
+                          ? 'Official GCash QR'
+                          : payMethod === 'maya'
+                          ? 'Official Maya QR'
+                          : `Official ${businessProfile.paymentGateways.bankName || 'Bank'} QR`;
 
                       return (
                         <div className="bg-white p-4 rounded-3xl border-2 border-slate-700 flex-shrink-0 shadow-2xl flex flex-col items-center gap-2 min-w-[210px] max-w-[240px]">
@@ -2513,11 +2527,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                             <div className="flex items-center gap-1.5 truncate">
                               <QrCode className="w-3.5 h-3.5 text-blue-600 shrink-0" />
                               <span className="truncate">
-                                {isShowingCustom
-                                  ? payMethod === 'gcash'
-                                    ? 'Official GCash QR'
-                                    : 'Official Maya QR'
-                                  : 'Dynamic QR Ph'}
+                                {isShowingCustom ? channelTitle : 'Dynamic QR Ph'}
                               </span>
                             </div>
 
@@ -2558,7 +2568,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                                 accountNumber: customer.accountNo,
                                 amount: Number(payAmount) || (customer.balance > 0 ? customer.balance : customer.monthlyFee),
                                 invoiceNumber: selectedPayInvoice?.invoiceNumber || 'BILL-2026',
-                                mobileNumber: businessProfile.paymentGateways.gcashNumber || '09624171684',
+                                mobileNumber: (payMethod === 'maya' ? businessProfile.paymentGateways.mayaNumber : payMethod === 'bank_transfer' ? businessProfile.paymentGateways.bankAccountNumber : businessProfile.paymentGateways.gcashNumber) || '09638927819',
                                 serviceProvider: payMethod === 'gcash' ? 'gcash' : payMethod === 'maya' ? 'maya' : 'qrph_national',
                               })}
                               size={150}
@@ -3929,30 +3939,42 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
             {/* Scrollable Body */}
             <div className="overflow-y-auto p-5 space-y-4 text-xs">
               {/* Channel Selector */}
-              <div className="flex rounded-2xl bg-slate-950 p-1 border border-slate-800">
+              <div className="grid grid-cols-4 gap-1.5 rounded-2xl bg-slate-950 p-1.5 border border-slate-800">
                 <button
                   type="button"
                   onClick={() => setPayMethod('gcash')}
-                  className={`flex-1 py-1.5 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  className={`py-2 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                     payMethod === 'gcash'
                       ? 'bg-blue-600 text-white shadow-md'
                       : 'text-slate-400 hover:text-slate-200'
                   }`}
                 >
-                  <Smartphone className="w-3.5 h-3.5" />
-                  <span>GCash QR</span>
+                  <Smartphone className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">GCash</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setPayMethod('maya')}
-                  className={`flex-1 py-1.5 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  className={`py-2 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                     payMethod === 'maya'
                       ? 'bg-emerald-600 text-white shadow-md'
                       : 'text-slate-400 hover:text-slate-200'
                   }`}
                 >
-                  <Smartphone className="w-3.5 h-3.5" />
-                  <span>Maya QR</span>
+                  <Smartphone className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">Maya</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPayMethod('bank_transfer')}
+                  className={`py-2 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                    payMethod === 'bank_transfer'
+                      ? 'bg-indigo-600 text-white shadow-md'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Building2 className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">Bank</span>
                 </button>
                 <button
                   type="button"
@@ -3961,10 +3983,10 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                     setPortalTab('pay');
                     setPayMethod('xendit');
                   }}
-                  className="flex-1 py-1.5 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 text-slate-400 hover:text-cyan-300 hover:bg-slate-900 cursor-pointer"
+                  className="py-2 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1 text-slate-400 hover:text-cyan-300 hover:bg-slate-900 cursor-pointer"
                 >
-                  <Zap className="w-3.5 h-3.5 text-cyan-400" />
-                  <span>Xendit</span>
+                  <Zap className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                  <span className="truncate">Xendit</span>
                 </button>
               </div>
 
@@ -4015,87 +4037,221 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                 </div>
               </div>
 
-              {/* Dynamic QR Ph Code Render */}
-              <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 flex flex-col items-center justify-center space-y-3">
-                <div className="p-2.5 bg-white rounded-2xl shadow-md">
-                  <QRCodeSVG
-                    id="express-pay-qr-svg"
-                    value={generateDynamicQrPhPayload({
-                      merchantName: businessProfile.tradeName || 'SWIFTSTREAM TELECOM',
-                      merchantCity: businessProfile.address.city || 'LAGONOY',
-                      accountNumber: customer.accountNo,
-                      amount: Number(payAmount) || (customer.balance > 0 ? customer.balance : customer.monthlyFee),
-                      invoiceNumber: latestUnpaidInvoice?.invoiceNumber || 'BILL-2026',
-                      mobileNumber: (payMethod === 'maya' ? businessProfile.paymentGateways.mayaNumber : businessProfile.paymentGateways.gcashNumber) || '09624171684',
-                      serviceProvider: payMethod === 'gcash' ? 'gcash' : payMethod === 'maya' ? 'maya' : 'qrph_national',
-                    })}
-                    size={160}
-                    level="M"
-                  />
-                </div>
+              {/* QR Code Render (Official Merchant Standee or Dynamic QR Ph) */}
+              {(() => {
+                const customQr =
+                  payMethod === 'gcash'
+                    ? businessProfile.paymentGateways.gcashQrImage
+                    : payMethod === 'maya'
+                    ? businessProfile.paymentGateways.mayaQrImage
+                    : payMethod === 'bank_transfer'
+                    ? businessProfile.paymentGateways.bankQrImage
+                    : undefined;
 
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const svg = document.getElementById('express-pay-qr-svg');
-                      if (svg) {
-                        const svgData = new XMLSerializer().serializeToString(svg);
-                        const canvas = document.createElement('canvas');
-                        const ctx = canvas.getContext('2d');
-                        const img = new Image();
-                        img.onload = () => {
-                          canvas.width = img.width || 200;
-                          canvas.height = img.height || 200;
-                          ctx?.drawImage(img, 0, 0);
-                          const pngFile = canvas.toDataURL('image/png');
-                          const downloadLink = document.createElement('a');
-                          downloadLink.download = `SwiftStream_QR_${customer.accountNo}.png`;
-                          downloadLink.href = pngFile;
-                          downloadLink.click();
-                        };
-                        img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
-                      }
-                    }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs font-semibold text-slate-200 transition-colors cursor-pointer"
-                  >
-                    <Download className="w-3.5 h-3.5 text-cyan-400" />
-                    <span>Download QR</span>
-                  </button>
+                const hasCustomQr = Boolean(
+                  customQr &&
+                  customQr.trim() &&
+                  !customQr.includes('images.unsplash.com')
+                );
 
-                  <button
-                    type="button"
-                    onClick={() =>
-                      handleCopy(
-                        (payMethod === 'maya'
-                          ? businessProfile.paymentGateways.mayaNumber
-                          : businessProfile.paymentGateways.gcashNumber) || '09624171684',
-                        'express_num'
-                      )
-                    }
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs font-semibold text-slate-200 transition-colors cursor-pointer"
-                  >
-                    {copiedField === 'express_num' ? (
-                      <Check className="w-3.5 h-3.5 text-emerald-400" />
-                    ) : (
-                      <Copy className="w-3.5 h-3.5 text-slate-400" />
-                    )}
-                    <span>{copiedField === 'express_num' ? 'Copied Number' : 'Copy Number'}</span>
-                  </button>
-                </div>
-              </div>
+                const isShowingCustom = hasCustomQr && qrDisplayMode === 'merchant';
+
+                const activeChannelLabel =
+                  payMethod === 'gcash'
+                    ? 'GCash'
+                    : payMethod === 'maya'
+                    ? 'Maya'
+                    : businessProfile.paymentGateways.bankName || 'Bank';
+
+                const targetNumber =
+                  payMethod === 'gcash'
+                    ? businessProfile.paymentGateways.gcashNumber
+                    : payMethod === 'maya'
+                    ? businessProfile.paymentGateways.mayaNumber
+                    : businessProfile.paymentGateways.bankAccountNumber;
+
+                const targetAccountName =
+                  payMethod === 'gcash'
+                    ? businessProfile.paymentGateways.gcashName
+                    : payMethod === 'maya'
+                    ? businessProfile.paymentGateways.mayaName
+                    : businessProfile.paymentGateways.bankAccountName;
+
+                const currentAmount = Number(payAmount) || (customer.balance > 0 ? customer.balance : customer.monthlyFee);
+
+                return (
+                  <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 flex flex-col items-center justify-center space-y-3">
+                    {/* Header with Title and Mode Switcher */}
+                    <div className="flex items-center justify-between w-full max-w-[280px] pb-1 border-b border-slate-800/80 text-[11px]">
+                      <div className="flex items-center gap-1.5 font-bold text-slate-200">
+                        <QrCode className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>
+                          {isShowingCustom
+                            ? `Official ${activeChannelLabel} QR`
+                            : `Dynamic QR Ph`}
+                        </span>
+                      </div>
+
+                      {hasCustomQr && (
+                        <button
+                          type="button"
+                          onClick={() => setQrDisplayMode((prev) => (prev === 'merchant' ? 'dynamic' : 'merchant'))}
+                          className="text-[10px] text-cyan-400 hover:text-cyan-300 font-mono font-semibold underline cursor-pointer"
+                          title="Toggle between uploaded merchant QR and dynamic QR Ph"
+                        >
+                          {qrDisplayMode === 'merchant' ? 'Show Dynamic QR' : 'Show Merchant QR'}
+                        </button>
+                      )}
+                    </div>
+
+                    {/* QR Code Container */}
+                    <div className="p-2.5 bg-white rounded-2xl shadow-md flex flex-col items-center justify-center">
+                      {isShowingCustom && customQr ? (
+                        <div className="flex flex-col items-center">
+                          <img
+                            src={customQr}
+                            alt={`${activeChannelLabel} Official QR`}
+                            className="w-[170px] h-[170px] object-contain rounded-xl cursor-pointer hover:opacity-95 transition-opacity"
+                            onClick={() => setPreviewQrModal(customQr)}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setPreviewQrModal(customQr)}
+                            className="mt-1 text-[10px] text-blue-600 hover:text-blue-800 font-bold flex items-center gap-1 cursor-pointer"
+                          >
+                            <Eye className="w-3 h-3" />
+                            <span>Tap to Enlarge</span>
+                          </button>
+                        </div>
+                      ) : (
+                        <QRCodeSVG
+                          id="express-pay-qr-svg"
+                          value={generateDynamicQrPhPayload({
+                            merchantName: businessProfile.tradeName || 'SWIFTSTREAM TELECOM',
+                            merchantCity: businessProfile.address.city || 'LAGONOY',
+                            accountNumber: customer.accountNo,
+                            amount: currentAmount,
+                            invoiceNumber: latestUnpaidInvoice?.invoiceNumber || 'BILL-2026',
+                            mobileNumber: targetNumber || '09638927819',
+                            serviceProvider: payMethod === 'gcash' ? 'gcash' : payMethod === 'maya' ? 'maya' : 'qrph_national',
+                          })}
+                          size={160}
+                          level="M"
+                        />
+                      )}
+                    </div>
+
+                    <div className="text-center font-mono font-bold text-cyan-300 text-xs">
+                      ₱{currentAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </div>
+
+                    {/* Account Quick Info Card */}
+                    <div className="w-full max-w-[280px] p-2.5 rounded-xl bg-slate-900/90 border border-slate-800 space-y-1.5 text-[11px]">
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400 text-[10px]">
+                          {payMethod === 'bank_transfer' ? 'Bank:' : 'Channel:'}
+                        </span>
+                        <span className="font-bold text-slate-200">
+                          {payMethod === 'bank_transfer'
+                            ? businessProfile.paymentGateways.bankName || 'Direct Bank Transfer'
+                            : payMethod === 'gcash'
+                            ? 'GCash Direct'
+                            : 'Maya Direct'}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400 text-[10px]">Account Name:</span>
+                        <span className="font-semibold text-slate-200 truncate max-w-[170px]">
+                          {targetAccountName || 'SwiftStream Telecom'}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400 text-[10px]">
+                          {payMethod === 'bank_transfer' ? 'Account No:' : 'Mobile No:'}
+                        </span>
+                        <span className="font-mono font-bold text-cyan-300">
+                          {targetNumber || 'Not set'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Download & Copy Buttons */}
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (isShowingCustom && customQr) {
+                            const downloadLink = document.createElement('a');
+                            downloadLink.download = `SwiftStream_${payMethod.toUpperCase()}_QR_${customer.accountNo}.png`;
+                            downloadLink.href = customQr;
+                            downloadLink.click();
+                          } else {
+                            const svg = document.getElementById('express-pay-qr-svg');
+                            if (svg) {
+                              const svgData = new XMLSerializer().serializeToString(svg);
+                              const canvas = document.createElement('canvas');
+                              const ctx = canvas.getContext('2d');
+                              const img = new Image();
+                              img.onload = () => {
+                                canvas.width = img.width || 200;
+                                canvas.height = img.height || 200;
+                                ctx?.drawImage(img, 0, 0);
+                                const pngFile = canvas.toDataURL('image/png');
+                                const downloadLink = document.createElement('a');
+                                downloadLink.download = `SwiftStream_QR_${customer.accountNo}.png`;
+                                downloadLink.href = pngFile;
+                                downloadLink.click();
+                              };
+                              img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
+                            }
+                          }
+                        }}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs font-semibold text-slate-200 transition-colors cursor-pointer"
+                      >
+                        <Download className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>Download QR</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleCopy(targetNumber || '', 'express_num')}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs font-semibold text-slate-200 transition-colors cursor-pointer"
+                      >
+                        {copiedField === 'express_num' ? (
+                          <Check className="w-3.5 h-3.5 text-emerald-400" />
+                        ) : (
+                          <Copy className="w-3.5 h-3.5 text-slate-400" />
+                        )}
+                        <span>
+                          {copiedField === 'express_num'
+                            ? 'Copied!'
+                            : payMethod === 'bank_transfer'
+                            ? 'Copy Acct #'
+                            : 'Copy Number'}
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Reference Number & Receipt Upload */}
               <div className="space-y-3">
                 <div>
                   <label className="block text-[11px] font-semibold text-slate-300 mb-1">
-                    Enter GCash / Maya Reference Number:
+                    Enter {payMethod === 'gcash' ? 'GCash' : payMethod === 'maya' ? 'Maya' : payMethod === 'bank_transfer' ? 'Bank Transfer' : 'Payment'} Reference / Trace Number:
                   </label>
                   <input
                     type="text"
                     value={payReference}
                     onChange={(e) => setPayReference(e.target.value)}
-                    placeholder="e.g. 100982347891"
+                    placeholder={
+                      payMethod === 'gcash'
+                        ? 'e.g. 100982347891 (GCash Ref)'
+                        : payMethod === 'maya'
+                        ? 'e.g. 9847291039 (Maya Ref)'
+                        : 'e.g. BDO-98471203 (Bank Trace / Ref)'
+                    }
                     className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 font-mono placeholder-slate-500 focus:outline-none focus:border-cyan-500"
                   />
                 </div>

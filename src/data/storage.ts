@@ -154,6 +154,14 @@ export const loadStoredData = () => {
       street: (rawBusinessProfile.address?.street === 'National Highway, Zone 3' || rawBusinessProfile.address?.street === 'Zone 5') ? '' : (rawBusinessProfile.address?.street || ''),
     };
 
+    const rawGateways = rawBusinessProfile.paymentGateways || initialBusinessProfile.paymentGateways;
+    const cleanedPaymentGateways = {
+      ...rawGateways,
+      gcashQrImage: rawGateways?.gcashQrImage?.includes('images.unsplash.com') ? '' : (rawGateways?.gcashQrImage || ''),
+      mayaQrImage: rawGateways?.mayaQrImage?.includes('images.unsplash.com') ? '' : (rawGateways?.mayaQrImage || ''),
+      bankQrImage: rawGateways?.bankQrImage || '',
+    };
+
     const businessProfile: BusinessProfile = {
       ...rawBusinessProfile,
       name: rawBusinessProfile.name?.replace(/\s*&\s*REPAIR\s*SHOP/gi, '').trim() || 'SWIFTSTREAM TELECOMMUNICATIONS',
@@ -161,6 +169,7 @@ export const loadStoredData = () => {
       industry: (rawBusinessProfile.industry === 'Information Technology & Telecommunications') ? '' : (rawBusinessProfile.industry || ''),
       logoUrl: rawBusinessProfile.logoUrl || '/favicon.svg',
       address: cleanedAddress,
+      paymentGateways: cleanedPaymentGateways,
     };
 
     const rawPlans = JSON.parse(

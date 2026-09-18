@@ -344,6 +344,30 @@ export const PaymentTerminalModal: React.FC<PaymentTerminalModalProps> = ({
             </div>
           )}
 
+          {/* Bank Transfer Quick Reference Banner */}
+          {paymentMethod === 'bank_transfer' && (
+            <div className="p-3 rounded-2xl bg-indigo-950/20 border border-indigo-800/40 flex items-center gap-3 text-xs">
+              {businessProfile.paymentGateways.bankQrImage ? (
+                <img
+                  src={businessProfile.paymentGateways.bankQrImage}
+                  alt="Bank QR"
+                  className="w-12 h-12 object-contain bg-white rounded-xl p-0.5 shadow flex-shrink-0"
+                />
+              ) : (
+                <div className="w-12 h-12 bg-indigo-900/40 text-indigo-300 font-mono text-[9px] font-bold rounded-xl border border-indigo-700/50 flex items-center justify-center flex-shrink-0">
+                  Bank QR
+                </div>
+              )}
+              <div className="space-y-0.5 flex-1">
+                <span className="text-[10px] text-indigo-400 font-bold uppercase tracking-wider block">
+                  {businessProfile.paymentGateways.bankName || 'Bank Deposit / Wire Transfer'}
+                </span>
+                <p className="font-bold text-slate-100">{businessProfile.paymentGateways.bankAccountName}</p>
+                <p className="font-mono text-indigo-300 font-semibold">{businessProfile.paymentGateways.bankAccountNumber}</p>
+              </div>
+            </div>
+          )}
+
           {/* Amount and Reference */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>

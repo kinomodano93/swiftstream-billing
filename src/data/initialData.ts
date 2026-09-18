@@ -54,13 +54,14 @@ export const initialBusinessProfile: BusinessProfile = {
   paymentGateways: {
     gcashNumber: '09638927819',
     gcashName: 'LEONARDO F.',
-    gcashQrImage: 'https://images.unsplash.com/photo-1550751827-4bd374c3f58b?auto=format&fit=crop&q=80&w=400',
+    gcashQrImage: '',
     mayaNumber: '09638927819',
     mayaName: 'SWIFTSTREAM TEL',
-    mayaQrImage: 'https://images.unsplash.com/photo-1563986768609-322da13575f3?auto=format&fit=crop&q=80&w=400',
+    mayaQrImage: '',
     bankName: 'BDO Unibank (Lagonoy Branch)',
     bankAccountNumber: '0012-3456-7890',
     bankAccountName: 'SWIFTSTREAM TELECOMMUNICATION',
+    bankQrImage: '',
     xenditConfig: {
       enabled: true,
       provider: 'Xendit',
