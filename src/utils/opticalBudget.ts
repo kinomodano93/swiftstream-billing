@@ -93,19 +93,16 @@ export const buildPonCascadeChain = (
     const chain: NapBox[] = [];
     const visited = new Set<string>();
 
-    // 1. Find root feeder NAP (explicit feedSourceType === 'olt', or no upstreamNapId and feedSourceType !== 'nap')
-    let root = napsOnPon.find((n) => n.feedSourceType === 'olt');
-    if (!root) {
-      root = napsOnPon.find((n) => !n.upstreamNapId && n.feedSourceType !== 'nap');
-    }
-    if (!root) {
-      // Fallback to closest to OLT
-      root = [...napsOnPon].sort(
-        (a, b) =>
-          calculateSpanMetrics(olt.latitude, olt.longitude, a.latitude, a.longitude).directMeters -
-          calculateSpanMetrics(olt.latitude, olt.longitude, b.latitude, b.longitude).directMeters
-      )[0];
-    }
+    // 1. Find root feeder NAP:
+    // If multiple claim feeder / 'olt', pick the one physically closest to the Central OLT POP
+    const feederCandidates = napsOnPon.filter((n) => n.feedSourceType === 'olt' || !n.upstreamNapId);
+    let root = feederCandidates.length > 0
+      ? [...feederCandidates].sort(
+          (a, b) =>
+            calculateSpanMetrics(olt.latitude, olt.longitude, a.latitude, a.longitude).directMeters -
+            calculateSpanMetrics(olt.latitude, olt.longitude, b.latitude, b.longitude).directMeters
+        )[0]
+      : napsOnPon[0];
 
     chain.push(root);
     visited.add(root.id);
@@ -223,7 +220,9 @@ export const calculateCascadeTelemetry = (
       ? chain.find((b) => b.id === nap.upstreamNapId)
       : null;
 
-    const isFeeder = (nap.feedSourceType === 'olt' || !nap.upstreamNapId) && !explicitUpstream;
+    // Box 1 (i === 0) is the root feeder from the Central OLT.
+    // All subsequent boxes in the cascade (i > 0) are daisy-chained hops fed from the preceding box (or explicit upstream).
+    const isFeeder = i === 0 && !explicitUpstream;
     const isTerminal = hopIndex === totalHops || nap.fbtRatio === 'terminal';
 
     const upstreamType: 'olt' | 'nap' = isFeeder ? 'olt' : 'nap';

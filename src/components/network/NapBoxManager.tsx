@@ -115,6 +115,51 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
     }
   };
 
+  const openAddBoxModal = (initialCoords?: { lat: number; lng: number }) => {
+    // Determine existing boxes on selected PON port
+    const candidates = napBoxes.filter(
+      (b) =>
+        (b.oltId === selectedOltId || (!b.oltId && selectedOltId === oltNodes[0]?.id)) &&
+        (b.ponPortNumber || 1) === Number(ponPortNumber)
+    );
+
+    if (candidates.length > 0) {
+      // Prior boxes already deployed on this PON! Default to cascading from the last box
+      const targetParent = candidates[candidates.length - 1];
+      setFeedSourceType('nap');
+      setUpstreamNapId(targetParent.id);
+      setFbtRatio(candidates.length === 1 ? '80/20' : candidates.length === 2 ? '70/30' : 'terminal');
+      if (!isCustomBarangay) {
+        setBarangay(targetParent.barangay);
+      }
+      if (initialCoords) {
+        setLatitude(Number(initialCoords.lat.toFixed(4)));
+        setLongitude(Number(initialCoords.lng.toFixed(4)));
+      } else {
+        // Auto-align ~250m downstream from upstream parent
+        setLatitude(Number((targetParent.latitude + 0.0018).toFixed(4)));
+        setLongitude(Number((targetParent.longitude + 0.0015).toFixed(4)));
+      }
+    } else {
+      // First box on this PON! Default to OLT POP Feeder
+      setFeedSourceType('olt');
+      setUpstreamNapId('');
+      setFbtRatio('85/15');
+      const targetOlt = oltNodes.find((o) => o.id === selectedOltId) || oltNodes[0] || oltNode;
+      if (targetOlt && !isCustomBarangay) {
+        setBarangay(targetOlt.barangay);
+      }
+      if (initialCoords) {
+        setLatitude(Number(initialCoords.lat.toFixed(4)));
+        setLongitude(Number(initialCoords.lng.toFixed(4)));
+      } else if (targetOlt) {
+        setLatitude(Number((targetOlt.latitude - 0.0032).toFixed(4)));
+        setLongitude(Number((targetOlt.longitude - 0.0035).toFixed(4)));
+      }
+    }
+    setShowAddBoxModal(true);
+  };
+
   const handleCreateBox = (e: React.FormEvent) => {
     e.preventDefault();
     const ports: NapPort[] = Array.from({ length: totalPorts }, (_, i) => ({
@@ -125,7 +170,7 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
     const finalBarangay = isCustomBarangay ? (customBarangay.trim() || 'Lagonoy') : barangay;
     const finalSplitterType = `${plcSplitterType} PLC (${fbtRatio === 'terminal' ? '100% Terminal' : `${fbtRatio} FBT`})`;
 
-    // Resolve upstream parent for cascaded hops (defaults to first NAP box if not explicitly changed)
+    // Resolve upstream parent for cascaded hops (defaults to latest box in cascade if not explicitly chosen)
     const candidatesOnPon = napBoxes.filter(
       (b) =>
         (b.oltId === selectedOltId || (!b.oltId && selectedOltId === oltNodes[0]?.id)) &&
@@ -133,7 +178,7 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
     );
     const resolvedUpstreamNapId =
       feedSourceType === 'nap'
-        ? upstreamNapId || candidatesOnPon[0]?.id || undefined
+        ? upstreamNapId || candidatesOnPon[candidatesOnPon.length - 1]?.id || candidatesOnPon[0]?.id || undefined
         : undefined;
 
     addNapBox({
@@ -162,10 +207,6 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
     setLocation('');
     setIsCustomBarangay(false);
     setCustomBarangay('');
-    setFeedSourceType('olt');
-    setUpstreamNapId('');
-    setFbtRatio('85/15');
-    setPlcSplitterType('1:16');
   };
 
   const getPortStatusStyles = (status: string) => {
@@ -234,7 +275,7 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
           </button>
 
           <button
-            onClick={() => setShowAddBoxModal(true)}
+            onClick={() => openAddBoxModal()}
             className="flex items-center gap-1.5 px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-cyan-600/20 transition-all hover:scale-105"
           >
             <Plus className="w-4 h-4" />
@@ -340,9 +381,7 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
         <FiberGisMap
           onSelectCustomer={onSelectCustomer}
           onDeployNapAtLocation={(coords) => {
-            setLatitude(Number(coords.lat.toFixed(4)));
-            setLongitude(Number(coords.lng.toFixed(4)));
-            setShowAddBoxModal(true);
+            openAddBoxModal(coords);
           }}
           onRegisterOltAtLocation={(coords) => {
             setOltModalCoords(coords);
@@ -585,6 +624,34 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
                         PON Port #{activeBox.ponPortNumber || 1}
                       </span>
                     </div>
+
+                    {/* Quick Re-link Feed Parent */}
+                    {napsOnPon.length > 1 && (
+                      <div className="pt-1.5 pb-1 border-t border-slate-900 flex items-center justify-between gap-2 text-[10px]">
+                        <span className="text-slate-400 font-medium">Re-link Parent:</span>
+                        <select
+                          value={activeBox.feedSourceType === 'olt' || !activeBox.upstreamNapId ? '__olt__' : activeBox.upstreamNapId}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (val === '__olt__') {
+                              updateNapBox(activeBox.id, { feedSourceType: 'olt', upstreamNapId: undefined });
+                            } else {
+                              updateNapBox(activeBox.id, { feedSourceType: 'nap', upstreamNapId: val });
+                            }
+                          }}
+                          className="px-2 py-1 rounded-lg bg-slate-900 border border-slate-700 text-cyan-300 font-mono text-[10px] focus:outline-none focus:border-cyan-400 font-semibold"
+                        >
+                          <option value="__olt__">🏢 Central OLT (Feeder Root)</option>
+                          {napsOnPon
+                            .filter((b) => b.id !== activeBox.id)
+                            .map((b) => (
+                              <option key={`relink-${b.id}`} value={b.id}>
+                                ⚡ Cascaded from {b.code} ({b.name})
+                              </option>
+                            ))}
+                        </select>
+                      </div>
+                    )}
 
                     {currentHop ? (
                       <div className="space-y-2">
@@ -849,13 +916,31 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
                           setSelectedOltId(id);
                           const target = oltNodes.find((o) => o.id === id);
                           if (target) {
+                            let effectivePort = ponPortNumber;
                             if (ponPortNumber > (target.totalPonPorts || 16)) {
+                              effectivePort = 1;
                               setPonPortNumber(1);
                             }
-                            if (!isCustomBarangay) {
-                              setBarangay(target.barangay);
-                              setLatitude(Number(target.latitude.toFixed(4)));
-                              setLongitude(Number(target.longitude.toFixed(4)));
+                            const cands = napBoxes.filter(
+                              (b) => (b.oltId === id) && (b.ponPortNumber || 1) === effectivePort
+                            );
+                            if (cands.length > 0) {
+                              const p = cands[cands.length - 1];
+                              setFeedSourceType('nap');
+                              setUpstreamNapId(p.id);
+                              if (!isCustomBarangay) {
+                                setBarangay(p.barangay);
+                                setLatitude(Number((p.latitude + 0.0018).toFixed(4)));
+                                setLongitude(Number((p.longitude + 0.0015).toFixed(4)));
+                              }
+                            } else {
+                              setFeedSourceType('olt');
+                              setUpstreamNapId('');
+                              if (!isCustomBarangay) {
+                                setBarangay(target.barangay);
+                                setLatitude(Number(target.latitude.toFixed(4)));
+                                setLongitude(Number(target.longitude.toFixed(4)));
+                              }
                             }
                           }
                         }}
@@ -876,7 +961,28 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
                       </label>
                       <select
                         value={ponPortNumber}
-                        onChange={(e) => setPonPortNumber(Number(e.target.value))}
+                        onChange={(e) => {
+                          const newPort = Number(e.target.value);
+                          setPonPortNumber(newPort);
+                          const cands = napBoxes.filter(
+                            (b) =>
+                              (b.oltId === selectedOltId || (!b.oltId && selectedOltId === oltNodes[0]?.id)) &&
+                              (b.ponPortNumber || 1) === newPort
+                          );
+                          if (cands.length > 0) {
+                            const p = cands[cands.length - 1];
+                            setFeedSourceType('nap');
+                            setUpstreamNapId(p.id);
+                            if (!isCustomBarangay) {
+                              setBarangay(p.barangay);
+                              setLatitude(Number((p.latitude + 0.0018).toFixed(4)));
+                              setLongitude(Number((p.longitude + 0.0015).toFixed(4)));
+                            }
+                          } else {
+                            setFeedSourceType('olt');
+                            setUpstreamNapId('');
+                          }
+                        }}
                         className="w-full px-2.5 py-1.5 bg-slate-950 border border-purple-800/60 rounded-xl text-slate-100 font-mono font-bold text-xs focus:outline-none focus:border-purple-400"
                       >
                         {Array.from(

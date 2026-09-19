@@ -1262,6 +1262,33 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
                                 </span>
                               </div>
 
+                              {napsOnPon.length > 1 && (
+                                <div className="pt-1.5 pb-1 border-t border-slate-900 flex items-center justify-between gap-1 text-[10px]">
+                                  <span className="text-slate-400 font-medium">Re-link Parent:</span>
+                                  <select
+                                    value={selectedAsset.data.feedSourceType === 'olt' || !selectedAsset.data.upstreamNapId ? '__olt__' : selectedAsset.data.upstreamNapId}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      if (val === '__olt__') {
+                                        updateNapBox(selectedAsset.data.id, { feedSourceType: 'olt', upstreamNapId: undefined });
+                                      } else {
+                                        updateNapBox(selectedAsset.data.id, { feedSourceType: 'nap', upstreamNapId: val });
+                                      }
+                                    }}
+                                    className="px-2 py-0.5 rounded-md bg-slate-900 border border-slate-700 text-cyan-300 font-mono text-[10px] focus:outline-none focus:border-cyan-400 font-semibold"
+                                  >
+                                    <option value="__olt__">🏢 Central OLT (Feeder Root)</option>
+                                    {napsOnPon
+                                      .filter((b) => b.id !== selectedAsset.data.id)
+                                      .map((b) => (
+                                        <option key={`relink-map-${b.id}`} value={b.id}>
+                                          ⚡ Cascaded from {b.code} ({b.name})
+                                        </option>
+                                      ))}
+                                  </select>
+                                </div>
+                              )}
+
                               {currentHop && (
                                 <>
                                   <div className="flex items-center justify-between">
