@@ -214,6 +214,7 @@ export const seedFirestoreFromLocalData = async (
     fiberCables: FiberCable[];
     fiberClosures: FiberClosure[];
     oltNode: OltPopNode;
+    oltNodes?: OltPopNode[];
     mikrotikDevices: MikrotikDevice[];
     expenses: Expense[];
     auditLogs: AuditLog[];
@@ -333,12 +334,18 @@ export const seedFirestoreFromLocalData = async (
       await uploadBatch(COLLECTIONS.SYSTEM_USERS, staffPayload, 'Staff Users');
     }
 
-    // 20. Singletons: OLT Node & Business Profile
+    // 20. OLT Nodes & Business Profile
     const singletonsBatch = writeBatch(db);
-    singletonsBatch.set(doc(db, COLLECTIONS.OLT_NODES, data.oltNode.id || 'primary_olt'), data.oltNode, { merge: true });
+    const nodesToUpload = data.oltNodes && data.oltNodes.length > 0 ? data.oltNodes : [data.oltNode];
+    nodesToUpload.forEach((node) => {
+      if (node && node.id) {
+        singletonsBatch.set(doc(db, COLLECTIONS.OLT_NODES, node.id), node, { merge: true });
+        totalUploaded++;
+      }
+    });
     singletonsBatch.set(doc(db, COLLECTIONS.BUSINESS_PROFILE, 'company_profile'), data.businessProfile, { merge: true });
+    totalUploaded++;
     await singletonsBatch.commit();
-    totalUploaded += 2;
 
     if (onProgress) onProgress('Cloud Firestore synchronization complete!', 100, 100);
 

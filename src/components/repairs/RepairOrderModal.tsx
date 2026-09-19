@@ -10,7 +10,7 @@ interface RepairOrderModalProps {
 }
 
 export const RepairOrderModal: React.FC<RepairOrderModalProps> = ({ orderToEdit, onClose }) => {
-  const { customers, addRepairOrder, updateRepairOrder, businessProfile } = useApp();
+  const { customers, addRepairOrder, updateRepairOrder, updateCustomer, businessProfile } = useApp();
 
   const isEditing = !!orderToEdit;
 
@@ -31,6 +31,12 @@ export const RepairOrderModal: React.FC<RepairOrderModalProps> = ({ orderToEdit,
   const [parts, setParts] = useState<RepairPart[]>(
     orderToEdit?.partsUsed || []
   );
+  const [opticalBefore, setOpticalBefore] = useState<string>(
+    orderToEdit?.opticalPowerBeforeDbm != null ? String(orderToEdit.opticalPowerBeforeDbm) : ''
+  );
+  const [opticalAfter, setOpticalAfter] = useState<string>(
+    orderToEdit?.opticalPowerAfterDbm != null ? String(orderToEdit.opticalPowerAfterDbm) : ''
+  );
 
   // New part temp state
   const [newPartName, setNewPartName] = useState('');
@@ -45,19 +51,28 @@ export const RepairOrderModal: React.FC<RepairOrderModalProps> = ({ orderToEdit,
       if (cust) {
         setCustomerName(cust.fullName);
         setContactNumber(cust.mobile);
-        setAddress(`${cust.address.street}, Brgy. ${cust.address.barangay}`);
+        setAddress(`${cust.address.street}, Brgy. ${cust.address.barangay}, ${cust.address.city}`);
       }
     }
   };
 
+  // Add Part
   const handleAddPart = () => {
-    if (!newPartName.trim() || newPartCost <= 0) return;
-    setParts((prev) => [...prev, { name: newPartName, cost: newPartCost, quantity: newPartQty }]);
+    if (!newPartName.trim() || newPartCost < 0 || newPartQty <= 0) return;
+
+    const newPart: RepairPart = {
+      name: newPartName.trim(),
+      cost: newPartCost,
+      quantity: newPartQty,
+    };
+
+    setParts([...parts, newPart]);
     setNewPartName('');
     setNewPartCost(0);
     setNewPartQty(1);
   };
 
+  // Remove Part
   const handleRemovePart = (index: number) => {
     setParts((prev) => prev.filter((_, i) => i !== index));
   };
@@ -73,6 +88,9 @@ export const RepairOrderModal: React.FC<RepairOrderModalProps> = ({ orderToEdit,
       return;
     }
 
+    const beforeNum = opticalBefore.trim() ? parseFloat(opticalBefore) : undefined;
+    const afterNum = opticalAfter.trim() ? parseFloat(opticalAfter) : undefined;
+
     if (isEditing && orderToEdit) {
       updateRepairOrder(orderToEdit.id, {
         customerId: customerId || undefined,
@@ -80,6 +98,8 @@ export const RepairOrderModal: React.FC<RepairOrderModalProps> = ({ orderToEdit,
         contactNumber,
         address,
         deviceType,
+        opticalPowerBeforeDbm: beforeNum,
+        opticalPowerAfterDbm: afterNum,
         issueDescription,
         diagnosisNotes,
         technician,
@@ -98,6 +118,8 @@ export const RepairOrderModal: React.FC<RepairOrderModalProps> = ({ orderToEdit,
         contactNumber,
         address,
         deviceType,
+        opticalPowerBeforeDbm: beforeNum,
+        opticalPowerAfterDbm: afterNum,
         issueDescription,
         diagnosisNotes,
         technician,
@@ -108,6 +130,39 @@ export const RepairOrderModal: React.FC<RepairOrderModalProps> = ({ orderToEdit,
         dateReceived: new Date().toISOString(),
         isPaid: false,
       });
+    }
+
+    // Auto-activate subscriber and sync optical power reading if job is completed
+    const targetCust = customers.find(
+      (c) =>
+        c.id === customerId ||
+        c.accountNo === customerId ||
+        (orderToEdit?.customerId && (c.id === orderToEdit.customerId || c.accountNo === orderToEdit.customerId))
+    );
+
+    if (targetCust) {
+      const isInstallationOrder =
+        targetCust.status === 'pending_install' ||
+        (orderToEdit?.orderNumber && orderToEdit.orderNumber.startsWith('INST-')) ||
+        issueDescription.toUpperCase().includes('INSTALLATION');
+
+      if ((status === 'completed' || status === 'resolved') && isInstallationOrder && targetCust.status === 'pending_install') {
+        updateCustomer(targetCust.id, {
+          status: 'active',
+          installationDate: new Date().toISOString().slice(0, 10),
+          network: {
+            ...targetCust.network,
+            ...(afterNum !== undefined && !isNaN(afterNum) ? { opticalPowerDbm: afterNum } : {}),
+          },
+        });
+      } else if (afterNum !== undefined && !isNaN(afterNum)) {
+        updateCustomer(targetCust.id, {
+          network: {
+            ...targetCust.network,
+            opticalPowerDbm: afterNum,
+          },
+        });
+      }
     }
 
     onClose();
@@ -185,28 +240,62 @@ export const RepairOrderModal: React.FC<RepairOrderModalProps> = ({ orderToEdit,
             </div>
 
             <div>
-              <label className="block text-slate-400 mb-1 font-medium">Device / Issue Category</label>
+              <label className="block text-slate-400 mb-1 font-medium">Issue / Trouble Category</label>
               <select
                 value={deviceType}
                 onChange={(e) => setDeviceType(e.target.value as any)}
-                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500"
+                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500 text-xs"
               >
-                <option value="ONU/Router">ONU / Fiber Modem</option>
-                <option value="Fiber Line Cut">Fiber Line Drop / Splicing</option>
-                <option value="Desktop/Laptop">Desktop / Laptop PC Repair</option>
-                <option value="Power Adapter">Power Adapter / Voltage Issue</option>
-                <option value="Switch/AP">Switch / Outdoor Access Point</option>
-                <option value="Other">Other Electronic Device</option>
+                <option value="ONU/Router">ONU / Optical Modem (No Power / Config)</option>
+                <option value="Fiber Line Cut">Fiber Drop Cable Cut / Splicing Needed</option>
+                <option value="Optical Signal Loss (LOS)">Optical Signal Loss (Red LOS / High dBm)</option>
+                <option value="NAP Box / Splitter Fault">NAP Box Port / Splitter Fault</option>
+                <option value="Power Adapter">Power Adapter / 12V Supply Issue</option>
+                <option value="Switch/AP">Mesh Extender / WiFi AP Fault</option>
+                <option value="Cable Relocation">Drop Cable Transfer / Room Relocation</option>
+                <option value="Other">Other NOC Trouble / Inquiry</option>
               </select>
             </div>
 
             <div>
-              <label className="block text-slate-400 mb-1 font-medium">Assigned Technician</label>
+              <label className="block text-slate-400 mb-1 font-medium">Assigned Lineman / Tech</label>
               <input
                 type="text"
                 value={technician}
                 onChange={(e) => setTechnician(e.target.value)}
                 className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500"
+              />
+            </div>
+          </div>
+
+          {/* Optical Power Telemetry (dBm) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-3 bg-slate-950/60 rounded-2xl border border-slate-800/80 text-xs">
+            <div>
+              <label className="block text-slate-400 mb-1 font-medium flex items-center justify-between">
+                <span>Optical Power Before (Rx dBm)</span>
+                <span className="text-[10px] text-slate-500 font-mono">e.g. -28.5 dBm</span>
+              </label>
+              <input
+                type="number"
+                step="any"
+                value={opticalBefore}
+                onChange={(e) => setOpticalBefore(e.target.value)}
+                placeholder="-28.5"
+                className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 font-mono text-xs focus:outline-none focus:border-cyan-500"
+              />
+            </div>
+            <div>
+              <label className="block text-slate-400 mb-1 font-medium flex items-center justify-between">
+                <span>Optical Power After (Rx dBm)</span>
+                <span className="text-[10px] text-emerald-400 font-mono">Target: -16 to -22 dBm</span>
+              </label>
+              <input
+                type="number"
+                step="any"
+                value={opticalAfter}
+                onChange={(e) => setOpticalAfter(e.target.value)}
+                placeholder="-18.2"
+                className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 font-mono text-xs focus:outline-none focus:border-cyan-500"
               />
             </div>
           </div>
@@ -218,7 +307,7 @@ export const RepairOrderModal: React.FC<RepairOrderModalProps> = ({ orderToEdit,
               required
               value={issueDescription}
               onChange={(e) => setIssueDescription(e.target.value)}
-              placeholder="Describe symptoms (e.g. Red LOS light blinking, drop wire severed by truck, laptop no power)..."
+              placeholder="Describe symptoms (e.g. Red LOS light blinking, drop wire severed by tree branch, high optical attenuation, ONU unconfigured)..."
               className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500"
             />
           </div>
@@ -229,7 +318,7 @@ export const RepairOrderModal: React.FC<RepairOrderModalProps> = ({ orderToEdit,
               rows={2}
               value={diagnosisNotes}
               onChange={(e) => setDiagnosisNotes(e.target.value)}
-              placeholder="Re-spliced with 2x SC connectors, replaced blown capacitor..."
+              placeholder="Action taken (e.g. Re-spliced drop cable with mechanical splice, replaced SC/UPC connector, re-seated port in NAP Box 03)..."
               className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500"
             />
           </div>

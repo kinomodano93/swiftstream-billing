@@ -29,13 +29,31 @@ import {
   Scissors,
   Wrench,
   FileSpreadsheet,
+  Trash2,
+  Ruler,
+  Waypoints,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { FiberCable, FiberClosure, GeoPoint, NapBox, NapPort, OltPopNode, Customer } from '../../types';
 import { formatCurrency, formatPhoneNumber } from '../../utils/formatters';
+import { RealLeafletMap, RealMapTileStyle } from './RealLeafletMap';
+import { OltRegistrationModal } from './OltRegistrationModal';
+import { isGoogleMapsConfigured } from '../../services/googleMapsService';
+import {
+  getOltToNapDistance,
+  getNapToNapDistance,
+  calculateSpanMetrics,
+} from '../../utils/geoDistance';
+import {
+  buildPonCascadeChain,
+  calculateCascadeTelemetry,
+  CascadeHopTelemetry,
+} from '../../utils/opticalBudget';
 
 interface FiberGisMapProps {
   onSelectCustomer?: (customerId: string) => void;
+  onDeployNapAtLocation?: (coords: { lat: number; lng: number }) => void;
+  onRegisterOltAtLocation?: (coords: { lat: number; lng: number }) => void;
 }
 
 // Bounding box for Lagonoy, Camarines Sur
@@ -73,25 +91,50 @@ const FIBER_COLOR_CODES = [
   { num: 12, name: 'Aqua / Cyan', hex: '#06b6d4', text: '#0f172a' },
 ];
 
-export const FiberGisMap: React.FC<FiberGisMapProps> = ({ onSelectCustomer }) => {
+export const FiberGisMap: React.FC<FiberGisMapProps> = ({
+  onSelectCustomer,
+  onDeployNapAtLocation,
+  onRegisterOltAtLocation,
+}) => {
   const {
     napBoxes,
     customers,
     fiberCables = [],
     fiberClosures = [],
+    oltNodes = [],
     oltNode,
+    businessProfile,
     addNapBox,
     addFiberCable,
     addFiberClosure,
     updateNapBox,
+    deleteNapBox,
   } = useApp();
+
+  const isGoogleAvailable = isGoogleMapsConfigured(businessProfile);
+
+  const effectiveOltNodes = oltNodes.length > 0 ? oltNodes : (oltNode ? [oltNode] : []);
+  const primaryOlt = effectiveOltNodes[0] || oltNode;
+
+  // OLT Filter state
+  const [selectedOltFilter, setSelectedOltFilter] = useState<string>('all');
+  const [editingOltId, setEditingOltId] = useState<string | null>(null);
+
+  const filteredNapBoxes = useMemo(() => {
+    if (selectedOltFilter === 'all') return napBoxes;
+    return napBoxes.filter(
+      (b) => b.oltId === selectedOltFilter || (!b.oltId && selectedOltFilter === effectiveOltNodes[0]?.id)
+    );
+  }, [napBoxes, selectedOltFilter, effectiveOltNodes]);
 
   // Map viewport transform state
   const [zoom, setZoom] = useState<number>(1);
   const [pan, setPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [dragStart, setDragStart] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
-  const [mapStyle, setMapStyle] = useState<'satellite' | 'dark_grid' | 'schematic'>('satellite');
+  const [mapStyle, setMapStyle] = useState<RealMapTileStyle | 'schematic'>(
+    isGoogleAvailable ? 'google_hybrid' : 'satellite'
+  );
 
   // Layer visibility toggles
   const [showOlt, setShowOlt] = useState<boolean>(true);
@@ -101,12 +144,18 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({ onSelectCustomer }) =>
   const [showClosures, setShowClosures] = useState<boolean>(true);
   const [showDropLines, setShowDropLines] = useState<boolean>(true);
   const [showCoverageRings, setShowCoverageRings] = useState<boolean>(true);
+  const [showSpanDistances, setShowSpanDistances] = useState<'all' | 'olt' | 'inter_nap' | 'none'>('all');
 
   // Selected asset for drawer inspection
   const [selectedAsset, setSelectedAsset] = useState<{
     type: 'olt' | 'nap' | 'cable' | 'closure' | 'customer';
     data: any;
   } | null>(null);
+  const [drawerInterNapTargetId, setDrawerInterNapTargetId] = useState<string>('');
+
+  // OLT Registration Modal state
+  const [showOltModal, setShowOltModal] = useState<boolean>(false);
+  const [oltModalCoords, setOltModalCoords] = useState<{ lat: number; lng: number } | null>(null);
 
   // OTDR Fault Simulation state
   const [showOtdrModal, setShowOtdrModal] = useState<boolean>(false);
@@ -235,20 +284,25 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({ onSelectCustomer }) =>
   // Export GeoJSON
   const handleExportGeoJson = () => {
     const features = [
-      // OLT Feature
-      {
+      // All OLT Headend Features
+      ...effectiveOltNodes.map((olt) => ({
         type: 'Feature',
         geometry: {
           type: 'Point',
-          coordinates: [oltNode.longitude, oltNode.latitude],
+          coordinates: [olt.longitude, olt.latitude],
         },
         properties: {
-          name: oltNode.name,
+          id: olt.id,
+          code: olt.code,
+          name: olt.name,
+          barangay: olt.barangay,
           type: 'OLT_HEADEND',
-          ponPorts: oltNode.totalPonPorts,
-          txPower: oltNode.txPowerDbm,
+          ponPorts: olt.totalPonPorts,
+          activePonPorts: olt.activePonPorts,
+          txPower: olt.txPowerDbm,
+          ipAddress: olt.ipAddress,
         },
-      },
+      })),
       // Cables
       ...fiberCables.map((c) => ({
         type: 'Feature',
@@ -371,29 +425,71 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({ onSelectCustomer }) =>
         <div className="flex items-center gap-2">
           {/* Map style selector */}
           <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-800">
+            {isGoogleAvailable ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setMapStyle('google_hybrid')}
+                  className={`px-3 py-1 rounded-lg font-medium transition-all flex items-center gap-1.5 ${
+                    mapStyle === 'google_hybrid' ? 'bg-cyan-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                  title="Google Hybrid: High-resolution aerial satellite photography with street names and municipal landmarks"
+                >
+                  <span>🛰️ Google Hybrid</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMapStyle('google_streets')}
+                  className={`px-3 py-1 rounded-lg font-medium transition-all flex items-center gap-1.5 ${
+                    mapStyle === 'google_streets' ? 'bg-cyan-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                  title="Google Streets: Official Google Maps road and highway vector map"
+                >
+                  <span>🛣️ Google Streets</span>
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setMapStyle('satellite')}
+                className={`px-3 py-1 rounded-lg font-medium transition-all ${
+                  mapStyle === 'satellite' ? 'bg-cyan-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                🛰️ Real Satellite
+              </button>
+            )}
             <button
-              onClick={() => setMapStyle('satellite')}
-              className={`px-3 py-1 rounded-lg font-medium transition-all ${
-                mapStyle === 'satellite' ? 'bg-cyan-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              🛰️ Satellite Hybrid
-            </button>
-            <button
+              type="button"
               onClick={() => setMapStyle('dark_grid')}
               className={`px-3 py-1 rounded-lg font-medium transition-all ${
                 mapStyle === 'dark_grid' ? 'bg-cyan-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
               }`}
+              title="CartoDB Dark Matter: High-contrast cyber NOC map for optical telemetry"
             >
-              🗺️ Cyber Grid
+              🌃 NOC Dark Map
             </button>
+            {isGoogleAvailable && (
+              <button
+                type="button"
+                onClick={() => setMapStyle('satellite')}
+                className={`px-3 py-1 rounded-lg font-medium transition-all ${
+                  mapStyle === 'satellite' ? 'bg-cyan-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
+                }`}
+                title="Esri World Imagery: Alternative aerial photography"
+              >
+                🛰️ Esri Aerial
+              </button>
+            )}
             <button
+              type="button"
               onClick={() => setMapStyle('schematic')}
               className={`px-3 py-1 rounded-lg font-medium transition-all ${
                 mapStyle === 'schematic' ? 'bg-cyan-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
               }`}
+              title="Topology Grid: Circuit schematic diagrams"
             >
-              📐 Topology
+              📐 Topology Grid
             </button>
           </div>
 
@@ -482,10 +578,70 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({ onSelectCustomer }) =>
           >
             📡 500m Zones
           </button>
+
+          {/* Span Distances Mode Selector */}
+          <div className="flex items-center gap-1.5 bg-slate-950 px-2 py-1 rounded-xl border border-cyan-900/60">
+            <Ruler className="w-3.5 h-3.5 text-cyan-400" />
+            <select
+              value={showSpanDistances}
+              onChange={(e) => setShowSpanDistances(e.target.value as any)}
+              className="bg-transparent text-cyan-300 text-[11px] font-medium focus:outline-none cursor-pointer"
+            >
+              <option value="all" className="bg-slate-900 text-slate-200">
+                📏 All Spans (OLT & Inter-NAP)
+              </option>
+              <option value="olt" className="bg-slate-900 text-slate-200">
+                🏢 OLT-to-NAP Feeder Spans
+              </option>
+              <option value="inter_nap" className="bg-slate-900 text-slate-200">
+                📦 Inter-NAP Hop Spans
+              </option>
+              <option value="none" className="bg-slate-900 text-slate-400">
+                🚫 Hide Span Distances
+              </option>
+            </select>
+          </div>
+
+          {/* Serving OLT Scope Filter */}
+          <div className="flex items-center gap-1.5 bg-slate-950 px-2 py-1 rounded-xl border border-purple-900/60">
+            <Server className="w-3.5 h-3.5 text-purple-400" />
+            <select
+              value={selectedOltFilter}
+              onChange={(e) => setSelectedOltFilter(e.target.value)}
+              className="bg-transparent text-slate-200 text-[11px] font-medium focus:outline-none cursor-pointer"
+            >
+              <option value="all" className="bg-slate-900 text-slate-200">
+                🌐 All OLT POPs ({napBoxes.length} NAPs)
+              </option>
+              {effectiveOltNodes.map((olt) => {
+                const count = napBoxes.filter(
+                  (b) => b.oltId === olt.id || (!b.oltId && olt.id === effectiveOltNodes[0]?.id)
+                ).length;
+                return (
+                  <option key={olt.id} value={olt.id} className="bg-slate-900 text-slate-200">
+                    🏢 {olt.code || 'OLT'} - {olt.name} ({count} NAPs)
+                  </option>
+                );
+              })}
+            </select>
+          </div>
         </div>
 
         {/* Right: OSP Diagnostic Tools */}
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              setOltModalCoords(null);
+              setEditingOltId(selectedOltFilter !== 'all' ? selectedOltFilter : null);
+              setShowOltModal(true);
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-600/30 hover:bg-purple-600/40 text-purple-200 border border-purple-500/50 rounded-xl font-semibold transition-all shadow-sm"
+            title="Register & Configure OLT Headends"
+          >
+            <Server className="w-3.5 h-3.5 text-purple-300" />
+            <span>Configure OLTs ({effectiveOltNodes.length})</span>
+          </button>
+
           <button
             onClick={() => setShowOtdrModal(true)}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl font-semibold shadow-md shadow-rose-600/20 transition-all"
@@ -515,9 +671,41 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({ onSelectCustomer }) =>
 
       {/* Interactive Map & Side Inspector Layout */}
       <div className="relative rounded-3xl overflow-hidden border border-slate-800 bg-slate-950 shadow-2xl h-[620px] flex">
-        {/* SVG GIS Canvas */}
-        <div
-          className="flex-1 h-full cursor-grab active:cursor-grabbing overflow-hidden relative select-none"
+        {mapStyle !== 'schematic' ? (
+          <div className="flex-1 h-full relative">
+            <RealLeafletMap
+              oltNode={primaryOlt}
+              oltNodes={effectiveOltNodes}
+              napBoxes={filteredNapBoxes}
+              fiberCables={fiberCables}
+              fiberClosures={fiberClosures}
+              customers={customers}
+              selectedAsset={selectedAsset}
+              onSelectAsset={setSelectedAsset}
+              onSelectCustomer={onSelectCustomer}
+              onDeployNapAtLocation={onDeployNapAtLocation}
+              onRegisterOltAtLocation={(coords) => {
+                setOltModalCoords(coords);
+                setEditingOltId(null);
+                setShowOltModal(true);
+              }}
+              activeOtdrBreak={activeOtdrBreak}
+              mapTileStyle={mapStyle}
+              googleMapsApiKey={businessProfile?.apiKeys?.googleMapsApiKey}
+              showOlt={showOlt}
+              showFeeder={showFeeder}
+              showDistribution={showDistribution}
+              showNaps={showNaps}
+              showClosures={showClosures}
+              showDropLines={showDropLines}
+              showCoverageRings={showCoverageRings}
+              showSpanDistances={showSpanDistances}
+            />
+          </div>
+        ) : (
+          /* SVG GIS Canvas (Topology Schematic Mode) */
+          <div
+            className="flex-1 h-full cursor-grab active:cursor-grabbing overflow-hidden relative select-none"
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
@@ -535,7 +723,7 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({ onSelectCustomer }) =>
               style={{ transformOrigin: 'center center' }}
             >
               {/* Background Theme & Grid */}
-              <rect width={SVG_WIDTH} height={SVG_HEIGHT} fill={mapStyle === 'satellite' ? '#090d16' : '#030712'} />
+              <rect width={SVG_WIDTH} height={SVG_HEIGHT} fill="#030712" />
 
               {/* Grid Lines */}
               <defs>
@@ -667,6 +855,96 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({ onSelectCustomer }) =>
                       />
                     </g>
                   );
+                })}
+
+              {/* Cascaded Daisy-Chain Spans & Distance Pills (SVG Schematic Mode) */}
+              {showSpanDistances !== 'none' &&
+                effectiveOltNodes.map((olt) => {
+                  const linkedNaps = napBoxes.filter(
+                    (b) => b.oltId === olt.id || (!b.oltId && olt.id === effectiveOltNodes[0]?.id)
+                  );
+                  const ponGroups = new Map<number, NapBox[]>();
+                  linkedNaps.forEach((nap) => {
+                    const port = nap.ponPortNumber || 1;
+                    if (!ponGroups.has(port)) ponGroups.set(port, []);
+                    ponGroups.get(port)!.push(nap);
+                  });
+
+                  const ponColors = ['#06b6d4', '#10b981', '#a855f7', '#f59e0b', '#ec4899', '#3b82f6'];
+
+                  return Array.from(ponGroups.entries()).map(([ponPort, napsOnPon]) => {
+                    const chain = buildPonCascadeChain(napsOnPon, olt);
+                    const telemetryList = calculateCascadeTelemetry(chain, olt);
+                    const baseColor = ponColors[(ponPort - 1) % ponColors.length];
+
+                    return telemetryList.map((hop) => {
+                      const { nap, hopSpan, isFeeder } = hop;
+                      const shouldRender =
+                        showSpanDistances === 'all' ||
+                        (isFeeder && showSpanDistances === 'olt') ||
+                        (!isFeeder && showSpanDistances === 'inter_nap');
+
+                      if (!shouldRender) return null;
+
+                      const fromPt = projectGeoToSvg(hop.upstreamCoords.lat, hop.upstreamCoords.lng);
+                      const toPt = projectGeoToSvg(nap.latitude, nap.longitude);
+                      const midX = (fromPt.x + toPt.x) / 2;
+                      const midY = (fromPt.y + toPt.y) / 2;
+
+                      const isNapSelected = selectedAsset?.type === 'nap' && selectedAsset.data.id === nap.id;
+                      const isUpstreamSelected =
+                        selectedAsset?.type === 'nap' && selectedAsset.data.id === hop.upstreamId;
+                      const isOltSelected = selectedAsset?.type === 'olt' && selectedAsset.data.id === olt.id;
+                      const isHighlighted = isNapSelected || isUpstreamSelected || isOltSelected;
+
+                      const strokeColor = isHighlighted ? '#fbbf24' : baseColor;
+
+                      return (
+                        <g
+                          key={`svg-cascade-${olt.id}-p${ponPort}-${nap.id}`}
+                          className="cursor-pointer"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedAsset({ type: 'nap', data: nap });
+                          }}
+                        >
+                          <line
+                            x1={fromPt.x}
+                            y1={fromPt.y}
+                            x2={toPt.x}
+                            y2={toPt.y}
+                            stroke={strokeColor}
+                            strokeWidth={isHighlighted ? '3' : isFeeder ? '2' : '1.5'}
+                            strokeDasharray={isHighlighted ? undefined : isFeeder ? undefined : '5 4'}
+                            strokeOpacity={isHighlighted ? 1 : 0.75}
+                          />
+                          {/* Midpoint Pill */}
+                          <g transform={`translate(${midX}, ${midY})`}>
+                            <rect
+                              x="-28"
+                              y="-9"
+                              width="56"
+                              height="18"
+                              rx="9"
+                              fill="#090d16"
+                              stroke={strokeColor}
+                              strokeWidth="1.2"
+                            />
+                            <text
+                              textAnchor="middle"
+                              dy="3.5"
+                              fill={isHighlighted ? '#fbbf24' : '#f8fafc'}
+                              fontSize="8.5"
+                              fontFamily="monospace"
+                              fontWeight="bold"
+                            >
+                              {isFeeder ? '📏' : '⚡'}{hopSpan.directMeters >= 1000 ? `${hopSpan.directKm}k` : `${hopSpan.directMeters}m`}
+                            </text>
+                          </g>
+                        </g>
+                      );
+                    });
+                  });
                 })}
 
               {/* Fiber Cables Polyline Paths */}
@@ -807,28 +1085,44 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({ onSelectCustomer }) =>
                   );
                 })}
 
-              {/* Central Office / OLT Headend Node */}
-              {showOlt && (
-                <g
-                  transform={`translate(${projectGeoToSvg(oltNode.latitude, oltNode.longitude).x}, ${
-                    projectGeoToSvg(oltNode.latitude, oltNode.longitude).y
-                  })`}
-                  className="cursor-pointer group"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setSelectedAsset({ type: 'olt', data: oltNode });
-                  }}
-                >
-                  <circle r="22" fill="#06b6d4" fillOpacity="0.2" stroke="#06b6d4" strokeWidth="2" className="animate-ping" />
-                  <circle r="16" fill="#0284c7" stroke="#ffffff" strokeWidth="2" />
-                  <text x="0" y="4" textAnchor="middle" fill="#ffffff" fontSize="11" fontWeight="bold">
-                    OLT
-                  </text>
-                  <text x="0" y="30" textAnchor="middle" fill="#38bdf8" fontSize="11" fontWeight="bold">
-                    SWIFTSTREAM NOC
-                  </text>
-                </g>
-              )}
+              {/* Central Office / OLT Headend Nodes */}
+              {showOlt &&
+                effectiveOltNodes.map((node) => {
+                  const svgPt = projectGeoToSvg(node.latitude, node.longitude);
+                  const isSel = selectedAsset?.type === 'olt' && selectedAsset?.data?.id === node.id;
+                  return (
+                    <g
+                      key={node.id}
+                      transform={`translate(${svgPt.x}, ${svgPt.y})`}
+                      className="cursor-pointer group"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedAsset({ type: 'olt', data: node });
+                      }}
+                    >
+                      <circle
+                        r="22"
+                        fill={isSel ? '#ec4899' : '#06b6d4'}
+                        fillOpacity="0.2"
+                        stroke={isSel ? '#ec4899' : '#06b6d4'}
+                        strokeWidth="2"
+                        className="animate-ping"
+                      />
+                      <circle
+                        r="16"
+                        fill={isSel ? '#db2777' : '#0284c7'}
+                        stroke="#ffffff"
+                        strokeWidth="2"
+                      />
+                      <text x="0" y="4" textAnchor="middle" fill="#ffffff" fontSize="10" fontWeight="bold">
+                        {node.code || 'OLT'}
+                      </text>
+                      <text x="0" y="28" textAnchor="middle" fill="#38bdf8" fontSize="10" fontWeight="bold">
+                        {node.name.split(' ')[0]}
+                      </text>
+                    </g>
+                  );
+                })}
 
               {/* Active OTDR Fiber Break Alert Beacon */}
               {activeOtdrBreak && (
@@ -857,10 +1151,11 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({ onSelectCustomer }) =>
             </div>
             <div className="border-l border-slate-700 pl-3 flex items-center gap-1.5">
               <div className="w-8 h-1 bg-cyan-400 rounded-full" />
-              <span>500 Meters</span>
+              <span>500 Meters (Topology Grid)</span>
             </div>
           </div>
         </div>
+      )}
 
         {/* Slide-out Side Asset Inspector Drawer */}
         {selectedAsset && (
@@ -901,17 +1196,199 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({ onSelectCustomer }) =>
                     <h3 className="text-sm font-bold text-slate-100">{selectedAsset.data.name}</h3>
                     <p className="text-[11px] text-cyan-400 font-mono">{selectedAsset.data.code}</p>
                     <p className="text-slate-400 mt-1">{selectedAsset.data.location}, Brgy. {selectedAsset.data.barangay}</p>
-                  </div>
 
-                  <div className="grid grid-cols-2 gap-2 text-[11px]">
-                    <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
-                      <span className="text-slate-500 block text-[10px]">Splitter Type</span>
-                      <span className="font-bold text-slate-200">{selectedAsset.data.splitterType}</span>
-                    </div>
-                    <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
-                      <span className="text-slate-500 block text-[10px]">Optical Rx Power</span>
-                      <span className="font-bold text-emerald-400 font-mono">{selectedAsset.data.opticalInputPowerDbm || -8.4} dBm</span>
-                    </div>
+                    {/* Cascade Hierarchy, Upstream Feed & Optical Waterfall Telemetry */}
+                    {(() => {
+                      const parentOlt =
+                        effectiveOltNodes.find(
+                          (o) => o.id === selectedAsset.data.oltId || (!selectedAsset.data.oltId && o.id === effectiveOltNodes[0]?.id)
+                        ) || effectiveOltNodes[0] || primaryOlt;
+
+                      const ponPort = selectedAsset.data.ponPortNumber || 1;
+                      const napsOnPon = parentOlt
+                        ? napBoxes.filter(
+                            (b) =>
+                              (b.oltId === parentOlt.id || (!b.oltId && parentOlt.id === effectiveOltNodes[0]?.id)) &&
+                              (b.ponPortNumber || 1) === ponPort
+                          )
+                        : [];
+
+                      const chain = parentOlt ? buildPonCascadeChain(napsOnPon, parentOlt) : [];
+                      const telemetryList = parentOlt ? calculateCascadeTelemetry(chain, parentOlt) : [];
+                      const currentHop = telemetryList.find((h) => h.nap.id === selectedAsset.data.id);
+
+                      // Upstream and downstream nodes in cascade
+                      const currentIdx = chain.findIndex((b) => b.id === selectedAsset.data.id);
+                      const upstreamNap = currentIdx > 0 ? chain[currentIdx - 1] : null;
+                      const downstreamNap = currentIdx >= 0 && currentIdx < chain.length - 1 ? chain[currentIdx + 1] : null;
+
+                      return (
+                        <div className="space-y-3">
+                          {/* Cascade Hierarchy & Upstream Node Card */}
+                          <div className="mt-2.5 p-3 rounded-2xl bg-purple-950/40 border border-purple-800/60 space-y-2.5">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <span className="p-1.5 rounded-lg bg-purple-900/60 text-purple-300 font-bold font-mono text-[10px] border border-purple-700/50">
+                                  {currentHop ? (currentHop.isFeeder ? 'Hop #1 (Feeder)' : `Hop #${currentHop.hopIndex} of ${currentHop.totalHops}`) : 'Standalone'}
+                                </span>
+                                <div>
+                                  <span className="text-[10px] text-purple-300 font-semibold block">Serving PON Trunk</span>
+                                  <span className="text-slate-200 font-bold text-xs font-mono">
+                                    {parentOlt?.code || 'OLT-01'} • PON Port #{ponPort}
+                                  </span>
+                                </div>
+                              </div>
+                              <span className="px-2 py-0.5 rounded-full bg-slate-900 text-cyan-300 border border-slate-700 text-[10px] font-mono font-bold">
+                                {currentHop?.fbtRatio === 'terminal' ? '100% Terminal' : `${currentHop?.fbtRatio || '85/15'} FBT`}
+                              </span>
+                            </div>
+
+                            {/* Feed Source Details */}
+                            <div className="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800/80 space-y-1.5 text-[11px] font-mono">
+                              <div className="flex items-center justify-between">
+                                <span className="text-slate-400">Direct Feed Parent:</span>
+                                <span className="text-purple-300 font-bold flex items-center gap-1">
+                                  {currentHop?.isFeeder ? (
+                                    <>
+                                      <Server className="w-3 h-3 text-purple-400" />
+                                      <span>{parentOlt?.code || 'OLT'} (POP Central)</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Radio className="w-3 h-3 text-cyan-400" />
+                                      <span>{currentHop?.upstreamName || 'Upstream NAP'}</span>
+                                    </>
+                                  )}
+                                </span>
+                              </div>
+
+                              {currentHop && (
+                                <>
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-slate-400">Hop Span Distance:</span>
+                                    <span className="text-cyan-300 font-bold">
+                                      {currentHop.hopSpan.formattedDirect}
+                                      <span className="text-slate-500 text-[10px] font-normal ml-1">
+                                        (Cable: {currentHop.hopSpan.formattedRoute})
+                                      </span>
+                                    </span>
+                                  </div>
+
+                                  <div className="flex items-center justify-between pt-1 border-t border-slate-900">
+                                    <span className="text-slate-400">Total Run from OLT:</span>
+                                    <span className="text-purple-300 font-bold">
+                                      {currentHop.cumulativeDirectMeters.toLocaleString()}m
+                                      <span className="text-slate-500 text-[10px] font-normal ml-1">
+                                        (Cable: {currentHop.cumulativeCableMeters.toLocaleString()}m)
+                                      </span>
+                                    </span>
+                                  </div>
+                                </>
+                              )}
+                            </div>
+
+                            {/* Cascade Traversal Buttons */}
+                            <div className="flex items-center gap-2 pt-1">
+                              {upstreamNap ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedAsset({ type: 'nap', data: upstreamNap })}
+                                  className="flex-1 py-1 px-2 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 text-[10px] font-semibold flex items-center justify-center gap-1 transition-colors"
+                                >
+                                  <span>← Upstream</span>
+                                  <span className="text-cyan-400 font-mono">({upstreamNap.code})</span>
+                                </button>
+                              ) : parentOlt ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedAsset({ type: 'olt', data: parentOlt })}
+                                  className="flex-1 py-1 px-2 rounded-lg bg-purple-950/60 hover:bg-purple-900/60 border border-purple-800/60 text-purple-200 text-[10px] font-semibold flex items-center justify-center gap-1 transition-colors"
+                                >
+                                  <Server className="w-3 h-3 text-purple-400" />
+                                  <span>Inspect Serving OLT</span>
+                                </button>
+                              ) : null}
+
+                              {downstreamNap && (
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedAsset({ type: 'nap', data: downstreamNap })}
+                                  className="flex-1 py-1 px-2 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 text-[10px] font-semibold flex items-center justify-center gap-1 transition-colors"
+                                >
+                                  <span>Downstream →</span>
+                                  <span className="text-emerald-400 font-mono">({downstreamNap.code})</span>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Optical Power & Splitter Waterfall Card */}
+                          {currentHop && (
+                            <div className="p-3 rounded-2xl bg-slate-950 border border-slate-800 space-y-2.5">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px] uppercase tracking-wider font-bold text-slate-400 flex items-center gap-1">
+                                  <Zap className="w-3.5 h-3.5 text-amber-400" />
+                                  <span>Optical Power & Splitter Waterfall</span>
+                                </span>
+                                <span
+                                  className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                                    currentHop.healthStatus === 'optimal'
+                                      ? 'bg-emerald-950/80 text-emerald-400 border-emerald-800/50'
+                                      : currentHop.healthStatus === 'acceptable'
+                                      ? 'bg-cyan-950/80 text-cyan-300 border-cyan-800/50'
+                                      : 'bg-amber-950/80 text-amber-400 border-amber-800/50'
+                                  }`}
+                                >
+                                  {currentHop.healthLabel}
+                                </span>
+                              </div>
+
+                              <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
+                                <div className="p-2 rounded-xl bg-slate-900/90 border border-slate-800">
+                                  <span className="text-slate-500 block text-[10px]">Arriving Input</span>
+                                  <span className="font-bold text-cyan-300 text-sm">{currentHop.arrivingInputPowerDbm} dBm</span>
+                                  <span className="text-[9px] text-slate-500 block mt-0.5">Fiber Loss: -{currentHop.hopFiberLossDb} dB</span>
+                                </div>
+
+                                <div className="p-2 rounded-xl bg-slate-900/90 border border-slate-800">
+                                  <span className="text-slate-500 block text-[10px]">Subscriber Drop Rx</span>
+                                  <span
+                                    className={`font-bold text-sm ${
+                                      currentHop.healthStatus === 'optimal'
+                                        ? 'text-emerald-400'
+                                        : currentHop.healthStatus === 'acceptable'
+                                        ? 'text-cyan-300'
+                                        : 'text-amber-400'
+                                    }`}
+                                  >
+                                    {currentHop.dropPortRxPowerDbm} dBm
+                                  </span>
+                                  <span className="text-[9px] text-slate-500 block mt-0.5">PLC Loss: -{currentHop.plcLossDb} dB</span>
+                                </div>
+                              </div>
+
+                              {/* Splitter Specs Grid */}
+                              <div className="p-2.5 rounded-xl bg-slate-900/60 border border-slate-800/70 grid grid-cols-2 gap-2 text-[10px]">
+                                <div>
+                                  <span className="text-slate-400 block font-medium">FBT Coupler Leg</span>
+                                  <span className="text-amber-300 font-mono font-bold">
+                                    {currentHop.isTerminal ? 'None (100% Direct)' : `${currentHop.fbtRatio} (Tap -${currentHop.fbtTapLossDb} dB)`}
+                                  </span>
+                                </div>
+                                <div>
+                                  <span className="text-slate-400 block font-medium">Trunk Through Out</span>
+                                  <span className="text-slate-200 font-mono font-bold">
+                                    {currentHop.throughOutputPowerDbm !== null
+                                      ? `${currentHop.throughOutputPowerDbm} dBm (-${currentHop.fbtThroughLossDb}dB)`
+                                      : 'Terminal (End of Run)'}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   {/* Ports Grid */}
@@ -958,6 +1435,79 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({ onSelectCustomer }) =>
                           </div>
                         ))}
                     </div>
+                  </div>
+
+                  {/* Inter-NAP Hop Spans (Box to Box) */}
+                  <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-cyan-300 font-bold uppercase tracking-wider flex items-center gap-1">
+                        <Waypoints className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>Inter-NAP Hop Span</span>
+                      </span>
+                      <span className="text-[10px] text-slate-500 font-mono">Box to Box</span>
+                    </div>
+
+                    <select
+                      value={drawerInterNapTargetId}
+                      onChange={(e) => setDrawerInterNapTargetId(e.target.value)}
+                      className="w-full px-2 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-slate-200 text-[11px] font-mono focus:outline-none focus:border-cyan-500"
+                    >
+                      <option value="">-- Measure span to another NAP box --</option>
+                      {napBoxes
+                        .filter((b) => b.id !== selectedAsset.data.id)
+                        .map((b) => (
+                          <option key={b.id} value={b.id}>
+                            {b.code} - {b.name} (Brgy. {b.barangay})
+                          </option>
+                        ))}
+                    </select>
+
+                    {drawerInterNapTargetId && (() => {
+                      const targetNap = napBoxes.find((b) => b.id === drawerInterNapTargetId);
+                      if (!targetNap) return null;
+                      const span = getNapToNapDistance(selectedAsset.data, targetNap);
+                      return (
+                        <div className="p-2.5 rounded-lg bg-cyan-950/40 border border-cyan-800/50 space-y-1.5 font-mono text-[11px]">
+                          <div className="flex items-center justify-between">
+                            <span className="text-cyan-300 font-bold">Direct Distance:</span>
+                            <span className="text-white font-bold">{span.formattedDirect}</span>
+                          </div>
+                          <div className="flex items-center justify-between text-[10px]">
+                            <span className="text-slate-400">Est. Cable (+20%):</span>
+                            <span className="text-cyan-400 font-semibold">{span.formattedRoute}</span>
+                          </div>
+                          <div className="flex items-center justify-between text-[10px] pt-1 border-t border-cyan-900/50">
+                            <span className="text-slate-500">Optical Loss (@ 1310nm):</span>
+                            <span className="text-emerald-400 font-bold">~{span.opticalLossDb} dB</span>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+
+                  {/* Action Buttons: Delete NAP Box */}
+                  <div className="pt-2 border-t border-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const box = selectedAsset.data as NapBox;
+                        const connectedSubs = customers.filter(
+                          (c) => c.network?.napBoxId === box.id || box.ports?.some((p: NapPort) => p.customerId === c.id)
+                        );
+                        const confirmMsg = connectedSubs.length > 0
+                          ? `WARNING: NAP Box "${box.code} - ${box.name}" has ${connectedSubs.length} subscriber(s) connected.\n\nDeleting this box will disconnect these subscribers in the network database. Proceed?`
+                          : `Are you sure you want to permanently delete NAP Box "${box.code} - ${box.name}"?`;
+
+                        if (window.confirm(confirmMsg)) {
+                          deleteNapBox(box.id);
+                          setSelectedAsset(null);
+                        }
+                      }}
+                      className="w-full py-2 px-3 rounded-xl bg-rose-950/60 hover:bg-rose-900/80 border border-rose-800/60 text-rose-300 font-bold text-xs flex items-center justify-center gap-2 transition-colors shadow-sm"
+                    >
+                      <Trash2 className="w-4 h-4 text-rose-400" />
+                      <span>Delete NAP Box ({selectedAsset.data.code})</span>
+                    </button>
                   </div>
                 </div>
               )}
@@ -1075,6 +1625,149 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({ onSelectCustomer }) =>
                   )}
                 </div>
               )}
+
+              {/* Inspector Content: Central OLT Headend */}
+              {selectedAsset.type === 'olt' && (() => {
+                const oltData = selectedAsset.data;
+                const linkedNaps = napBoxes.filter(
+                  (b) => b.oltId === oltData.id || (!b.oltId && oltData.id === effectiveOltNodes[0]?.id)
+                );
+                const linkedSubsCount = linkedNaps.reduce(
+                  (acc, b) => acc + (b.ports?.filter((p) => p.status === 'occupied').length || 0),
+                  0
+                );
+                const totalPortsCount = linkedNaps.reduce((acc, b) => acc + (b.totalPorts || 16), 0);
+
+                return (
+                  <div className="space-y-4">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="px-2 py-0.5 rounded-md bg-purple-950 text-purple-300 border border-purple-800 text-[10px] font-bold uppercase tracking-wider font-mono">
+                          {oltData.code || 'POP Headend'}
+                        </span>
+                        <span className="px-2 py-0.5 rounded-md bg-emerald-950 text-emerald-300 border border-emerald-800 text-[10px] font-bold">
+                          Online Active
+                        </span>
+                      </div>
+                      <h3 className="text-sm font-bold text-slate-100 mt-2">{oltData.name}</h3>
+                      <p className="text-slate-400 text-[11px] mt-0.5">
+                        {oltData.location}, Brgy. {oltData.barangay}
+                      </p>
+                      <div className="mt-1 flex items-center gap-1 font-mono text-[10px] text-cyan-400">
+                        <MapPin className="w-3 h-3" />
+                        <span>
+                          {oltData.latitude?.toFixed(4)}° N, {oltData.longitude?.toFixed(4)}° E
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 text-[11px]">
+                      <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                        <span className="text-slate-500 block text-[10px]">Total PON Ports</span>
+                        <span className="font-bold text-slate-200 font-mono">
+                          {oltData.totalPonPorts || 16} SFP Ports
+                        </span>
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                        <span className="text-slate-500 block text-[10px]">Optical Tx Power</span>
+                        <span className="font-bold text-emerald-400 font-mono">
+                          +{oltData.txPowerDbm || 4.5} dBm
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 text-[11px]">
+                      <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                        <span className="text-slate-500 block text-[10px]">Management IP</span>
+                        <span className="font-bold text-cyan-300 font-mono">
+                          {oltData.ipAddress || '192.168.88.1'}
+                        </span>
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                        <span className="text-slate-500 block text-[10px]">Downstream NAPs</span>
+                        <span className="font-bold text-purple-300 font-mono">
+                          {linkedNaps.length} Boxes ({linkedSubsCount}/{totalPortsCount} subs)
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Linked NAP Boxes List */}
+                    <div>
+                      <span className="font-bold text-slate-300 block mb-2">
+                        Connected NAP Distribution Hubs ({linkedNaps.length})
+                      </span>
+                      {linkedNaps.length === 0 ? (
+                        <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 text-center text-slate-500 text-[11px]">
+                          No NAP boxes currently assigned to this OLT.
+                        </div>
+                      ) : (
+                        <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                          {linkedNaps.map((box) => {
+                            const occupied = box.ports.filter((p) => p.status === 'occupied').length;
+                            const oltSpan = getOltToNapDistance(oltData, box);
+                            return (
+                              <div
+                                key={box.id}
+                                onClick={() => setSelectedAsset({ type: 'nap', data: box })}
+                                className="p-2 rounded-xl bg-slate-950 border border-slate-800/80 hover:border-purple-500/50 cursor-pointer flex items-center justify-between group transition-colors"
+                              >
+                                <div>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="font-bold text-slate-200 text-[11px] group-hover:text-purple-300">
+                                      {box.code}
+                                    </span>
+                                    <span className="text-[9px] px-1 rounded bg-purple-950/80 text-purple-300 font-mono">
+                                      PON #{box.ponPortNumber || 1}
+                                    </span>
+                                  </div>
+                                  <span className="text-[10px] text-slate-400 block truncate max-w-[170px]">
+                                    {box.name} • Brgy. {box.barangay}
+                                  </span>
+                                </div>
+                                <div className="text-right">
+                                  <span className="font-mono text-[10px] text-emerald-400 font-bold block">
+                                    {occupied}/{box.totalPorts}
+                                  </span>
+                                  <span
+                                    className="font-mono text-[9px] text-cyan-400 flex items-center justify-end gap-0.5"
+                                    title={`Direct span: ${oltSpan.formattedDirect} | Est. Cable Route: ${oltSpan.formattedRoute} (~${oltSpan.opticalLossDb} dB)`}
+                                  >
+                                    <Ruler className="w-2.5 h-2.5" />
+                                    <span>{oltSpan.formattedDirect}</span>
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
+                      <span className="text-slate-500 block text-[10px] uppercase font-bold">
+                        Facility & Power Backup
+                      </span>
+                      <p className="text-slate-300 text-[11px]">
+                        {oltData.notes ||
+                          'Optical POP headend with redundant utility grid & UPS battery bank.'}
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOltModalCoords(null);
+                        setEditingOltId(oltData.id);
+                        setShowOltModal(true);
+                      }}
+                      className="w-full py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl font-semibold transition-all shadow-md flex items-center justify-center gap-2"
+                    >
+                      <Server className="w-4 h-4" />
+                      <span>Configure / Edit OLT Coordinates</span>
+                    </button>
+                  </div>
+                );
+              })()}
             </div>
           </div>
         )}
@@ -1244,6 +1937,17 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({ onSelectCustomer }) =>
           </div>
         </div>
       )}
+
+      {/* OLT Registration & Coordinates Modal */}
+      <OltRegistrationModal
+        isOpen={showOltModal}
+        onClose={() => {
+          setShowOltModal(false);
+          setEditingOltId(null);
+        }}
+        initialCoords={oltModalCoords}
+        editingOltId={editingOltId}
+      />
     </div>
   );
 };

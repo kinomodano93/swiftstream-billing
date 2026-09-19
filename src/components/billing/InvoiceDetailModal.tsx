@@ -398,6 +398,10 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                         {businessProfile.paymentGateways.gcashName ? ` (${businessProfile.paymentGateways.gcashName})` : ''}
                       </p>
                     )}
+                    <p>
+                      <strong className="text-cyan-400 print:text-cyan-800">Online Checkout:</strong>{' '}
+                      Xendit Gateway (GCash, Maya, Cards, QR Ph) via Client Portal
+                    </p>
                     {businessProfile.paymentGateways.mayaNumber && (
                       <p>
                         <strong className="text-emerald-400 print:text-emerald-800">Maya:</strong>{' '}

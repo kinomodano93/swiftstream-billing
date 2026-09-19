@@ -30,6 +30,7 @@ export const ClientApplicationManager: React.FC = () => {
     customers,
     addCustomer,
     updateCustomer,
+    addRepairOrder,
   } = useApp();
 
   // Clean online applications state with persistent local storage
@@ -214,6 +215,29 @@ export const ClientApplicationManager: React.FC = () => {
       }
     }
 
+    // Automatically dispatch technical installation work order for lineman / field crew
+    const orderNum = `INST-${new Date().getFullYear().toString().slice(2)}${String(
+      new Date().getMonth() + 1
+    ).padStart(2, '0')}-${String(Math.floor(100 + Math.random() * 900))}`;
+
+    addRepairOrder({
+      orderNumber: orderNum,
+      customerId: targetAccountNo,
+      customerName: app.applicantName,
+      contactNumber: app.phone,
+      address: `${app.address}, Brgy. ${app.barangay}, ${app.city}`,
+      deviceType: 'ONU/Router',
+      issueDescription: `NEW SUBSCRIBER INSTALLATION: ${plan?.name || 'Fiber Plan'}. Run fiber drop cable from NAP ${assignedNap?.name || assignedNap?.code || 'Assigned Box'}, splice drop wire, mount ONU/Router, measure optical signal Rx (dBm), and verify PPPoE connectivity.`,
+      diagnosisNotes: `Online Application #${app.applicationNumber} approved. Scheduled survey/install: ${app.surveyDate || 'Immediate'}. Notes: ${app.notes || 'None'}.`,
+      technician: app.assignedTechnician || 'Leonardo Flojo (IT Lead)',
+      partsUsed: [],
+      laborCost: 0,
+      totalCost: 0,
+      status: 'received',
+      dateReceived: new Date().toISOString().slice(0, 10),
+      isPaid: false,
+    });
+
     const approvedApp: OnlineApplication = {
       ...app,
       status: 'approved',
@@ -225,6 +249,7 @@ export const ClientApplicationManager: React.FC = () => {
       setSelectedApp(approvedApp);
     }
     showToast(`Approved! Subscriber account created for ${app.applicantName}. Ready for installation.`);
+    showToast(`Approved! Account ${targetAccountNo} created & Work Order #${orderNum} dispatched.`);
   };
 
   const handleScheduleSurvey = (app: OnlineApplication) => {

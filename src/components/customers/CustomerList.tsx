@@ -33,6 +33,39 @@ import {
   PppoeActiveSessionItem,
 } from '../../services/mikrotikApiService';
 
+const getOpticalPowerBadge = (dbm?: number) => {
+  if (dbm === undefined || dbm === null || isNaN(dbm)) {
+    return {
+      text: 'Awaiting OPM',
+      statusText: '',
+      badgeClass: 'bg-slate-800/80 text-slate-400 border-slate-700/60',
+      dotClass: 'bg-slate-500',
+    };
+  }
+  if (dbm >= -24 && dbm <= -15) {
+    return {
+      text: `${dbm} dBm`,
+      statusText: 'Optimal',
+      badgeClass: 'bg-emerald-950/80 text-emerald-400 border-emerald-800/60',
+      dotClass: 'bg-emerald-400',
+    };
+  }
+  if (dbm < -24 && dbm >= -27) {
+    return {
+      text: `${dbm} dBm`,
+      statusText: 'Warning',
+      badgeClass: 'bg-amber-950/80 text-amber-300 border-amber-800/60',
+      dotClass: 'bg-amber-400',
+    };
+  }
+  return {
+    text: `${dbm} dBm`,
+    statusText: 'Critical / LOS',
+    badgeClass: 'bg-rose-950/80 text-rose-400 border-rose-800/60',
+    dotClass: 'bg-rose-400',
+  };
+};
+
 interface CustomerListProps {
   onOpenCustomerModal: (customer?: Customer) => void;
   onSelectCustomer: (customerId: string) => void;
@@ -380,6 +413,29 @@ export const CustomerList: React.FC<CustomerListProps> = ({
                         <div className="text-[10px] text-slate-400 font-mono mt-0.5">
                           IP: {activeSessionMap.get(customer.network.pppoeUsername.toLowerCase())?.assignedIp || customer.network.ipAddress} • NAP: {assignedNap?.code || customer.network.napBoxId} (Port #{customer.network.napPortNumber})
                         </div>
+                        {/* Optical Rx Telemetry & Drop Wire Metric */}
+                        {(() => {
+                          const opticalPower = customer.network.opticalPowerDbm ?? customer.installationDetails?.opticalPowerDbm;
+                          const optBadge = getOpticalPowerBadge(opticalPower);
+                          const dropMeters = customer.network.dropCableMeters ?? customer.installationDetails?.dropCableMeters;
+
+                          return (
+                            <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                              <span
+                                className={`inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[9px] font-mono font-bold border ${optBadge.badgeClass}`}
+                                title={optBadge.statusText ? `Optical Power Rx: ${optBadge.text} (${optBadge.statusText})` : 'Awaiting lineman optical meter reading'}
+                              >
+                                <span className={`w-1 h-1 rounded-full ${optBadge.dotClass}`} />
+                                {optBadge.text}
+                              </span>
+                              {dropMeters ? (
+                                <span className="text-[10px] text-slate-400 font-mono">
+                                  • {dropMeters}m drop
+                                </span>
+                              ) : null}
+                            </div>
+                          );
+                        })()}
                       </td>
 
                       {/* Balance */}

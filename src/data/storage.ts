@@ -31,6 +31,7 @@ import {
   initialMikrotikDevices,
   initialNapBoxes,
   initialOltNode,
+  initialOltNodes,
   initialPayments,
   initialPlans,
   initialReminders,
@@ -41,6 +42,7 @@ import {
   initialCoverageAreas,
   initialStaffUsers,
 } from './initialData';
+import { DEFAULT_OSP_NAPS, DEFAULT_OSP_CABLES, DEFAULT_OSP_CLOSURES } from './networkGeo';
 import { resolveInvoicePlanDetails, isRouterProfileName } from '../utils/formatters';
 
 const STORAGE_KEYS = {
@@ -58,6 +60,7 @@ const STORAGE_KEYS = {
   FIBER_CABLES: 'swiftstream_fiber_cables_v4',
   FIBER_CLOSURES: 'swiftstream_fiber_closures_v4',
   OLT_NODE: 'swiftstream_olt_node_v4',
+  OLT_NODES: 'swiftstream_olt_nodes_v4',
   DAILY_REMITTANCES: 'swiftstream_daily_remittances_v4',
   ADDON_CATALOG: 'swiftstream_addon_catalog_v4',
   PAYMENT_SUBMISSIONS: 'swiftstream_payment_submissions_v4',
@@ -170,6 +173,14 @@ export const loadStoredData = () => {
       logoUrl: rawBusinessProfile.logoUrl || '/favicon.svg',
       address: cleanedAddress,
       paymentGateways: cleanedPaymentGateways,
+      apiKeys: {
+        ...initialBusinessProfile.apiKeys,
+        ...(rawBusinessProfile.apiKeys || {}),
+        googleMapsApiKey:
+          rawBusinessProfile.apiKeys?.googleMapsApiKey ||
+          initialBusinessProfile.apiKeys?.googleMapsApiKey ||
+          'AIzaSyALbVJUcMbVm_E_MrAcHstSMrmKHqFCH6Y',
+      },
     };
 
     const rawPlans = JSON.parse(
@@ -280,9 +291,10 @@ export const loadStoredData = () => {
       localStorage.getItem(STORAGE_KEYS.PAYMENTS) || JSON.stringify(initialPayments)
     ) as Payment[];
 
-    const napBoxes = JSON.parse(
+    const rawNapBoxes = JSON.parse(
       localStorage.getItem(STORAGE_KEYS.NAP_BOXES) || JSON.stringify(initialNapBoxes)
     ) as NapBox[];
+    const napBoxes = rawNapBoxes && rawNapBoxes.length > 0 ? rawNapBoxes : DEFAULT_OSP_NAPS;
 
     const repairOrders = JSON.parse(
       localStorage.getItem(STORAGE_KEYS.REPAIR_ORDERS) || JSON.stringify(initialRepairOrders)
@@ -304,17 +316,37 @@ export const loadStoredData = () => {
       localStorage.getItem(STORAGE_KEYS.AUDIT_LOGS) || JSON.stringify(initialAuditLogs)
     ) as AuditLog[];
 
-    const fiberCables = JSON.parse(
+    const rawFiberCables = JSON.parse(
       localStorage.getItem(STORAGE_KEYS.FIBER_CABLES) || JSON.stringify(initialFiberCables)
     ) as FiberCable[];
+    const fiberCables = rawFiberCables && rawFiberCables.length > 0 ? rawFiberCables : DEFAULT_OSP_CABLES;
 
-    const fiberClosures = JSON.parse(
+    const rawFiberClosures = JSON.parse(
       localStorage.getItem(STORAGE_KEYS.FIBER_CLOSURES) || JSON.stringify(initialFiberClosures)
     ) as FiberClosure[];
+    const fiberClosures = rawFiberClosures && rawFiberClosures.length > 0 ? rawFiberClosures : DEFAULT_OSP_CLOSURES;
 
-    const oltNode = JSON.parse(
-      localStorage.getItem(STORAGE_KEYS.OLT_NODE) || JSON.stringify(initialOltNode)
-    ) as OltPopNode;
+    const rawOltNodes = JSON.parse(
+      localStorage.getItem(STORAGE_KEYS.OLT_NODES) || '[]'
+    ) as OltPopNode[];
+    let oltNodes: OltPopNode[] = [];
+    if (rawOltNodes && rawOltNodes.length > 0) {
+      oltNodes = rawOltNodes;
+    } else {
+      const singleOltRaw = localStorage.getItem(STORAGE_KEYS.OLT_NODE);
+      if (singleOltRaw) {
+        try {
+          const parsed = JSON.parse(singleOltRaw);
+          if (parsed && parsed.id) {
+            oltNodes = [parsed];
+          }
+        } catch {}
+      }
+      if (oltNodes.length === 0) {
+        oltNodes = initialOltNodes;
+      }
+    }
+    const oltNode = oltNodes[0] || initialOltNode;
 
     const dailyRemittances = JSON.parse(
       localStorage.getItem(STORAGE_KEYS.DAILY_REMITTANCES) || JSON.stringify(initialDailyRemittances)
@@ -377,6 +409,7 @@ export const loadStoredData = () => {
       auditLogs,
       fiberCables,
       fiberClosures,
+      oltNodes,
       oltNode,
       dailyRemittances,
       addonCatalog,
@@ -401,6 +434,7 @@ export const loadStoredData = () => {
       auditLogs: initialAuditLogs,
       fiberCables: initialFiberCables,
       fiberClosures: initialFiberClosures,
+      oltNodes: initialOltNodes,
       oltNode: initialOltNode,
       dailyRemittances: initialDailyRemittances,
       addonCatalog: initialAddonCatalog,

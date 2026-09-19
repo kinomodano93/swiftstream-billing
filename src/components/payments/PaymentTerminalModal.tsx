@@ -221,7 +221,7 @@ export const PaymentTerminalModal: React.FC<PaymentTerminalModalProps> = ({
                 { id: 'xendit', label: 'Xendit', icon: '⚡', badge: 'Gateway' },
                 { id: 'gcash', label: 'GCash', icon: '📱' },
                 { id: 'maya', label: 'Maya', icon: '💳' },
-                { id: 'bank_transfer', label: 'Bank', icon: '🏦' },
+                { id: 'bank_transfer', label: 'Bank Deposit', icon: '🏦', badge: 'OTC / Direct' },
               ].map((method) => (
                 <button
                   type="button"
@@ -233,13 +233,19 @@ export const PaymentTerminalModal: React.FC<PaymentTerminalModalProps> = ({
                         ? 'bg-amber-600/20 border-amber-500 text-amber-300 shadow-sm'
                         : method.id === 'xendit'
                         ? 'bg-cyan-600/20 border-cyan-500 text-cyan-300 shadow-sm'
+                        : method.id === 'bank_transfer'
+                        ? 'bg-indigo-600/20 border-indigo-500 text-indigo-300 shadow-sm'
                         : 'bg-emerald-600/20 border-emerald-500 text-emerald-300 shadow-sm'
                       : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
                   }`}
                 >
                   {method.badge && (
                     <span className={`text-[8px] font-mono font-bold px-1.5 py-0.2 rounded-full ${
-                      method.id === 'cash' ? 'bg-amber-950 text-amber-300 border border-amber-800/60' : 'bg-cyan-950 text-cyan-300 border border-cyan-800/60'
+                      method.id === 'cash'
+                        ? 'bg-amber-950 text-amber-300 border border-amber-800/60'
+                        : method.id === 'xendit'
+                        ? 'bg-cyan-950 text-cyan-300 border border-cyan-800/60'
+                        : 'bg-indigo-950 text-indigo-300 border border-indigo-800/60'
                     }`}>
                       {method.badge}
                     </span>
@@ -346,7 +352,7 @@ export const PaymentTerminalModal: React.FC<PaymentTerminalModalProps> = ({
 
           {/* Bank Transfer Quick Reference Banner */}
           {paymentMethod === 'bank_transfer' && (
-            <div className="p-3 rounded-2xl bg-indigo-950/20 border border-indigo-800/40 flex items-center gap-3 text-xs">
+            <div className="p-3.5 rounded-2xl bg-indigo-950/25 border border-indigo-800/40 flex items-start gap-3 text-xs">
               {businessProfile.paymentGateways.bankQrImage ? (
                 <img
                   src={businessProfile.paymentGateways.bankQrImage}
@@ -354,16 +360,26 @@ export const PaymentTerminalModal: React.FC<PaymentTerminalModalProps> = ({
                   className="w-12 h-12 object-contain bg-white rounded-xl p-0.5 shadow flex-shrink-0"
                 />
               ) : (
-                <div className="w-12 h-12 bg-indigo-900/40 text-indigo-300 font-mono text-[9px] font-bold rounded-xl border border-indigo-700/50 flex items-center justify-center flex-shrink-0">
-                  Bank QR
+                <div className="w-10 h-10 bg-indigo-900/40 text-indigo-300 font-mono text-sm font-bold rounded-xl border border-indigo-700/50 flex items-center justify-center flex-shrink-0">
+                  🏦
                 </div>
               )}
-              <div className="space-y-0.5 flex-1">
-                <span className="text-[10px] text-indigo-400 font-bold uppercase tracking-wider block">
-                  {businessProfile.paymentGateways.bankName || 'Bank Deposit / Wire Transfer'}
-                </span>
-                <p className="font-bold text-slate-100">{businessProfile.paymentGateways.bankAccountName}</p>
-                <p className="font-mono text-indigo-300 font-semibold">{businessProfile.paymentGateways.bankAccountNumber}</p>
+              <div className="space-y-1 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-indigo-400 font-bold uppercase tracking-wider block">
+                    {businessProfile.paymentGateways.bankName || 'Bank Deposit / Wire Transfer'} (Corporate / Direct)
+                  </span>
+                  <span className="text-[9px] bg-indigo-950 border border-indigo-700/60 px-1.5 py-0.2 rounded text-indigo-300 font-semibold">
+                    Admin POS Only
+                  </span>
+                </div>
+                <div className="flex items-baseline gap-2">
+                  <span className="font-bold text-slate-100">{businessProfile.paymentGateways.bankAccountName}</span>
+                  <span className="font-mono text-indigo-300 font-semibold">{businessProfile.paymentGateways.bankAccountNumber}</span>
+                </div>
+                <p className="text-[10px] text-slate-400">
+                  Direct OTC bank deposit or corporate wire transfer. Cashier encodes the bank validated deposit slip or transfer reference number below.
+                </p>
               </div>
             </div>
           )}

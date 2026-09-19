@@ -79,7 +79,7 @@ export const OfficialReceiptModal: React.FC<OfficialReceiptModalProps> = ({ paym
               {businessProfile.name}
             </h3>
             <p className="text-[10px] text-slate-600">{businessProfile.tradeName}</p>
-            <p className="text-[10px] text-slate-600 font-bold">TIN: {businessProfile.tin}</p>
+            <p className="text-[10px] text-slate-600 font-bold">TIN: {businessProfile.tin} (Non-VAT)</p>
             <p className="text-[10px] text-slate-600">
               {formatBusinessAddress(businessProfile.address)}
             </p>
@@ -87,11 +87,12 @@ export const OfficialReceiptModal: React.FC<OfficialReceiptModalProps> = ({ paym
           </div>
 
           {/* Receipt Title & Meta */}
-          <div className="text-center space-y-1">
+          <div className="text-center space-y-0.5">
             <h4 className="font-extrabold text-xs uppercase tracking-wider text-slate-900">
               OFFICIAL BILLING RECEIPT
             </h4>
-            <div className="flex justify-between text-[11px] text-slate-600 pt-1">
+            <p className="text-[9px] text-slate-500 italic">Non-VAT Reg. Entity pursuant to Sec. 109 of the NIRC</p>
+            <div className="flex justify-between text-[11px] text-slate-600 pt-1.5">
               <span>OR No: <strong className="text-slate-950">{payment.receiptNumber}</strong></span>
               <span>{formatDateTime(payment.paymentDate)}</span>
             </div>
@@ -143,11 +144,15 @@ export const OfficialReceiptModal: React.FC<OfficialReceiptModalProps> = ({ paym
             <span className="text-[9px] text-slate-400">Scan QR to verify authentic receipt</span>
           </div>
 
-          {/* Footer message */}
+          {/* Footer message & BIR statutory notice */}
           <div className="text-center text-[10px] text-slate-500 space-y-0.5 pt-1">
             <p className="font-bold text-slate-700">Thank you for your business!</p>
             <p>Your high-speed fiber connection is active.</p>
-            <p className="text-[9px]">{businessProfile.name || 'SwiftStream Telecommunications'}</p>
+            <p className="text-[9px] font-bold text-slate-700 uppercase tracking-tight">
+              THIS DOCUMENT IS NOT VALID FOR CLAIM OF INPUT TAX
+            </p>
+            <p className="text-[9px] text-slate-500 font-medium">THIS SERVES AS AN OFFICIAL RECEIPT</p>
+            <p className="text-[8px] text-slate-400">{businessProfile.name || 'SwiftStream Telecommunications'}</p>
           </div>
         </div>
       </div>

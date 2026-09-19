@@ -106,6 +106,7 @@ export const initialBusinessProfile: BusinessProfile = {
     mikrotikPassword: '',
     geminiApiKey: '',
     geminiModel: 'gemini-2.5-flash',
+    googleMapsApiKey: 'AIzaSyALbVJUcMbVm_E_MrAcHstSMrmKHqFCH6Y',
   },
   smsGateway: {
     provider: 'semaphore',
@@ -219,19 +220,38 @@ export const initialPlans: Plan[] = [
 ];
 
 
-export const initialOltNode: OltPopNode = {
-  id: 'olt-01-headend',
-  name: 'SwiftStream Central OLT & NOC Headend',
-  location: 'Shop #4, Arcade Bldg., National Highway',
-  barangay: 'Binauahan',
-  latitude: 13.6838,
-  longitude: 123.5175,
-  totalPonPorts: 16,
-  activePonPorts: 0,
-  txPowerDbm: 4.5,
-  ipAddress: '192.168.88.1',
-  notes: 'Main GPON Optical Line Terminal with redundant CASURECO power + 3kVA Online UPS.',
-};
+export const initialOltNodes: OltPopNode[] = [
+  {
+    id: 'olt-01-headend',
+    code: 'OLT-01',
+    name: 'SwiftStream Central OLT & NOC Headend',
+    location: 'Shop #4, Arcade Bldg., National Highway',
+    barangay: 'Binauahan',
+    latitude: 13.6838,
+    longitude: 123.5175,
+    totalPonPorts: 16,
+    activePonPorts: 4,
+    txPowerDbm: 4.5,
+    ipAddress: '192.168.88.1',
+    notes: 'Main GPON Optical Line Terminal with redundant CASURECO power + 3kVA Online UPS.',
+  },
+  {
+    id: 'olt-02-presentacion',
+    code: 'OLT-02',
+    name: 'Presentacion Municipal POP OLT',
+    location: 'Zone 2, Near Municipal Hall',
+    barangay: 'Sta. Maria (Poblacion)',
+    latitude: 13.7120,
+    longitude: 123.7250,
+    totalPonPorts: 16,
+    activePonPorts: 1,
+    txPowerDbm: 5.0,
+    ipAddress: '192.168.89.1',
+    notes: 'Secondary expansion GPON POP serving coastal Presentacion barangays via microwave backbone link.',
+  },
+];
+
+export const initialOltNode: OltPopNode = initialOltNodes[0];
 
 export const initialFiberClosures: FiberClosure[] = [];
 

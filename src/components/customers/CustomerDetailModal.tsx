@@ -21,6 +21,8 @@ import {
   Power,
   CheckCircle2,
   AlertCircle,
+  PauseCircle,
+  PlayCircle,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import {
@@ -323,6 +325,32 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
               <span>+ Add Credit</span>
             </button>
 
+            {hasPermission('canAccessNetworkConfig') && customer.status === 'active' && (
+              <button
+                onClick={() => {
+                  if (confirm(`Suspend line for ${customer.fullName}? This will restrict access and isolate line.`)) {
+                    toggleCustomerStatus(customer.id, 'suspended');
+                  }
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600/20 text-rose-300 hover:bg-rose-600 hover:text-white rounded-lg font-semibold transition-colors cursor-pointer"
+                title="Suspend Subscriber Line (Overdue / Isolation)"
+              >
+                <PauseCircle className="w-3.5 h-3.5" />
+                <span>Suspend Line</span>
+              </button>
+            )}
+
+            {hasPermission('canAccessNetworkConfig') && customer.status === 'suspended' && (
+              <button
+                onClick={() => toggleCustomerStatus(customer.id, 'active')}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600/20 text-emerald-300 hover:bg-emerald-600 hover:text-white rounded-lg font-semibold transition-colors cursor-pointer"
+                title="Restore Active Service"
+              >
+                <PlayCircle className="w-3.5 h-3.5" />
+                <span>Reactivate Line</span>
+              </button>
+            )}
+
             {systemRole !== 'cashier' && (
               <button
                 onClick={() => {
@@ -513,16 +541,28 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
                   </div>
                   <div className="flex justify-between py-1 border-b border-slate-900">
                     <span className="text-slate-500">Optical Power Rx:</span>
-                    <span className="font-mono font-bold text-emerald-400">
-                      {customer.network.opticalPowerDbm || customer.installationDetails?.opticalPowerDbm || -18.5} dBm (Optimal)
+                    {(() => {
+                      const opt = customer.network.opticalPowerDbm ?? customer.installationDetails?.opticalPowerDbm;
+                      if (opt == null || isNaN(opt)) {
+                        return <span className="font-mono text-slate-500 text-xs italic">Awaiting OPM Test</span>;
+                      }
+                      const isOptimal = opt >= -24 && opt <= -15;
+                      const isWarning = opt < -24 && opt >= -27;
+                      return (
+                        <span className={`font-mono font-bold ${isOptimal ? 'text-emerald-400' : isWarning ? 'text-amber-300' : 'text-rose-400'}`}>
+                          {opt} dBm ({isOptimal ? 'Optimal' : isWarning ? 'Warning' : 'Critical / LOS'})
+                        </span>
+                      );
+                    })()}
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-slate-900">
+                    <span className="text-slate-500">Drop Cable Length:</span>
+                    <span className="font-mono text-slate-300">
+                      {customer.network.dropCableMeters != null || customer.installationDetails?.dropCableMeters != null
+                        ? `${customer.network.dropCableMeters ?? customer.installationDetails?.dropCableMeters} meters (Installed)`
+                        : 'Not recorded'}
                     </span>
                   </div>
-                  {customer.installationDetails?.dropCableMeters && (
-                    <div className="flex justify-between py-1 border-b border-slate-900">
-                      <span className="text-slate-500">Drop Cable Length:</span>
-                      <span className="font-mono text-slate-300">{customer.installationDetails.dropCableMeters} meters (Installed)</span>
-                    </div>
-                  )}
                   <div className="flex justify-between py-1 border-b border-slate-900">
                     <span className="text-slate-500">OLT PON Port / VLAN:</span>
                     <span className="text-slate-300 font-mono">{customer.network.oltPonPort || 'PON-1/1'} (VLAN {customer.network.vlanId || '100'})</span>
@@ -704,14 +744,26 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
                       <div className="mt-3 space-y-1.5">
                         <div className="flex justify-between">
                           <span className="text-slate-500">Optical Rx Power:</span>
-                          <span className="font-mono font-bold text-emerald-400">
-                            {customer.network.opticalPowerDbm || customer.installationDetails?.opticalPowerDbm || -18.5} dBm
-                          </span>
+                          {(() => {
+                            const opt = customer.network.opticalPowerDbm ?? customer.installationDetails?.opticalPowerDbm;
+                            if (opt == null || isNaN(opt)) {
+                              return <span className="font-mono text-slate-500 text-xs italic">Awaiting OPM</span>;
+                            }
+                            const isOptimal = opt >= -24 && opt <= -15;
+                            const isWarning = opt < -24 && opt >= -27;
+                            return (
+                              <span className={`font-mono font-bold ${isOptimal ? 'text-emerald-400' : isWarning ? 'text-amber-300' : 'text-rose-400'}`}>
+                                {opt} dBm
+                              </span>
+                            );
+                          })()}
                         </div>
                         <div className="flex justify-between">
                           <span className="text-slate-500">Drop Cable:</span>
                           <span className="font-mono text-slate-300">
-                            {customer.installationDetails?.dropCableMeters || 120} meters
+                            {customer.network.dropCableMeters != null || customer.installationDetails?.dropCableMeters != null
+                              ? `${customer.network.dropCableMeters ?? customer.installationDetails?.dropCableMeters} meters`
+                              : 'Not recorded'}
                           </span>
                         </div>
                         <div className="flex justify-between">

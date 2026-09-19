@@ -1667,9 +1667,139 @@ exports.xenditWebhook = onRequest(
     if (req.method === "OPTIONS") return res.status(204).send("");
 
     const callbackToken = req.headers["x-callback-token"];
-    console.log("[Firebase Cloud Functions] Xendit Webhook payload:", req.body?.id, req.body?.status, "token:", callbackToken);
+    const payload = req.body || {};
+    console.log("[Firebase Cloud Functions] Xendit Webhook payload:", payload.id, payload.status, "token:", callbackToken);
 
-    return res.status(200).json({ success: true, message: "Webhook acknowledged" });
+    try {
+      const status = (payload.status || "").toUpperCase();
+      if (status === "PAID" || status === "SETTLED") {
+        const externalId = payload.external_id || "";
+        const xenditInvoiceId = payload.id || "";
+        const paidAmount = Number(payload.paid_amount || payload.amount || 0);
+        const paymentMethodChannel = payload.payment_method || payload.payment_channel || "MULTI_CHANNEL";
+        const paidAt = payload.paid_at || new Date().toISOString();
+
+        console.log(`[Xendit Webhook] Processing settlement for external_id: ${externalId}, amount: ${paidAmount}`);
+
+        // 1. Locate Invoice in Firestore
+        let invoiceRef = null;
+        let invoiceData = null;
+
+        if (externalId) {
+          const directDoc = await db.collection("invoices").doc(externalId).get();
+          if (directDoc.exists) {
+            invoiceRef = directDoc.ref;
+            invoiceData = directDoc.data();
+          }
+        }
+
+        if (!invoiceRef && externalId) {
+          const querySnap = await db.collection("invoices")
+            .where("invoiceNumber", "==", externalId)
+            .limit(1)
+            .get();
+          if (!querySnap.empty) {
+            invoiceRef = querySnap.docs[0].ref;
+            invoiceData = querySnap.docs[0].data();
+          }
+        }
+
+        if (!invoiceRef && xenditInvoiceId) {
+          const querySnap = await db.collection("invoices")
+            .where("xenditInvoiceId", "==", xenditInvoiceId)
+            .limit(1)
+            .get();
+          if (!querySnap.empty) {
+            invoiceRef = querySnap.docs[0].ref;
+            invoiceData = querySnap.docs[0].data();
+          }
+        }
+
+        // 2. Settle the invoice & generate payment receipt
+        const receiptNo = `OR-XND-${Date.now().toString().slice(-6)}`;
+        const paymentId = `pay-xnd-${xenditInvoiceId || Date.now()}`;
+        const batch = db.batch();
+
+        const paymentDocRef = db.collection("payments").doc(paymentId);
+        const customerId = invoiceData?.customerId || "";
+
+        batch.set(paymentDocRef, {
+          id: paymentId,
+          receiptNumber: receiptNo,
+          invoiceId: invoiceRef ? invoiceRef.id : externalId,
+          invoiceNumber: invoiceData?.invoiceNumber || externalId,
+          customerId: customerId,
+          amount: paidAmount > 0 ? paidAmount : Number(invoiceData?.totalAmount || 0),
+          paymentMethod: "xendit",
+          paymentDate: paidAt,
+          referenceNumber: xenditInvoiceId || `XND-${Date.now()}`,
+          cashierName: "Xendit Multi-Channel Gateway",
+          cashierId: "system-xendit-gateway",
+          status: "settled",
+          notes: `Automated settlement via Xendit Webhook (${paymentMethodChannel})`,
+          createdAt: new Date().toISOString(),
+        }, { merge: true });
+
+        if (invoiceRef) {
+          batch.update(invoiceRef, {
+            status: "paid",
+            balanceDue: 0,
+            paymentStatus: "paid",
+            paidAt: paidAt,
+            lastPaymentDate: paidAt,
+            xenditPaymentMethod: paymentMethodChannel,
+            xenditInvoiceId: xenditInvoiceId,
+            updatedAt: new Date().toISOString(),
+          });
+        }
+
+        // 3. Update Customer Balance & Auto-restore if suspended
+        if (customerId) {
+          const custRef = db.collection("customers").doc(customerId);
+          const custDoc = await custRef.get();
+          if (custDoc.exists) {
+            const custData = custDoc.data();
+            const currentBal = Number(custData.balance || 0);
+            const deduct = paidAmount > 0 ? paidAmount : Number(invoiceData?.totalAmount || 0);
+            const newBal = Math.max(0, currentBal - deduct);
+
+            const customerUpdates = {
+              balance: newBal,
+              lastPaymentDate: paidAt,
+              updatedAt: new Date().toISOString(),
+            };
+
+            if (custData.status === "suspended" && newBal <= 0) {
+              customerUpdates.status = "active";
+              console.log(`[Xendit Webhook] Automatically reactivated customer ${custData.accountNo} (${custData.fullName})`);
+            }
+
+            batch.update(custRef, customerUpdates);
+          }
+        }
+
+        // 4. Audit Log
+        const auditRef = db.collection("system_logs").doc(`log-${Date.now()}`);
+        batch.set(auditRef, {
+          id: auditRef.id,
+          userName: "Xendit Multi-Channel Gateway",
+          action: "ONLINE_PAYMENT_SETTLED",
+          category: "billing",
+          severity: "info",
+          details: `Invoice ${invoiceData?.invoiceNumber || externalId} settled for ₱${paidAmount} via ${paymentMethodChannel}. Ref: ${xenditInvoiceId}.`,
+          status: "success",
+          timestamp: new Date().toISOString(),
+        });
+
+        await batch.commit();
+        console.log(`[Xendit Webhook] Successfully recorded payment ${receiptNo} for ${externalId}`);
+      }
+
+      return res.status(200).json({ success: true, message: "Webhook processed successfully" });
+    } catch (err) {
+      console.error("[Xendit Webhook] Error processing payment:", err);
+      return res.status(200).json({ success: false, error: err.message });
+    }
   }
 );
 

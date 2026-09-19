@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Zap, X, CheckCircle2, Users, AlertTriangle, Calendar } from 'lucide-react';
+import { Zap, X, CheckCircle2, Users, AlertTriangle, Calendar, MessageSquare } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { formatCurrency } from '../../utils/formatters';
 import { hasCustomerInvoiceForMonth } from '../../utils/billingRules';
@@ -40,9 +40,11 @@ export const BatchBillingModal: React.FC<BatchBillingModalProps> = ({ onClose })
 
   const [applyWalletCredits, setApplyWalletCredits] = useState<boolean>(true);
   const [enableProration, setEnableProration] = useState<boolean>(true);
+  const [autoEnqueueSms, setAutoEnqueueSms] = useState<boolean>(true);
   const [isDone, setIsDone] = useState<boolean>(false);
   const [resultCount, setResultCount] = useState<number>(0);
   const [resultAmount, setResultAmount] = useState<number>(0);
+  const [smsResultCount, setSmsResultCount] = useState<number>(0);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
 
   const billingPeriodMonthStr = `${billingYear}-${billingMonth}`;
@@ -134,12 +136,18 @@ export const BatchBillingModal: React.FC<BatchBillingModalProps> = ({ onClose })
         enableProration,
         customerIds: eligibleSubscribers.map((c) => c.id),
         billingType,
+        autoEnqueueSms,
       });
 
       setResultCount(res.count);
       setResultAmount(res.totalAmount);
+      setSmsResultCount(res.smsQueuedCount || 0);
       setIsDone(true);
-      showToast('success', 'Batch Invoicing Complete', `Generated ${res.count} invoices totaling ${formatCurrency(res.totalAmount)}.`);
+      showToast(
+        'success',
+        'Batch Invoicing Complete',
+        `Generated ${res.count} invoices totaling ${formatCurrency(res.totalAmount)}${res.smsQueuedCount ? ` with ${res.smsQueuedCount} SMS notices enqueued` : ''}.`
+      );
     } catch (err: any) {
       showToast('error', 'Batch Billing Failed', err?.message || 'Error occurred during generation.');
     } finally {
@@ -276,6 +284,29 @@ export const BatchBillingModal: React.FC<BatchBillingModalProps> = ({ onClose })
                 </div>
               )}
 
+              {/* Auto SMS Enqueue Option */}
+              <label className="flex items-start gap-3 p-3 rounded-xl bg-slate-950/70 border border-slate-800 hover:border-slate-700 transition-colors cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={autoEnqueueSms}
+                  onChange={(e) => setAutoEnqueueSms(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 rounded text-blue-600 bg-slate-900 border-slate-700 focus:ring-blue-500 cursor-pointer"
+                />
+                <div className="space-y-0.5 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-slate-200 text-xs">
+                      Auto-Enqueue SMS Billing Notices
+                    </span>
+                    <span className="text-[9px] bg-blue-950/80 border border-blue-800/60 px-1.5 py-0.2 rounded text-blue-300 font-semibold">
+                      SMS Gateway
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400">
+                    Immediately queue statement advisories to subscribers' registered mobile numbers via SMS gateway upon invoice creation.
+                  </p>
+                </div>
+              </label>
+
               {/* Live Count & Estimated Amount Preview */}
               <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800 space-y-2">
                 <div className="flex items-center justify-between">
@@ -346,6 +377,11 @@ export const BatchBillingModal: React.FC<BatchBillingModalProps> = ({ onClose })
                 <p className="text-xs text-slate-400 mt-1 max-w-xs mx-auto">
                   Generated <strong className="text-emerald-400 font-mono">{resultCount} invoices</strong> for cycle {MONTHS.find(m => m.value === billingMonth)?.label} {billingYear} totaling <strong className="text-emerald-400 font-mono">{formatCurrency(resultAmount)}</strong>.
                 </p>
+                {smsResultCount > 0 && (
+                  <p className="text-[11px] text-cyan-300 font-medium mt-2 bg-cyan-950/40 border border-cyan-800/40 rounded-lg p-2 mx-auto max-w-xs">
+                    📱 Enqueued <strong>{smsResultCount} SMS billing advisories</strong> directly to subscriber mobile numbers.
+                  </p>
+                )}
               </div>
 
               <button

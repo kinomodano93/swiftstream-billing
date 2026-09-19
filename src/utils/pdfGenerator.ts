@@ -608,7 +608,7 @@ export const generateThermalReceiptPDF = (
   doc.setFontSize(paperWidth === '58mm' ? 6.5 : 7.5);
   doc.setFont('helvetica', 'normal');
   doc.text(business.tradeName || (business.industry && business.industry !== 'Information Technology & Telecommunications' ? business.industry : '') || 'Internet Service Provider', centerX, 13, { align: 'center' });
-  doc.text(`TIN: ${business.tin}`, centerX, 17, { align: 'center' });
+  doc.text(`TIN: ${business.tin} (Non-VAT)`, centerX, 17, { align: 'center' });
   doc.text(getBusinessAddressLines(business.address).line2 || formatBusinessAddress(business.address), centerX, 21, { align: 'center' });
   doc.text(`Hotline: ${business.representative.mobile}`, centerX, 25, { align: 'center' });
 
@@ -618,15 +618,19 @@ export const generateThermalReceiptPDF = (
   // Title
   doc.setFontSize(paperWidth === '58mm' ? 8 : 9);
   doc.setFont('helvetica', 'bold');
-  doc.text('COLLECTION OFFICIAL RECEIPT', centerX, 33, { align: 'center' });
+  doc.text('COLLECTION OFFICIAL RECEIPT', centerX, 32.5, { align: 'center' });
 
-  doc.setFontSize(paperWidth === '58mm' ? 6.5 : 7.5);
+  doc.setFontSize(paperWidth === '58mm' ? 5 : 6);
+  doc.setFont('helvetica', 'italic');
+  doc.text('Non-VAT Reg. Entity pursuant to Sec. 109 of the NIRC', centerX, 36, { align: 'center' });
+
+  doc.setFontSize(paperWidth === '58mm' ? 6 : 7);
   doc.setFont('helvetica', 'normal');
-  doc.text(`OR No: ${payment.receiptNumber}`, margin, 38);
-  doc.text(`Date: ${formatDateTime(payment.paymentDate)}`, margin, 42);
-  doc.text(`Cashier: ${payment.cashierName}`, margin, 46);
+  doc.text(`OR No: ${payment.receiptNumber}`, margin, 40);
+  doc.text(`Date: ${formatDateTime(payment.paymentDate)}`, margin, 44);
+  doc.text(`Cashier: ${payment.cashierName}`, margin, 48);
 
-  doc.line(margin, 49, rightX, 49);
+  doc.line(margin, 51, rightX, 51);
 
   // Subscriber Details
   doc.text(`Subscriber Account:`, margin, 54);
@@ -686,11 +690,14 @@ export const generateThermalReceiptPDF = (
   currentY += 6;
 
   // Footer
-  doc.setFontSize(paperWidth === '58mm' ? 6 : 7);
+  doc.setFontSize(paperWidth === '58mm' ? 5.5 : 6.5);
   doc.setFont('helvetica', 'normal');
   doc.text('STATUS: LINE ACTIVE & UNBLOCKED', centerX, currentY, { align: 'center' });
   doc.text('Thank you for your prompt payment!', centerX, currentY + 4, { align: 'center' });
-  doc.text('THIS SERVES AS AN OFFICIAL RECEIPT', centerX, currentY + 9, { align: 'center' });
+  doc.setFont('helvetica', 'bold');
+  doc.text('THIS DOCUMENT IS NOT VALID FOR CLAIM OF INPUT TAX', centerX, currentY + 8, { align: 'center' });
+  doc.setFont('helvetica', 'normal');
+  doc.text('THIS SERVES AS AN OFFICIAL RECEIPT', centerX, currentY + 12, { align: 'center' });
 
   return doc;
 };
@@ -710,12 +717,14 @@ export const generateEODReportPDF = (
   const cashPayments = payments.filter((p) => p.paymentMethod === 'cash');
   const gcashPayments = payments.filter((p) => p.paymentMethod === 'gcash');
   const mayaPayments = payments.filter((p) => p.paymentMethod === 'maya');
+  const xenditPayments = payments.filter((p) => p.paymentMethod === 'xendit');
   const bankPayments = payments.filter((p) => p.paymentMethod === 'bank_transfer');
   const otherPayments = payments.filter((p) => p.paymentMethod === 'other' || p.paymentMethod === 'check');
 
   const cashTotal = cashPayments.reduce((sum, p) => sum + p.amount, 0);
   const gcashTotal = gcashPayments.reduce((sum, p) => sum + p.amount, 0);
   const mayaTotal = mayaPayments.reduce((sum, p) => sum + p.amount, 0);
+  const xenditTotal = xenditPayments.reduce((sum, p) => sum + p.amount, 0);
   const bankTotal = bankPayments.reduce((sum, p) => sum + p.amount, 0);
   const otherTotal = otherPayments.reduce((sum, p) => sum + p.amount, 0);
   const grandTotal = payments.reduce((sum, p) => sum + p.amount, 0);
@@ -728,7 +737,7 @@ export const generateEODReportPDF = (
   doc.setFontSize(7.5);
   doc.setFont('helvetica', 'normal');
   doc.text(business.tradeName || (business.industry && business.industry !== 'Information Technology & Telecommunications' ? business.industry : '') || 'Internet Service Provider', 40, 14, { align: 'center' });
-  doc.text(`TIN: ${business.tin}`, 40, 18, { align: 'center' });
+  doc.text(`TIN: ${business.tin} (Non-VAT)`, 40, 18, { align: 'center' });
   doc.text(getBusinessAddressLines(business.address).line2 || formatBusinessAddress(business.address), 40, 22, { align: 'center' });
 
   doc.setLineWidth(0.3);
@@ -751,48 +760,59 @@ export const generateEODReportPDF = (
   doc.text('COLLECTION CHANNEL BREAKDOWN', 6, 54);
 
   doc.setFont('helvetica', 'normal');
-  doc.text(`1. Cash in Drawer (${cashPayments.length} txns):`, 6, 60);
-  doc.text(formatCurrencyPdf(cashTotal), 74, 60, { align: 'right' });
+  let itemY = 60;
+  doc.text(`1. Cash in Drawer (${cashPayments.length} txns):`, 6, itemY);
+  doc.text(formatCurrencyPdf(cashTotal), 74, itemY, { align: 'right' });
 
-  doc.text(`2. GCash E-Wallet (${gcashPayments.length} txns):`, 6, 66);
-  doc.text(formatCurrencyPdf(gcashTotal), 74, 66, { align: 'right' });
+  itemY += 5.5;
+  doc.text(`2. GCash E-Wallet (${gcashPayments.length} txns):`, 6, itemY);
+  doc.text(formatCurrencyPdf(gcashTotal), 74, itemY, { align: 'right' });
 
-  doc.text(`3. Maya (PayMaya) (${mayaPayments.length} txns):`, 6, 72);
-  doc.text(formatCurrencyPdf(mayaTotal), 74, 72, { align: 'right' });
+  itemY += 5.5;
+  doc.text(`3. Maya (PayMaya) (${mayaPayments.length} txns):`, 6, itemY);
+  doc.text(formatCurrencyPdf(mayaTotal), 74, itemY, { align: 'right' });
 
-  doc.text(`4. Bank Transfers (${bankPayments.length} txns):`, 6, 78);
-  doc.text(formatCurrencyPdf(bankTotal), 74, 78, { align: 'right' });
+  itemY += 5.5;
+  doc.text(`4. Xendit Gateway (${xenditPayments.length} txns):`, 6, itemY);
+  doc.text(formatCurrencyPdf(xenditTotal), 74, itemY, { align: 'right' });
+
+  itemY += 5.5;
+  doc.text(`5. Bank Direct / OTC (${bankPayments.length} txns):`, 6, itemY);
+  doc.text(formatCurrencyPdf(bankTotal), 74, itemY, { align: 'right' });
 
   if (otherPayments.length > 0) {
-    doc.text(`5. Other / Checks (${otherPayments.length} txns):`, 6, 84);
-    doc.text(formatCurrencyPdf(otherTotal), 74, 84, { align: 'right' });
+    itemY += 5.5;
+    doc.text(`6. Other / Checks (${otherPayments.length} txns):`, 6, itemY);
+    doc.text(formatCurrencyPdf(otherTotal), 74, itemY, { align: 'right' });
   }
 
-  doc.line(5, 88, 75, 88);
+  doc.line(5, itemY + 4, 75, itemY + 4);
+  const totalY = itemY + 10;
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8.5);
-  doc.text(`TOTAL TRANSACTIONS:`, 6, 94);
-  doc.text(`${payments.length} Txns`, 74, 94, { align: 'right' });
+  doc.text(`TOTAL TRANSACTIONS:`, 6, totalY);
+  doc.text(`${payments.length} Txns`, 74, totalY, { align: 'right' });
 
   doc.setFontSize(9.5);
-  doc.text(`GRAND TOTAL COLLECTED:`, 6, 101);
-  doc.text(formatCurrencyPdf(grandTotal), 74, 101, { align: 'right' });
+  doc.text(`GRAND TOTAL COLLECTED:`, 6, totalY + 7);
+  doc.text(formatCurrencyPdf(grandTotal), 74, totalY + 7, { align: 'right' });
 
-  doc.line(5, 106, 75, 106);
+  doc.line(5, totalY + 12, 75, totalY + 12);
 
   // Signatures
   doc.setFontSize(7);
   doc.setFont('helvetica', 'normal');
-  doc.text('Cashier Shift Turn-Over:', 6, 114);
-  doc.line(6, 126, 38, 126);
-  doc.text(cashierName, 6, 130);
+  const sigY = totalY + 19;
+  doc.text('Cashier Shift Turn-Over:', 6, sigY);
+  doc.line(6, sigY + 12, 38, sigY + 12);
+  doc.text(cashierName, 6, sigY + 16);
 
-  doc.text('Audited & Acknowledged By:', 42, 114);
-  doc.line(42, 126, 74, 126);
-  doc.text('Operations Lead / Manager', 42, 130);
+  doc.text('Audited & Acknowledged By:', 42, sigY);
+  doc.line(42, sigY + 12, 74, sigY + 12);
+  doc.text('Operations Lead / Manager', 42, sigY + 16);
 
-  doc.text('OFFICIAL ISP END-OF-DAY SETTLEMENT', 40, 142, { align: 'center' });
+  doc.text('OFFICIAL ISP END-OF-DAY SETTLEMENT', 40, sigY + 28, { align: 'center' });
 
   return doc;
 };

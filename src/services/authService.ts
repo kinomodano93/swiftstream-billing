@@ -20,6 +20,11 @@ export const isStaffUser = (user: AppUserProfile | null | undefined): boolean =>
   return user.role === 'admin' || user.role === 'cashier' || user.role === 'technician' || user.role === 'tech';
 };
 
+export const isAdminUser = (user: AppUserProfile | null | undefined): boolean => {
+  if (!user || !user.role) return false;
+  return user.role === 'admin';
+};
+
 export interface AppUserProfile {
   uid: string;
   email: string | null;

@@ -130,7 +130,7 @@ export const RepairOrderList: React.FC<RepairOrderListProps> = ({
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search ticket #, device, customer..."
+              placeholder="Search ticket #, equipment, customer..."
               className="w-full pl-9 pr-3 py-1.5 bg-slate-950/70 border border-slate-800 rounded-lg text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500"
             />
           </div>
@@ -151,8 +151,8 @@ export const RepairOrderList: React.FC<RepairOrderListProps> = ({
                 <tr>
                   <th className="py-3 px-4">Ticket # & Date</th>
                   <th className="py-3 px-4">Customer / Contact</th>
-                  <th className="py-3 px-4">Device & Problem Description</th>
-                  <th className="py-3 px-4">Parts & Diagnosis</th>
+                  <th className="py-3 px-4">Equipment & Incident Description</th>
+                  <th className="py-3 px-4">Optical Telemetry & Diagnosis</th>
                   <th className="py-3 px-4">Assigned Tech</th>
                   <th className="py-3 px-4">Service Fee</th>
                   <th className="py-3 px-4">Status</th>
@@ -195,9 +195,9 @@ export const RepairOrderList: React.FC<RepairOrderListProps> = ({
                         )}
                       </td>
 
-                      {/* Device & Problem Description */}
+                      {/* Equipment & Problem Description */}
                       <td className="py-3 px-4 max-w-[240px]">
-                        <span className="inline-block px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-semibold text-[10px] uppercase">
+                        <span className="inline-block px-2 py-0.5 rounded bg-cyan-950/60 border border-cyan-800/40 text-cyan-300 font-semibold text-[10px] uppercase">
                           {order.deviceType}
                         </span>
                         <p className="text-slate-200 mt-1 line-clamp-2 leading-snug">
@@ -205,19 +205,44 @@ export const RepairOrderList: React.FC<RepairOrderListProps> = ({
                         </p>
                       </td>
 
-                      {/* Parts & Diagnosis */}
-                      <td className="py-3 px-4 max-w-[180px]">
+                      {/* Optical Telemetry & Diagnosis */}
+                      <td className="py-3 px-4 max-w-[200px]">
+                        {(order.opticalPowerBeforeDbm !== undefined || order.opticalPowerAfterDbm !== undefined) && (
+                          <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
+                            {order.opticalPowerBeforeDbm !== undefined && (
+                              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-950/80 border border-amber-800/50 text-amber-300 font-semibold">
+                                In: {order.opticalPowerBeforeDbm} dBm
+                              </span>
+                            )}
+                            {order.opticalPowerAfterDbm !== undefined && (
+                              <span
+                                className={`text-[10px] font-mono px-1.5 py-0.5 rounded border font-bold ${
+                                  order.opticalPowerAfterDbm >= -25 && order.opticalPowerAfterDbm <= -15
+                                    ? 'bg-emerald-950/80 border-emerald-700/60 text-emerald-300'
+                                    : 'bg-rose-950/80 border-rose-700/60 text-rose-300'
+                                }`}
+                                title={
+                                  order.opticalPowerAfterDbm >= -25 && order.opticalPowerAfterDbm <= -15
+                                    ? 'Optimal Light Level (-15 to -25 dBm)'
+                                    : 'Suboptimal Light Level'
+                                }
+                              >
+                                Rx: {order.opticalPowerAfterDbm} dBm
+                              </span>
+                            )}
+                          </div>
+                        )}
                         {order.diagnosisNotes && (
                           <p className="text-[11px] text-slate-400 italic line-clamp-2">
                             {order.diagnosisNotes}
                           </p>
                         )}
                         {order.partsUsed && order.partsUsed.length > 0 ? (
-                          <div className="text-[10px] text-emerald-400 mt-0.5 font-medium">
-                            {order.partsUsed.length} parts replaced
+                          <div className="text-[10px] text-cyan-400 mt-0.5 font-medium">
+                            {order.partsUsed.length} parts/materials used
                           </div>
-                        ) : (
-                          <span className="text-slate-600 text-[10px]">No hardware parts</span>
+                        ) : !order.opticalPowerBeforeDbm && !order.opticalPowerAfterDbm && (
+                          <span className="text-slate-600 text-[10px]">No telemetry or parts</span>
                         )}
                       </td>
 

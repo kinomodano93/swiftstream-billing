@@ -137,6 +137,16 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
   const [routerModel, setRouterModel] = useState(
     customerToEdit?.network?.routerModel || 'Huawei EG8145V5 Dual Band'
   );
+  const [opticalPowerDbm, setOpticalPowerDbm] = useState<string>(
+    customerToEdit?.network?.opticalPowerDbm != null ? String(customerToEdit.network.opticalPowerDbm) : '-18.5'
+  );
+  const [dropCableMeters, setDropCableMeters] = useState<string>(
+    customerToEdit?.network?.dropCableMeters != null
+      ? String(customerToEdit.network.dropCableMeters)
+      : customerToEdit?.installationDetails?.dropCableMeters != null
+      ? String(customerToEdit.installationDetails.dropCableMeters)
+      : '75'
+  );
 
   const selectedPlan = plans.find((p) => p.id === selectedPlanId) || defaultPlan;
   const selectedRouter =
@@ -167,6 +177,14 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
       setNapPortNumber(customerToEdit.network?.napPortNumber || 1);
       setOnuSerial(customerToEdit.network?.onuSerial || '');
       setRouterModel(customerToEdit.network?.routerModel || 'Huawei EG8145V5 Dual Band');
+      setOpticalPowerDbm(customerToEdit.network?.opticalPowerDbm != null ? String(customerToEdit.network.opticalPowerDbm) : '-18.5');
+      setDropCableMeters(
+        customerToEdit.network?.dropCableMeters != null
+          ? String(customerToEdit.network.dropCableMeters)
+          : customerToEdit.installationDetails?.dropCableMeters != null
+          ? String(customerToEdit.installationDetails.dropCableMeters)
+          : '75'
+      );
       setSubmitError(null);
     }
   }, [customerToEdit]);
@@ -411,6 +429,8 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
       napPortNumber,
       onuSerial,
       routerModel,
+      opticalPowerDbm: opticalPowerDbm.trim() ? parseFloat(opticalPowerDbm) : -18.5,
+      dropCableMeters: dropCableMeters.trim() ? parseFloat(dropCableMeters) : 75,
       vlanId: '100',
       oltPonPort: 'PON-1/1',
       isMikrotikSynced: autoSyncMikrotik && !bypassSync,
@@ -1510,6 +1530,42 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
                   placeholder="Huawei EG8145V5 Dual Band"
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500"
                 />
+              </div>
+
+              <div>
+                <label className="block text-slate-400 mb-1 font-medium flex items-center justify-between">
+                  <span>Optical Power Rx (dBm)</span>
+                  <span className="text-[10px] text-emerald-400 font-mono">OPM Meter Reading</span>
+                </label>
+                <input
+                  type="number"
+                  step="0.1"
+                  value={opticalPowerDbm}
+                  onChange={(e) => setOpticalPowerDbm(e.target.value)}
+                  placeholder="-18.5"
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-mono focus:outline-none focus:border-cyan-500"
+                />
+                <span className="text-[10px] text-slate-500 mt-0.5 block">
+                  Optimal GPON/EPON window: -15.0 to -25.0 dBm
+                </span>
+              </div>
+
+              <div>
+                <label className="block text-slate-400 mb-1 font-medium flex items-center justify-between">
+                  <span>Fiber Drop Cable Length (m)</span>
+                  <span className="text-[10px] text-cyan-400 font-mono">NAP to House</span>
+                </label>
+                <input
+                  type="number"
+                  step="1"
+                  value={dropCableMeters}
+                  onChange={(e) => setDropCableMeters(e.target.value)}
+                  placeholder="75"
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-mono focus:outline-none focus:border-cyan-500"
+                />
+                <span className="text-[10px] text-slate-500 mt-0.5 block">
+                  Distance of black 1-core drop wire from NAP to ONT
+                </span>
               </div>
             </div>
           </div>

@@ -48,6 +48,7 @@ export const Sidebar: React.FC = () => {
     systemRole,
     canAccessTab,
     staffUsers,
+    currentAuthUser,
     overdueOperationalBillsCount,
     dueSoonOperationalBillsCount,
   } = useApp();
@@ -347,16 +348,22 @@ export const Sidebar: React.FC = () => {
           </button>
         </div>
 
-        {/* Location & Active Role Tag (Only when expanded) */}
+        {/* Security Clearance & Active Role Tag (Only when expanded) */}
         {!isCollapsed && (
           <div className="px-4 pt-3 pb-1 animate-in fade-in duration-200">
             <div className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-slate-950/60 border border-slate-800/80 text-[11px] text-slate-400">
               <span className="flex items-center gap-1.5 truncate">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                <span className="truncate">{businessProfile.address.city || 'Lagonoy'}, {businessProfile.address.province || 'Cam Sur'}</span>
+                <ShieldCheck className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                <span className="truncate font-medium text-slate-300">
+                  {currentAuthUser?.role === 'admin' ? 'Admin Clearance' : 'Staff Access'}
+                </span>
               </span>
-              <span className={`text-[10px] font-mono px-2 py-0.5 rounded border uppercase font-bold ${roleMeta.badgeBg} ${roleMeta.badgeBorder} ${roleMeta.textColor}`}>
-                {roleMeta.badge}
+              <span className={`text-[10px] font-mono px-2 py-0.5 rounded border uppercase font-bold ${
+                currentAuthUser?.role === 'admin'
+                  ? 'bg-purple-950/60 border-purple-800/60 text-purple-300'
+                  : `${roleMeta.badgeBg} ${roleMeta.badgeBorder} ${roleMeta.textColor}`
+              }`}>
+                {currentAuthUser?.role === 'admin' ? 'Super Admin' : roleMeta.badge}
               </span>
             </div>
           </div>
@@ -434,22 +441,29 @@ export const Sidebar: React.FC = () => {
                 <span className="text-emerald-400 font-mono text-[10px] font-semibold">ONLINE</span>
               </div>
               <div className="flex items-center justify-between text-slate-400">
-                <span>TIN No:</span>
-                <span className="font-mono text-[10px] text-slate-300">{businessProfile.tin}</span>
+                <span>Account:</span>
+                <span className="font-mono text-[10px] text-slate-300 truncate max-w-[120px]">
+                  {currentAuthUser?.email || 'Administrator'}
+                </span>
               </div>
               <div className="flex items-center justify-between text-slate-400">
-                <span>Rep:</span>
-                <span className="text-[10px] text-slate-300 truncate max-w-[120px] text-right">
-                  {businessProfile.representative.firstName} {businessProfile.representative.lastName}
+                <span>Session:</span>
+                <span className="text-[10px] text-emerald-400 font-semibold flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  {currentAuthUser?.role === 'admin' ? 'Verified Admin' : 'Active Staff'}
                 </span>
               </div>
             </div>
           ) : (
             <div
               className="flex justify-center p-2 rounded-xl bg-slate-900/90 border border-slate-800 text-[10px]"
-              title="MikroTik Core Router Online"
+              title={currentAuthUser?.role === 'admin' ? 'Verified Administrator Session' : 'Staff Operations Session'}
             >
-              <Wifi className="w-4 h-4 text-emerald-400" />
+              {currentAuthUser?.role === 'admin' ? (
+                <ShieldCheck className="w-4 h-4 text-purple-400" />
+              ) : (
+                <Wifi className="w-4 h-4 text-emerald-400" />
+              )}
             </div>
           )}
 

@@ -34,13 +34,16 @@ export const EODModal: React.FC<EODModalProps> = ({ onClose }) => {
   const cashPayments = shiftPayments.filter((p) => p.paymentMethod === 'cash');
   const gcashPayments = shiftPayments.filter((p) => p.paymentMethod === 'gcash');
   const mayaPayments = shiftPayments.filter((p) => p.paymentMethod === 'maya');
+  const xenditPayments = shiftPayments.filter((p) => p.paymentMethod === 'xendit');
   const bankPayments = shiftPayments.filter((p) => p.paymentMethod === 'bank_transfer');
   const otherPayments = shiftPayments.filter((p) => p.paymentMethod === 'other' || p.paymentMethod === 'check');
 
   const cashTotal = cashPayments.reduce((s, p) => s + p.amount, 0);
   const gcashTotal = gcashPayments.reduce((s, p) => s + p.amount, 0);
   const mayaTotal = mayaPayments.reduce((s, p) => s + p.amount, 0);
+  const xenditTotal = xenditPayments.reduce((s, p) => s + p.amount, 0);
   const bankTotal = bankPayments.reduce((s, p) => s + p.amount, 0);
+  const otherTotal = otherPayments.reduce((s, p) => s + p.amount, 0);
   const grandTotal = shiftPayments.reduce((s, p) => s + p.amount, 0);
 
   const handleDownloadPDF = () => {
@@ -101,21 +104,35 @@ export const EODModal: React.FC<EODModalProps> = ({ onClose }) => {
         {/* Content Body */}
         <div className="p-6 overflow-y-auto flex-1 space-y-5 text-xs">
           {/* Top KPI Summary */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-1">
-              <span className="text-[10px] font-bold text-slate-500 uppercase">Total Collected</span>
-              <h4 className="text-2xl font-black font-mono text-emerald-400">
+              <span className="text-[10px] font-bold text-slate-500 uppercase">Total Shift Collections</span>
+              <h4 className="text-xl font-black font-mono text-emerald-400">
                 {formatCurrency(grandTotal)}
               </h4>
-              <p className="text-[11px] text-slate-400">{shiftPayments.length} Total Transactions</p>
+              <p className="text-[11px] text-slate-400">{shiftPayments.length} Total Receipts</p>
             </div>
 
-            <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-1">
-              <span className="text-[10px] font-bold text-slate-500 uppercase">Physical Cash in Drawer</span>
-              <h4 className="text-2xl font-black font-mono text-cyan-400">
+            <div className="p-4 rounded-2xl bg-slate-950 border border-cyan-800/40 bg-cyan-950/20 space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold text-cyan-400 uppercase">Cash-in-Drawer (To Remit)</span>
+                <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-cyan-900/60 text-cyan-300">Safe Count</span>
+              </div>
+              <h4 className="text-xl font-black font-mono text-cyan-300">
                 {formatCurrency(cashTotal)}
               </h4>
-              <p className="text-[11px] text-slate-400">{cashPayments.length} Cash Payments</p>
+              <p className="text-[11px] text-slate-400">{cashPayments.length} Physical Cash Txns</p>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-950 border border-purple-800/40 bg-purple-950/20 space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold text-purple-400 uppercase">Digital Gateways & Banks</span>
+                <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-purple-900/60 text-purple-300">E-Inflows</span>
+              </div>
+              <h4 className="text-xl font-black font-mono text-purple-300">
+                {formatCurrency(grandTotal - cashTotal)}
+              </h4>
+              <p className="text-[11px] text-slate-400">{shiftPayments.length - cashPayments.length} Online / QR / Direct</p>
             </div>
           </div>
 
@@ -156,6 +173,17 @@ export const EODModal: React.FC<EODModalProps> = ({ onClose }) => {
                 <div className="text-right font-mono">
                   <span className="text-slate-400 mr-3 text-[11px]">{mayaPayments.length} txns</span>
                   <span className="font-bold text-cyan-400">{formatCurrency(mayaTotal)}</span>
+                </div>
+              </div>
+
+              <div className="p-3 flex items-center justify-between">
+                <span className="flex items-center gap-2 text-slate-300">
+                  <span>⚡</span>
+                  <span>Xendit Multi-Channel Gateway</span>
+                </span>
+                <div className="text-right font-mono">
+                  <span className="text-slate-400 mr-3 text-[11px]">{xenditPayments.length} txns</span>
+                  <span className="font-bold text-amber-400">{formatCurrency(xenditTotal)}</span>
                 </div>
               </div>
 

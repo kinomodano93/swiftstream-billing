@@ -55,6 +55,7 @@ import { testSmtpConnection, SMTP_PRESETS } from '../../utils/smtpService';
 import { testSmsGatewayConnection } from '../../utils/smsSender';
 import { sendTelegramStaffAlert, sendDiscordStaffAlert, testWebhookIntegration } from '../../utils/webhookService';
 import { testGeminiApiKey } from '../../utils/geminiService';
+import { testGoogleMapsApiKey, DEFAULT_GOOGLE_MAPS_API_KEY } from '../../services/googleMapsService';
 import { testGoogleDriveAccess, authorizeGoogleDriveWithPopup } from '../../services/routerBackupService';
 import { XenditGatewaySettings } from './XenditGatewaySettings';
 import { FirebaseSettingsCard } from './FirebaseSettingsCard';
@@ -157,6 +158,7 @@ export const SettingsModal: React.FC = () => {
     setDriveEnabled(businessProfile.apiKeys?.googleDriveConfig?.enabled ?? false);
     setDriveToken(businessProfile.apiKeys?.googleDriveConfig?.accessToken || '');
     setDriveFolderId(businessProfile.apiKeys?.googleDriveConfig?.folderId || '');
+    setGoogleMapsApiKey(businessProfile.apiKeys?.googleMapsApiKey || DEFAULT_GOOGLE_MAPS_API_KEY);
   }, [businessProfile]);
 
   // Address
@@ -226,6 +228,31 @@ export const SettingsModal: React.FC = () => {
       setGeminiTestResult({ success: false, message: err?.message || 'Connection test failed.' });
     } finally {
       setIsTestingGemini(false);
+    }
+  };
+
+  // Google Maps Platform Outside Plant State
+  const [googleMapsApiKey, setGoogleMapsApiKey] = useState<string>(
+    businessProfile.apiKeys?.googleMapsApiKey || DEFAULT_GOOGLE_MAPS_API_KEY
+  );
+  const [showGoogleMapsKey, setShowGoogleMapsKey] = useState<boolean>(false);
+  const [isTestingGoogleMaps, setIsTestingGoogleMaps] = useState<boolean>(false);
+  const [googleMapsTestResult, setGoogleMapsTestResult] = useState<{ success: boolean; message: string; services?: string[] } | null>(null);
+
+  const handleTestGoogleMaps = async () => {
+    if (!googleMapsApiKey.trim()) {
+      setGoogleMapsTestResult({ success: false, message: 'Please enter a valid Google Maps API Key first.' });
+      return;
+    }
+    setIsTestingGoogleMaps(true);
+    setGoogleMapsTestResult(null);
+    try {
+      const res = await testGoogleMapsApiKey(googleMapsApiKey.trim());
+      setGoogleMapsTestResult(res);
+    } catch (err: any) {
+      setGoogleMapsTestResult({ success: false, message: err?.message || 'Google Maps connection test failed.' });
+    } finally {
+      setIsTestingGoogleMaps(false);
     }
   };
 
@@ -564,6 +591,7 @@ export const SettingsModal: React.FC = () => {
         mikrotikPassword,
         geminiApiKey,
         geminiModel,
+        googleMapsApiKey: googleMapsApiKey.trim(),
         googleDriveConfig: {
           enabled: driveEnabled,
           accessToken: driveToken.trim(),
@@ -2008,6 +2036,118 @@ export const SettingsModal: React.FC = () => {
                       <AlertCircle className="w-4 h-4 flex-shrink-0 text-rose-400" />
                     )}
                     <span>{geminiTestResult.message}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Google Maps Platform & Outside Plant GIS Configuration */}
+          <div className="space-y-4 pt-4 border-t border-slate-800">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h4 className="font-bold text-slate-200 uppercase tracking-wider text-[11px] text-cyan-400 flex items-center gap-2">
+                  <MapPin className="w-4 h-4 text-emerald-400" />
+                  <span>Google Maps Platform & Outside Plant GIS</span>
+                </h4>
+                <p className="text-[11px] text-slate-400">
+                  Powers high-resolution Google Hybrid Satellite, Official Google Streets Roadmap, and Geocoding across Fiber GIS maps.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 bg-emerald-950/40 border border-emerald-800/50 px-3 py-1 rounded-xl text-emerald-300 font-mono text-[10px] font-bold self-start sm:self-auto">
+                <span className={`w-2 h-2 rounded-full ${googleMapsApiKey ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`}></span>
+                <span>{googleMapsApiKey ? 'GOOGLE MAPS PLATFORM ACTIVE' : 'OPEN MAPS FALLBACK'}</span>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-slate-400 font-medium text-xs">Google Maps API Key</label>
+                    <a
+                      href="https://console.cloud.google.com/google/maps-apis/credentials"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-[10px] text-cyan-400 hover:underline inline-flex items-center gap-1"
+                    >
+                      <span>Google Cloud Console</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  </div>
+                  <div className="relative">
+                    <input
+                      type={showGoogleMapsKey ? 'text' : 'password'}
+                      value={googleMapsApiKey}
+                      onChange={(e) => setGoogleMapsApiKey(e.target.value)}
+                      placeholder="AIzaSy..."
+                      className="w-full pl-3 pr-10 py-2 bg-slate-900 border border-slate-700 rounded-xl text-slate-100 font-mono text-xs focus:outline-none focus:border-cyan-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowGoogleMapsKey(!showGoogleMapsKey)}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200"
+                      title={showGoogleMapsKey ? 'Hide key' : 'Show key'}
+                    >
+                      {showGoogleMapsKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-slate-400 font-medium text-xs mb-1">Enabled Services & Layers</label>
+                  <div className="p-2.5 bg-slate-900 border border-slate-800 rounded-xl text-[11px] text-slate-300 space-y-1">
+                    <div className="flex items-center gap-2 text-emerald-400">
+                      <Check className="w-3.5 h-3.5 flex-shrink-0" />
+                      <span>Google Hybrid (Satellite Aerial + Street Labels)</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-cyan-400">
+                      <Check className="w-3.5 h-3.5 flex-shrink-0" />
+                      <span>Google Streets (Official Vector Roadmap)</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-slate-300">
+                      <Check className="w-3.5 h-3.5 flex-shrink-0" />
+                      <span>Google Terrain & Elevation Shading</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={handleTestGoogleMaps}
+                  disabled={isTestingGoogleMaps || !googleMapsApiKey.trim()}
+                  className="px-4 py-2 rounded-xl border border-slate-700 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-slate-200 font-semibold text-xs flex items-center gap-2 transition-colors"
+                >
+                  {isTestingGoogleMaps ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin text-cyan-400" />
+                      <span>Testing Google Maps Connection...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Zap className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>Test Google Maps Key</span>
+                    </>
+                  )}
+                </button>
+
+                {googleMapsTestResult && (
+                  <div
+                    className={`px-3 py-1.5 rounded-xl text-[11px] flex items-center gap-2 border ${
+                      googleMapsTestResult.success
+                        ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300'
+                        : 'bg-rose-950/40 border-rose-500/40 text-rose-300'
+                    }`}
+                  >
+                    {googleMapsTestResult.success ? (
+                      <CheckCircle2 className="w-4 h-4 flex-shrink-0 text-emerald-400" />
+                    ) : (
+                      <AlertCircle className="w-4 h-4 flex-shrink-0 text-rose-400" />
+                    )}
+                    <span>{googleMapsTestResult.message}</span>
                   </div>
                 )}
               </div>

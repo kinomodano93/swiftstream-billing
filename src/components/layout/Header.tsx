@@ -197,15 +197,27 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* System Role Indicator (Read-only, governed by authenticated account) */}
         <div
-          className={`flex items-center gap-1.5 sm:gap-2 px-2.5 py-1.5 rounded-xl border text-xs font-semibold select-none ${currentRoleMeta.badgeBg} ${currentRoleMeta.badgeBorder} ${currentRoleMeta.textColor}`}
-          title={`Current System Role: ${currentRoleMeta.label}`}
+          className={`flex items-center gap-1.5 sm:gap-2 px-2.5 py-1.5 rounded-xl border text-xs font-semibold select-none ${
+            currentAuthUser?.role === 'admin'
+              ? 'bg-purple-950/60 border-purple-800/60 text-purple-300 shadow-sm shadow-purple-950/40'
+              : `${currentRoleMeta.badgeBg} ${currentRoleMeta.badgeBorder} ${currentRoleMeta.textColor}`
+          }`}
+          title={`Authenticated Account: ${currentAuthUser?.email || 'N/A'} • Clearance: ${currentAuthUser?.role === 'admin' ? 'Administrator' : currentRoleMeta.label}`}
         >
-          {systemRole === 'admin' && <ShieldCheck className="w-4 h-4 text-purple-400 flex-shrink-0" />}
-          {systemRole === 'cashier' && <CreditCard className="w-4 h-4 text-emerald-400 flex-shrink-0" />}
-          {systemRole === 'technician' && <Wrench className="w-4 h-4 text-amber-400 flex-shrink-0" />}
+          {currentAuthUser?.role === 'admin' ? (
+            <ShieldCheck className="w-4 h-4 text-purple-400 flex-shrink-0" />
+          ) : systemRole === 'cashier' ? (
+            <CreditCard className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+          ) : (
+            <Wrench className="w-4 h-4 text-amber-400 flex-shrink-0" />
+          )}
           <div className="hidden sm:flex flex-col text-left leading-none">
-            <span className="text-[9px] uppercase font-mono tracking-wider opacity-75">Role</span>
-            <span className="font-bold text-[11px]">{currentRoleMeta.badge}</span>
+            <span className="text-[9px] uppercase font-mono tracking-wider opacity-75">
+              {currentAuthUser?.role === 'admin' ? 'Clearance' : 'Role'}
+            </span>
+            <span className="font-bold text-[11px]">
+              {currentAuthUser?.role === 'admin' ? 'Verified Admin' : currentRoleMeta.badge}
+            </span>
           </div>
         </div>
 

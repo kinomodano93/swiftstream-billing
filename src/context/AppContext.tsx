@@ -31,6 +31,8 @@ import {
   SYSTEM_ROLES_CONFIG,
   ROLE_PERMISSIONS,
   RolePermissions,
+  ADMIN_ONLY_TABS,
+  isAdminTab,
   StaffUser,
   OperationalBill,
   OperationalBillCategory,
@@ -70,6 +72,7 @@ import { db } from '../config/firebase';
 import {
   AppUserProfile,
   isStaffUser,
+  isAdminUser,
   subscribeToAuth,
   signOutUser,
   syncCustomerApprovalToUser,
@@ -124,6 +127,7 @@ interface AppContextType {
   napBoxes: NapBox[];
   fiberCables: FiberCable[];
   fiberClosures: FiberClosure[];
+  oltNodes: OltPopNode[];
   oltNode: OltPopNode;
   repairOrders: RepairOrder[];
   reminders: ReminderLog[];
@@ -189,7 +193,8 @@ interface AppContextType {
     enableProration?: boolean;
     customerIds?: string[];
     billingType?: string;
-  }) => { count: number; totalAmount: number };
+    autoEnqueueSms?: boolean;
+  }) => { count: number; totalAmount: number; smsQueuedCount?: number };
   applyInvoiceDiscount: (invoiceId: string, discountAmount: number) => void;
   runDailyGraceAudit: () => { isolatedCount: number; reactivatedCount: number; graceCount: number };
   triggerServerGraceAudit: () => Promise<{
@@ -257,7 +262,9 @@ interface AppContextType {
   addFiberClosure: (closure: Omit<FiberClosure, 'id'>) => FiberClosure;
   updateFiberClosure: (id: string, updates: Partial<FiberClosure>) => void;
   deleteFiberClosure: (id: string) => void;
-  updateOltNode: (updates: Partial<OltPopNode>) => void;
+  addOltNode: (node: Omit<OltPopNode, 'id'>) => OltPopNode;
+  updateOltNode: (idOrUpdates: string | Partial<OltPopNode>, updates?: Partial<OltPopNode>) => void;
+  deleteOltNode: (id: string) => void;
 
   // MikroTik Device Actions
   addMikrotikDevice: (device: Omit<MikrotikDevice, 'id'>) => MikrotikDevice;
@@ -362,7 +369,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [napBoxes, setNapBoxes] = useState<NapBox[]>(initial.napBoxes);
   const [fiberCables, setFiberCables] = useState<FiberCable[]>(initial.fiberCables);
   const [fiberClosures, setFiberClosures] = useState<FiberClosure[]>(initial.fiberClosures);
-  const [oltNode, setOltNode] = useState<OltPopNode>(initial.oltNode);
+  const [oltNodes, setOltNodes] = useState<OltPopNode[]>(initial.oltNodes || (initial.oltNode ? [initial.oltNode] : []));
+  const oltNode = oltNodes[0] || initial.oltNode;
   const [repairOrders, setRepairOrders] = useState<RepairOrder[]>(initial.repairOrders);
   const [reminders, setReminders] = useState<ReminderLog[]>(initial.reminders);
   const [mikrotikDevices, setMikrotikDevices] = useState<MikrotikDevice[]>(initial.mikrotikDevices);
@@ -420,14 +428,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             if (localRaw) {
               try {
                 const user = JSON.parse(localRaw) as AppUserProfile;
-                if (isStaffUser(user)) {
+                if (isAdminUser(user)) {
+                  return candidateTab;
+                }
+                if (user.role === 'cashier' && (candidateTab === 'billing' || candidateTab === 'payments')) {
+                  return candidateTab;
+                }
+                if ((user.role === 'technician' || user.role === 'tech') && (candidateTab === 'field_ops' || candidateTab === 'repairs' || candidateTab === 'network' || candidateTab === 'coverage')) {
                   return candidateTab;
                 }
               } catch {}
             }
-            // If auth is still initializing, preserve candidateTab during initial hydration.
-            // The role-guard useEffect will verify permissions once isAuthReady is true.
-            return candidateTab;
+            // If unauthenticated or role is not authorized for an admin module, default safely to public website
+            return 'home';
           }
         } else {
           // Direct root visit with no hash and no saved tab defaults to home
@@ -557,18 +570,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (user.role === 'cashier') return 'cashier';
         if (user.role === 'technician' || user.role === 'tech') return 'technician';
       }
-      const saved = localStorage.getItem(STORAGE_KEYS.SYSTEM_ROLE);
-      if (saved === 'admin' || saved === 'cashier' || saved === 'technician') {
-        return saved as SystemRole;
-      }
     } catch (_) {}
-    return 'admin';
+    return 'cashier'; // Safe least-privilege default (never default to admin when unauthenticated)
   });
 
   const setSystemRole = (role: SystemRole) => {
-    // Security restriction: When a user is logged in, their role is locked to their verified authenticated role
-    if (currentAuthUser && currentAuthUser.role !== 'admin' && role !== currentAuthUser.role) {
-      console.warn(`[Security Policy] Blocked attempt to elevate role to ${role} for user ${currentAuthUser.email}`);
+    // Strict security guardrail: ONLY verified authenticated admin users can change system role
+    if (!currentAuthUser || currentAuthUser.role !== 'admin') {
+      console.warn(`[Security Guardrail] Blocked unauthorized attempt to change role to ${role}`);
       return;
     }
     setSystemRoleState(role);
@@ -583,19 +592,39 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (currentAuthUser.role === 'admin') setSystemRoleState('admin');
       else if (currentAuthUser.role === 'cashier') setSystemRoleState('cashier');
       else if (currentAuthUser.role === 'technician' || currentAuthUser.role === 'tech') setSystemRoleState('technician');
+    } else {
+      setSystemRoleState('cashier');
     }
   }, [currentAuthUser]);
 
   const canAccessTab = (tabId: string): boolean => {
     if (tabId === 'home' || tabId === 'portal') return true;
-    if (!isStaffUser(currentAuthUser)) return false;
-    const permissions = ROLE_PERMISSIONS[systemRole];
+    // Strict authentication guard: MUST have an authenticated user with a staff role
+    if (!currentAuthUser || !isStaffUser(currentAuthUser)) return false;
+
+    // Strict admin guardrail: If the tab is an Admin-only tab, only verified admins can access
+    if (isAdminTab(tabId) && currentAuthUser.role !== 'admin') {
+      return false;
+    }
+
+    const effectiveRole: SystemRole = currentAuthUser.role === 'admin'
+      ? systemRole
+      : (currentAuthUser.role === 'cashier' ? 'cashier' : 'technician');
+
+    const permissions = ROLE_PERMISSIONS[effectiveRole];
     return permissions ? permissions.allowedTabs.includes(tabId) : false;
   };
 
   const hasPermission = (perm: keyof RolePermissions): boolean => {
-    if (!isStaffUser(currentAuthUser)) return false;
-    const permissions = ROLE_PERMISSIONS[systemRole];
+    if (!currentAuthUser || !isStaffUser(currentAuthUser)) return false;
+    if (currentAuthUser.role !== 'admin' && perm.startsWith('canAccess') && perm !== 'canAccessNetworkConfig') {
+      return false;
+    }
+    const effectiveRole: SystemRole = currentAuthUser.role === 'admin'
+      ? systemRole
+      : (currentAuthUser.role === 'cashier' ? 'cashier' : 'technician');
+
+    const permissions = ROLE_PERMISSIONS[effectiveRole];
     if (!permissions) return false;
     return Boolean(permissions[perm]);
   };
@@ -608,7 +637,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (activeTab === 'home' || activeTab === 'portal') return;
 
     // Admin/staff tabs require active staff login
-    if (!isStaffUser(currentAuthUser)) {
+    if (!currentAuthUser || !isStaffUser(currentAuthUser)) {
       if (currentAuthUser?.role === 'subscriber') {
         setActiveTab('portal');
         showToast('error', 'Access Restricted', 'Subscribers cannot access the administrative operations workspace.');
@@ -618,11 +647,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return;
     }
 
-    const perms = ROLE_PERMISSIONS[systemRole];
-    if (perms && !perms.allowedTabs.includes(activeTab)) {
-      if (systemRole === 'cashier') {
+    // Non-admins attempting to access admin-only module
+    if (currentAuthUser.role !== 'admin' && isAdminTab(activeTab)) {
+      showToast('error', 'Administrator Clearance Required', `The ${activeTab} module is restricted strictly to administrators.`);
+      if (currentAuthUser.role === 'cashier') {
         setActiveTab('billing');
-      } else if (systemRole === 'technician') {
+      } else if (currentAuthUser.role === 'technician' || currentAuthUser.role === 'tech') {
+        setActiveTab('field_ops');
+      } else {
+        setActiveTab('home');
+      }
+      return;
+    }
+
+    const effectiveRole: SystemRole = currentAuthUser.role === 'admin'
+      ? systemRole
+      : (currentAuthUser.role === 'cashier' ? 'cashier' : 'technician');
+
+    const perms = ROLE_PERMISSIONS[effectiveRole];
+    if (perms && !perms.allowedTabs.includes(activeTab)) {
+      if (effectiveRole === 'cashier') {
+        setActiveTab('billing');
+      } else if (effectiveRole === 'technician') {
         setActiveTab('field_ops');
       } else {
         setActiveTab('dashboard');
@@ -641,12 +687,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         } else if (hash === 'portal') {
           setActiveTab('portal');
         } else if (VALID_TABS.has(hash) && hash !== activeTab) {
-          if (isAuthReady && !isStaffUser(currentAuthUser)) {
-            setActiveTab('home');
-            showToast('info', 'Staff Login Required', 'Please sign in with an authorized staff account to access operations.');
-            openAuthModal('signin');
-          } else {
-            setActiveTab(hash);
+          if (isAuthReady) {
+            if (!currentAuthUser || !isStaffUser(currentAuthUser)) {
+              setActiveTab('home');
+              showToast('info', 'Administrator Authentication Required', 'Please sign in with verified credentials to access operations.');
+              openAuthModal('signin');
+            } else if (currentAuthUser.role === 'subscriber') {
+              setActiveTab('portal');
+              showToast('error', 'Access Denied', 'Subscribers are restricted to the Client Portal.');
+            } else if (isAdminTab(hash) && currentAuthUser.role !== 'admin') {
+              showToast('error', 'Admin Access Required', `The ${hash} module is restricted to Administrators.`);
+              setActiveTab(currentAuthUser.role === 'cashier' ? 'billing' : 'field_ops');
+            } else {
+              setActiveTab(hash);
+            }
           }
         }
       } catch {}
@@ -731,8 +785,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [fiberClosures]);
 
   useEffect(() => {
-    saveToStorage(STORAGE_KEYS.OLT_NODE, oltNode);
-  }, [oltNode]);
+    saveToStorage(STORAGE_KEYS.OLT_NODES, oltNodes);
+    if (oltNodes[0]) {
+      saveToStorage(STORAGE_KEYS.OLT_NODE, oltNodes[0]);
+    }
+  }, [oltNodes]);
 
   useEffect(() => {
     saveToStorage(STORAGE_KEYS.DAILY_REMITTANCES, dailyRemittances);
@@ -1021,7 +1078,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setAddonCatalog(data && data.length > 0 ? data : initialAddonCatalog);
     });
     const unsubOltNodes = subscribeToCollection<OltPopNode>(COLLECTIONS.OLT_NODES, (data) => {
-      if (data && data.length > 0) setOltNode(data[0]);
+      if (data && data.length > 0) setOltNodes(data);
     });
     const unsubSystemUsers = subscribeToCollection<any>(COLLECTIONS.SYSTEM_USERS, (data) => {
       if (data && data.length > 0) {
@@ -1869,10 +1926,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     enableProration?: boolean;
     customerIds?: string[];
     billingType?: string;
-  }): { count: number; totalAmount: number } => {
+    autoEnqueueSms?: boolean;
+  }): { count: number; totalAmount: number; smsQueuedCount?: number } => {
     if (!hasPermission('canBulkGenerateInvoices')) {
       showToast('error', 'Access Restricted', 'Only administrators have permission to run bulk billing generation.');
-      return { count: 0, totalAmount: 0 };
+      return { count: 0, totalAmount: 0, smsQueuedCount: 0 };
     }
 
     let targetSubscribers = customers;
@@ -1907,6 +1965,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     let generatedCount = 0;
     let totalGeneratedAmount = 0;
     const newInvoices: Invoice[] = [];
+    const newReminders: ReminderLog[] = [];
     const updatedCustomers = [...customers];
 
     const [year, month] = options.billingMonth.split('-');
@@ -2041,7 +2100,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         amountPaid: appliedCredit,
         balanceDue,
         status: invoiceStatus,
-        sentViaSms: false,
+        sentViaSms: options.autoEnqueueSms !== false,
         sentViaEmail: false,
         paidAt: invoiceStatus === 'paid' ? new Date().toISOString() : undefined,
         createdAt: new Date().toISOString(),
@@ -2050,6 +2109,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       newInvoices.push(invoice);
       generatedCount++;
       totalGeneratedAmount += totalAmount;
+
+      if (options.autoEnqueueSms !== false && customer.mobile) {
+        const smsMsg = generateReminderMessage('upcoming_due', customer, businessProfile, invoice);
+        newReminders.push({
+          id: generateId('REM'),
+          customerId: customer.id,
+          customerName: customer.fullName,
+          mobile: customer.mobile,
+          email: customer.email,
+          type: 'upcoming_due',
+          channel: 'sms',
+          messageText: smsMsg,
+          status: 'sent',
+          sentAt: new Date().toISOString(),
+          invoiceNumber: invoice.invoiceNumber,
+          amountDue: invoice.balanceDue,
+        });
+      }
 
       // Update customer balance & wallet
       const custIndex = updatedCustomers.findIndex((c) => c.id === customer.id);
@@ -2066,6 +2143,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setInvoices((prev) => [...newInvoices, ...prev]);
       setCustomers(updatedCustomers);
 
+      if (newReminders.length > 0) {
+        setReminders((prev) => [...newReminders, ...prev]);
+        newReminders.forEach((rem) => saveFirestoreDoc(COLLECTIONS.REMINDERS, rem));
+      }
+
       // Persist all generated invoices and updated customer balances to Firestore
       newInvoices.forEach((inv) => saveFirestoreDoc(COLLECTIONS.INVOICES, inv));
       updatedCustomers.forEach((cust) => saveFirestoreDoc(COLLECTIONS.CUSTOMERS, cust));
@@ -2075,21 +2157,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         action: 'BATCH_BILLING_EXECUTED',
         category: 'billing',
         severity: 'info',
-        details: `Batch billing executed: generated ${generatedCount} invoices totaling ₱${totalGeneratedAmount.toLocaleString()} for billing cycle ${options.billingMonth}.`,
+        details: `Batch billing executed: generated ${generatedCount} invoices totaling ₱${totalGeneratedAmount.toLocaleString()}${newReminders.length > 0 ? ` (${newReminders.length} SMS notices enqueued)` : ''} for billing cycle ${options.billingMonth}.`,
         status: 'success',
-        metadata: { generatedCount, totalGeneratedAmount, billingMonth: options.billingMonth },
+        metadata: { generatedCount, totalGeneratedAmount, smsQueuedCount: newReminders.length, billingMonth: options.billingMonth },
       });
 
       showToast(
         'success',
         'Batch Invoicing Complete',
-        `Generated ${generatedCount} invoices totaling ₱${totalGeneratedAmount.toLocaleString()}.`
+        `Generated ${generatedCount} invoices${newReminders.length > 0 ? ` (${newReminders.length} SMS queued)` : ''} totaling ₱${totalGeneratedAmount.toLocaleString()}.`
       );
     } else {
       showToast('info', 'No Invoices Needed', 'All active accounts for this period already have invoices.');
     }
 
-    return { count: generatedCount, totalAmount: totalGeneratedAmount };
+    return { count: generatedCount, totalAmount: totalGeneratedAmount, smsQueuedCount: newReminders.length };
   };
 
   const applyInvoiceDiscount = (invoiceId: string, discountAmount: number) => {
@@ -3005,13 +3087,57 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     showToast('warning', 'Closure Removed', 'Splice enclosure deleted from GIS map.');
   };
 
-  const updateOltNode = (updates: Partial<OltPopNode>) => {
-    setOltNode((prev) => {
-      const updated = { ...prev, ...updates };
-      saveFirestoreDoc(COLLECTIONS.OLT_NODES, updated);
-      return updated;
-    });
-    showToast('info', 'OLT POP Updated', 'Central Office node parameters saved.');
+  const addOltNode = (nodeData: Omit<OltPopNode, 'id'>): OltPopNode => {
+    const nextIndex = oltNodes.length + 1;
+    const generatedCode = nodeData.code || `OLT-${String(nextIndex).padStart(2, '0')}`;
+    const newNode: OltPopNode = {
+      ...nodeData,
+      id: generateId('OLT'),
+      code: generatedCode,
+    };
+    setOltNodes((prev) => [...prev, newNode]);
+    saveFirestoreDoc(COLLECTIONS.OLT_NODES, newNode);
+    showToast('success', 'OLT Headend Registered', `Optical Line Terminal "${newNode.code} - ${newNode.name}" added to network.`);
+    return newNode;
+  };
+
+  const updateOltNode = (idOrUpdates: string | Partial<OltPopNode>, updates?: Partial<OltPopNode>) => {
+    if (typeof idOrUpdates === 'string') {
+      const targetId = idOrUpdates;
+      const partial = updates || {};
+      setOltNodes((prev) =>
+        prev.map((node) => {
+          if (node.id === targetId) {
+            const updated = { ...node, ...partial };
+            saveFirestoreDoc(COLLECTIONS.OLT_NODES, updated);
+            return updated;
+          }
+          return node;
+        })
+      );
+      showToast('info', 'OLT POP Updated', 'Optical Line Terminal parameters saved.');
+    } else {
+      const partial = idOrUpdates;
+      setOltNodes((prev) => {
+        if (prev.length === 0) return prev;
+        const target = prev[0];
+        const updated = { ...target, ...partial };
+        saveFirestoreDoc(COLLECTIONS.OLT_NODES, updated);
+        return [updated, ...prev.slice(1)];
+      });
+      showToast('info', 'OLT POP Updated', 'Primary OLT node parameters saved.');
+    }
+  };
+
+  const deleteOltNode = (id: string) => {
+    if (oltNodes.length <= 1) {
+      showToast('error', 'Cannot Delete Headend', 'At least one Optical Line Terminal POP is required.');
+      return;
+    }
+    const target = oltNodes.find((n) => n.id === id);
+    deleteFirestoreDoc(COLLECTIONS.OLT_NODES, id);
+    setOltNodes((prev) => prev.filter((n) => n.id !== id));
+    showToast('warning', 'OLT Removed', `OLT "${target?.code || target?.name || id}" removed from network.`);
   };
 
   // --- Repair Operations ---
@@ -4062,7 +4188,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (jsonData.napBoxes) setNapBoxes(jsonData.napBoxes);
       if (jsonData.fiberCables) setFiberCables(jsonData.fiberCables);
       if (jsonData.fiberClosures) setFiberClosures(jsonData.fiberClosures);
-      if (jsonData.oltNode) setOltNode(jsonData.oltNode);
+      if (jsonData.oltNodes && Array.isArray(jsonData.oltNodes)) {
+        setOltNodes(jsonData.oltNodes);
+      } else if (jsonData.oltNode) {
+        setOltNodes([jsonData.oltNode]);
+      }
       if (jsonData.repairOrders) setRepairOrders(jsonData.repairOrders);
       if (jsonData.reminders) setReminders(jsonData.reminders);
       if (jsonData.mikrotikDevices) setMikrotikDevices(jsonData.mikrotikDevices);
@@ -4146,6 +4276,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         napBoxes,
         fiberCables,
         fiberClosures,
+        oltNodes,
         oltNode,
         repairOrders,
         reminders,
@@ -4208,7 +4339,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addFiberClosure,
         updateFiberClosure,
         deleteFiberClosure,
+        addOltNode,
         updateOltNode,
+        deleteOltNode,
         addMikrotikDevice,
         updateMikrotikDevice,
         deleteMikrotikDevice,

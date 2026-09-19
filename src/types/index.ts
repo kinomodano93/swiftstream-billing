@@ -81,6 +81,27 @@ export interface RolePermissions {
   canRunGraceAudit: boolean;
 }
 
+export const ADMIN_ONLY_TABS: readonly string[] = [
+  'dashboard',
+  'customers',
+  'applications',
+  'plans',
+  'reports',
+  'bill_calendar',
+  'mikrotik',
+  'ipoe_dhcp',
+  'reminders',
+  'verification_queue',
+  'staff_users',
+  'settings',
+  'system_logs',
+  'transaction_logs',
+];
+
+export const isAdminTab = (tabId: string): boolean => {
+  return ADMIN_ONLY_TABS.includes(tabId);
+};
+
 export const ROLE_PERMISSIONS: Record<SystemRole, RolePermissions> = {
   admin: {
     allowedTabs: [
@@ -123,6 +144,7 @@ export const ROLE_PERMISSIONS: Record<SystemRole, RolePermissions> = {
   cashier: {
     allowedTabs: [
       'billing',
+      'payments',
     ],
     canDeleteCustomer: false,
     canDeleteInvoice: false,
@@ -141,15 +163,10 @@ export const ROLE_PERMISSIONS: Record<SystemRole, RolePermissions> = {
   },
   technician: {
     allowedTabs: [
-      'dashboard',
       'field_ops',
-      'customers',
       'repairs',
       'network',
       'coverage',
-      'mikrotik',
-      'ipoe_dhcp',
-      'reminders',
     ],
     canDeleteCustomer: false,
     canDeleteInvoice: false,
@@ -272,6 +289,7 @@ export interface BusinessProfile {
     mikrotikUseSsl?: boolean;
     geminiApiKey?: string;
     geminiModel?: string;
+    googleMapsApiKey?: string;
     googleDriveConfig?: {
       enabled: boolean;
       folderId?: string;
@@ -408,6 +426,7 @@ export interface CustomerNetwork {
   routerModel?: string;
   isMikrotikSynced: boolean;
   opticalPowerDbm?: number;
+  dropCableMeters?: number;
 }
 
 export interface Customer {
@@ -565,6 +584,18 @@ export interface NapPort {
   signalDbm?: number;
 }
 
+export type FbtSplitterRatio =
+  | '90/10'
+  | '85/15'
+  | '80/20'
+  | '75/25'
+  | '70/30'
+  | '60/40'
+  | '50/50'
+  | 'terminal';
+
+export type PlcSplitterType = '1:4' | '1:8' | '1:16' | '1:32';
+
 export interface NapBox {
   id: string;
   code: string;
@@ -577,8 +608,16 @@ export interface NapBox {
   ports: NapPort[];
   latitude: number;
   longitude: number;
+  oltId?: string; // Linked parent OLT node ID
+  ponPortNumber?: number; // PON Port on the parent OLT (e.g. 1..16)
+  feedSourceType?: 'olt' | 'nap'; // 'olt' = First box fed directly from OLT, 'nap' = Daisy-chained from upstream NAP
+  upstreamNapId?: string; // ID of the parent upstream NAP box in the daisy-chain cascade
+  fbtRatio?: FbtSplitterRatio; // FBT asymmetrical coupler ratio (e.g. 85/15, 80/20, terminal)
+  plcSplitterType?: PlcSplitterType; // PLC symmetrical drop splitter inside the box
+  cascadeHopIndex?: number; // 1-based index in the cascade chain (1 = Feeder NAP, 2 = Hop 2, etc.)
   parentCableId?: string;
   opticalInputPowerDbm?: number;
+  calculatedRxPowerDbm?: number;
   notes?: string;
 }
 
@@ -617,6 +656,7 @@ export interface FiberClosure {
 
 export interface OltPopNode {
   id: string;
+  code?: string; // e.g. OLT-01, OLT-02
   name: string;
   location: string;
   barangay: string;
@@ -652,7 +692,18 @@ export interface RepairOrder {
   customerName: string;
   contactNumber: string;
   address: string;
-  deviceType: 'ONU/Router' | 'Fiber Line Cut' | 'Desktop/Laptop' | 'Power Adapter' | 'Switch/AP' | 'Other';
+  deviceType:
+    | 'ONU/Router'
+    | 'Fiber Line Cut'
+    | 'Optical Signal Loss (LOS)'
+    | 'NAP Box / Splitter Fault'
+    | 'Power Adapter'
+    | 'Switch/AP'
+    | 'Cable Relocation'
+    | 'Desktop/Laptop'
+    | 'Other';
+  opticalPowerBeforeDbm?: number;
+  opticalPowerAfterDbm?: number;
   issueDescription: string;
   diagnosisNotes?: string;
   technician: string;

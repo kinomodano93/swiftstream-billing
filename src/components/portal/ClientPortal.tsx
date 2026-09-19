@@ -53,6 +53,7 @@ import {
   Home,
   MoreHorizontal,
   Building2,
+  Lock,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import confetti from 'canvas-confetti';
@@ -214,6 +215,19 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
   const [xenditStatusMessage, setXenditStatusMessage] = useState<string>('');
   const [cashCollectionRequested, setCashCollectionRequested] = useState<boolean>(false);
 
+  // Available Xendit Subchannels
+  const xenditAvailableChannels = useMemo(() => {
+    const popularIds = ['GCASH', 'MAYA', 'QRPH', 'CREDIT_CARD', 'GRABPAY', 'SHOPEEPAY', '7ELEVEN'];
+    return XENDIT_CHANNELS
+      .filter((c) => popularIds.includes(c.id))
+      .map((c) => ({
+        code: c.id,
+        name: c.name,
+        icon: c.icon,
+        description: c.description,
+      }));
+  }, []);
+
   // Trouble Ticket Form State
   const [ticketDeviceType, setTicketDeviceType] = useState<RepairOrder['deviceType']>('ONU/Router');
   const [ticketIssue, setTicketIssue] = useState<string>('');
@@ -328,6 +342,14 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
   const totalBilledAmount = useMemo(() => {
     return customerInvoices.reduce((sum, inv) => sum + (inv.totalAmount || 0), 0);
   }, [customerInvoices]);
+
+  // Active Desktop Navigation Hub derived from current portalTab
+  const activeHub = useMemo<'overview' | 'billing' | 'support' | 'services'>(() => {
+    if (['bills', 'pay', 'receipts'].includes(portalTab)) return 'billing';
+    if (portalTab === 'support') return 'support';
+    if (['upgrade', 'speedtest', 'notifications'].includes(portalTab)) return 'services';
+    return 'overview';
+  }, [portalTab]);
 
   const totalPaidAmount = useMemo(() => {
     return customerPayments.reduce((sum, pay) => sum + (pay.amount || 0), 0);
@@ -514,9 +536,10 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
     if (e) e.preventDefault();
     if (!customer) return;
 
-    const amountNum = parseFloat(payAmount);
+    const exactDue = selectedPayInvoice?.balanceDue || (customer.balance > 0 ? customer.balance : customer.monthlyFee);
+    const amountNum = exactDue > 0 ? exactDue : parseFloat(payAmount) || customer.monthlyFee;
     if (isNaN(amountNum) || amountNum <= 0) {
-      alert('Please enter a valid payment amount.');
+      alert('No outstanding bill balance found for this account.');
       return;
     }
 
@@ -604,9 +627,10 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
     e.preventDefault();
     if (!customer) return;
 
-    const amountNum = parseFloat(payAmount);
+    const exactDue = selectedPayInvoice?.balanceDue || (customer.balance > 0 ? customer.balance : customer.monthlyFee);
+    const amountNum = exactDue > 0 ? exactDue : parseFloat(payAmount) || customer.monthlyFee;
     if (isNaN(amountNum) || amountNum <= 0) {
-      alert('Please enter a valid payment amount.');
+      alert('No outstanding bill balance found for this account.');
       return;
     }
 
@@ -1198,68 +1222,238 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
         </div>
       )}
 
-      {/* Desktop Navigation Tabs (Hidden on mobile; mobile uses native bottom nav bar) */}
-      <div className="hidden md:block border-b border-slate-800 bg-slate-900/70 px-4 sm:px-6 sticky top-16 z-20 backdrop-blur-md">
-        <div className="max-w-5xl mx-auto flex justify-center items-center overflow-x-auto py-2 scrollbar-none">
-          <div className="flex space-x-1 sm:space-x-2 text-xs">
-            {[
-              { id: 'overview', label: 'Subscription Overview', icon: Wifi },
-              {
-                id: 'bills',
-                label: 'Statements (Bills)',
-                icon: FileText,
-                badge: hasPendingProof
-                  ? `${pendingSubmissions.length} Reviewing`
-                  : unpaidInvoices.length > 0
-                  ? `${unpaidInvoices.length} Due`
-                  : null,
-                badgeColor: hasPendingProof
-                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                  : 'bg-rose-500/20 text-rose-300 border border-rose-500/30',
-              },
-              { id: 'pay', label: 'Pay Online', icon: CreditCard },
-              {
-                id: 'receipts',
-                label: 'Official Receipts',
-                icon: CheckCircle2,
-                badge: customerPayments.length > 0 ? `${customerPayments.length}` : null,
-                badgeColor: 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30',
-              },
-              {
-                id: 'notifications',
-                label: 'Notifications',
-                icon: Bell,
-                badge: recentRemindersCount > 0 ? `${recentRemindersCount}` : null,
-                badgeColor: 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30',
-              },
-              { id: 'support', label: 'Report Trouble', icon: Wrench },
-              { id: 'upgrade', label: 'WiFi & Upgrade', icon: Sparkles },
-              { id: 'speedtest', label: 'Speed Test', icon: Gauge },
-            ].map((tab) => {
-              const Icon = tab.icon;
-              const isActive = portalTab === tab.id;
-              return (
+      {/* Desktop Navigation Hubs (Hidden on mobile; mobile uses native bottom nav bar) */}
+      <div className="hidden md:block border-b border-slate-800 bg-slate-900/80 sticky top-16 z-20 backdrop-blur-md">
+        {/* Tier 1: 4 Primary Hubs + Express Pay Shortcut */}
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 flex items-center justify-between py-2.5">
+          <div className="flex items-center gap-1.5 sm:gap-2 text-xs">
+            {/* 1. Overview */}
+            <button
+              type="button"
+              onClick={() => setPortalTab('overview')}
+              className={`flex items-center gap-2 py-2 px-3.5 rounded-xl font-bold transition-all cursor-pointer ${
+                activeHub === 'overview'
+                  ? 'bg-cyan-600 text-white shadow-lg shadow-cyan-600/30'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+              }`}
+            >
+              <Home className="w-4 h-4" />
+              <span>Overview</span>
+            </button>
+
+            {/* 2. Billing & Payments */}
+            <button
+              type="button"
+              onClick={() => {
+                if (!['bills', 'pay', 'receipts'].includes(portalTab)) {
+                  setPortalTab(unpaidInvoices.length > 0 ? 'bills' : 'bills');
+                }
+              }}
+              className={`flex items-center gap-2 py-2 px-3.5 rounded-xl font-bold transition-all cursor-pointer ${
+                activeHub === 'billing'
+                  ? 'bg-cyan-600 text-white shadow-lg shadow-cyan-600/30'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+              }`}
+            >
+              <CreditCard className="w-4 h-4" />
+              <span>Billing &amp; Payments</span>
+              {hasPendingProof ? (
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 font-mono">
+                  {pendingSubmissions.length} Reviewing
+                </span>
+              ) : unpaidInvoices.length > 0 ? (
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/40 font-bold font-mono">
+                  {unpaidInvoices.length} Due
+                </span>
+              ) : null}
+            </button>
+
+            {/* 3. Support & Repairs */}
+            <button
+              type="button"
+              onClick={() => setPortalTab('support')}
+              className={`flex items-center gap-2 py-2 px-3.5 rounded-xl font-bold transition-all cursor-pointer ${
+                activeHub === 'support'
+                  ? 'bg-cyan-600 text-white shadow-lg shadow-cyan-600/30'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+              }`}
+            >
+              <Wrench className="w-4 h-4" />
+              <span>Support &amp; Repairs</span>
+              {customerTickets.some((t) => t.status === 'open' || t.status === 'in_progress') && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 font-mono">
+                  Active
+                </span>
+              )}
+            </button>
+
+            {/* 4. Services & Tools */}
+            <button
+              type="button"
+              onClick={() => {
+                if (!['upgrade', 'speedtest', 'notifications'].includes(portalTab)) {
+                  setPortalTab('upgrade');
+                }
+              }}
+              className={`flex items-center gap-2 py-2 px-3.5 rounded-xl font-bold transition-all cursor-pointer ${
+                activeHub === 'services'
+                  ? 'bg-cyan-600 text-white shadow-lg shadow-cyan-600/30'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+              }`}
+            >
+              <Layers className="w-4 h-4" />
+              <span>Services &amp; Tools</span>
+              {recentRemindersCount > 0 && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-mono">
+                  {recentRemindersCount}
+                </span>
+              )}
+            </button>
+          </div>
+
+          {/* Quick Express Pay Launcher Button on Desktop */}
+          <button
+            type="button"
+            onClick={() => setIsExpressPayOpen(true)}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold shadow-md shadow-emerald-600/25 transition-all hover:scale-105 active:scale-95 cursor-pointer"
+            title="Open Instant Express Pay drawer (GCash, Maya, Xendit)"
+          >
+            <Zap className="w-3.5 h-3.5" />
+            <span>⚡ Express Pay</span>
+          </button>
+        </div>
+
+        {/* Tier 2 Contextual Sub-Nav: Billing & Payments */}
+        {activeHub === 'billing' && (
+          <div className="border-t border-slate-800/80 bg-slate-950/60 py-2 px-4 sm:px-6 animate-in fade-in slide-in-from-top-1 duration-200">
+            <div className="max-w-5xl mx-auto flex items-center justify-between">
+              <div className="flex items-center gap-1.5 text-xs">
                 <button
-                  key={tab.id}
-                  onClick={() => setPortalTab(tab.id as any)}
-                  className={`flex items-center gap-2 py-2 px-3.5 rounded-xl font-semibold transition-all whitespace-nowrap cursor-pointer ${
-                    isActive
-                      ? 'bg-cyan-600 text-white shadow-lg shadow-cyan-600/30'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                  type="button"
+                  onClick={() => setPortalTab('bills')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-semibold transition-all cursor-pointer ${
+                    portalTab === 'bills'
+                      ? 'bg-slate-800 text-cyan-300 border border-slate-700 shadow-sm'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
                   }`}
                 >
-                  <Icon className="w-3.5 h-3.5" />
-                  <span>{tab.label}</span>
-                  {tab.badge && (
-                    <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${tab.badgeColor}`}>
-                      {tab.badge}
+                  <FileText className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>Statements (Bills)</span>
+                  {unpaidInvoices.length > 0 && (
+                    <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30 font-mono">
+                      {unpaidInvoices.length}
                     </span>
                   )}
                 </button>
-              );
-            })}
+
+                <button
+                  type="button"
+                  onClick={() => setPortalTab('pay')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-semibold transition-all cursor-pointer ${
+                    portalTab === 'pay'
+                      ? 'bg-slate-800 text-emerald-300 border border-slate-700 shadow-sm'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
+                  }`}
+                >
+                  <CreditCard className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Pay Online (Xendit / QR)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setPortalTab('receipts')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-semibold transition-all cursor-pointer ${
+                    portalTab === 'receipts'
+                      ? 'bg-slate-800 text-cyan-300 border border-slate-700 shadow-sm'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
+                  }`}
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Official Receipts (OR)</span>
+                  {customerPayments.length > 0 && (
+                    <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-mono">
+                      {customerPayments.length}
+                    </span>
+                  )}
+                </button>
+              </div>
+
+              <span className="text-[11px] text-slate-500 font-mono hidden lg:inline">
+                {hasPendingProof
+                  ? '⏳ Payment proof awaiting cashier approval'
+                  : customer && customer.balance > 0
+                  ? `Balance Due: ₱${customer.balance.toLocaleString(undefined, { minimumFractionDigits: 2 })}`
+                  : '✓ Account is fully settled'}
+              </span>
+            </div>
           </div>
-        </div>
+        )}
+
+        {/* Tier 2 Contextual Sub-Nav: Services & Tools */}
+        {activeHub === 'services' && (
+          <div className="border-t border-slate-800/80 bg-slate-950/60 py-2 px-4 sm:px-6 animate-in fade-in slide-in-from-top-1 duration-200">
+            <div className="max-w-5xl mx-auto flex items-center justify-between">
+              <div className="flex items-center gap-1.5 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setPortalTab('upgrade')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-semibold transition-all cursor-pointer ${
+                    portalTab === 'upgrade'
+                      ? 'bg-slate-800 text-cyan-300 border border-slate-700 shadow-sm'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
+                  }`}
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+                  <span>WiFi &amp; Plan Upgrade</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setPortalTab('speedtest')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-semibold transition-all cursor-pointer ${
+                    portalTab === 'speedtest'
+                      ? 'bg-slate-800 text-cyan-300 border border-slate-700 shadow-sm'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
+                  }`}
+                >
+                  <Gauge className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>Live Speed Test</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setPortalTab('notifications')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-semibold transition-all cursor-pointer ${
+                    portalTab === 'notifications'
+                      ? 'bg-slate-800 text-cyan-300 border border-slate-700 shadow-sm'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
+                  }`}
+                >
+                  <Bell className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Advisories &amp; Notices</span>
+                  {recentRemindersCount > 0 && (
+                    <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 font-mono">
+                      {recentRemindersCount}
+                    </span>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setGuestWifiQrModal(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-semibold text-slate-400 hover:text-sky-300 hover:bg-slate-900/60 transition-all cursor-pointer"
+                >
+                  <QrCode className="w-3.5 h-3.5 text-sky-400" />
+                  <span>Guest WiFi QR</span>
+                </button>
+              </div>
+
+              <span className="text-[11px] text-slate-500 font-mono hidden lg:inline">
+                Optical Node: Lagonoy Core • {resolvedSpeed > 0 ? `${resolvedSpeed} Mbps Fiber` : 'Active'}
+              </span>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Centered Main Content Container (pb-28 on mobile for safe clearance above bottom nav) */}
@@ -2063,10 +2257,10 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
             <div className="text-center space-y-1">
               <h2 className="text-xl font-bold text-slate-100 flex items-center justify-center gap-2">
                 <CreditCard className="w-5 h-5 text-emerald-400" />
-                <span>Pay Online via GCash, Maya, or Bank Transfer</span>
+                <span>Pay Online via Xendit Multi-Channel Gateway (GCash, Maya, Cards, QR Ph)</span>
               </h2>
               <p className="text-xs text-slate-400">
-                Scan our merchant QR code using GCash or Maya, enter your reference number, and attach your receipt screenshot. Once verified and approved by our cashier, your Official Receipt (OR) will be issued.
+                Choose automated checkout via Xendit for real-time settlement or scan our merchant QR Ph code. Official Receipts (OR) are automatically issued upon settlement.
               </p>
             </div>
 
@@ -2144,13 +2338,12 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                 <span className="text-xs font-bold text-slate-300 uppercase tracking-wider block text-center">
                   1. Select Payment Channel
                 </span>
-                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   {[
-                    { id: 'xendit', label: 'Xendit Gateway', icon: '⚡', desc: 'Direct Online Pay', badge: 'Fast Auto' },
+                    { id: 'xendit', label: 'Xendit Gateway', icon: '⚡', desc: 'Cards, Online Banks & QR Ph', badge: 'Fast Auto' },
                     { id: 'gcash', label: 'GCash QR Ph', icon: '📱', desc: 'Scan to pay' },
                     { id: 'maya', label: 'Maya QR Ph', icon: '💳', desc: 'Maya QR' },
-                    { id: 'cash', label: 'Cash Payment', icon: '💵', desc: 'Admin / Office manual' },
-                    { id: 'bank_transfer', label: 'Bank Transfer', icon: '🏦', desc: 'BDO / Landbank' },
+                    { id: 'cash', label: 'Cash Payment', icon: '💵', desc: 'Pay at Headend Office' },
                   ].map((m) => (
                     <button
                       type="button"
@@ -2206,30 +2399,28 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                         </span>
                       </div>
 
-                      {/* Payment Amount Input */}
-                      <div className="space-y-1">
-                        <label className="block text-slate-400 font-medium">Payment Amount (PHP ₱) *</label>
+                      {/* Payment Amount Display (Non-editable: locked to official statement balance) */}
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <label className="block text-slate-400 font-medium">Billed Amount Due (PHP ₱)</label>
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-mono flex items-center gap-1 border border-slate-700/60">
+                            <Lock className="w-3 h-3 text-cyan-400" />
+                            <span>Fixed Bill Amount</span>
+                          </span>
+                        </div>
                         <div className="relative">
-                          <span className="absolute left-4 top-1/2 -translate-y-1/2 font-mono font-bold text-slate-400 text-base">₱</span>
+                          <span className="absolute left-4 top-1/2 -translate-y-1/2 font-mono font-bold text-cyan-400 text-lg">₱</span>
                           <input
-                            type="number"
-                            step="any"
-                            required
-                            value={payAmount}
-                            onChange={(e) => setPayAmount(e.target.value)}
-                            placeholder="1299.00"
-                            className="w-full pl-9 pr-4 py-3 bg-slate-900 border border-slate-800 rounded-2xl text-slate-100 font-mono font-black text-lg focus:outline-none focus:border-cyan-500 text-center"
+                            type="text"
+                            readOnly
+                            disabled
+                            value={Number(selectedPayInvoice?.balanceDue || customer.balance || customer.monthlyFee).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            className="w-full pl-9 pr-4 py-3 bg-slate-950/80 border border-slate-800 rounded-2xl text-cyan-300 font-mono font-black text-xl cursor-not-allowed select-none text-center shadow-inner"
                           />
                         </div>
                         <div className="flex items-center justify-between text-[11px] text-slate-500 px-1 pt-0.5">
-                          <span>Bill Due: {formatCurrency(selectedPayInvoice?.balanceDue || customer.balance || customer.monthlyFee)}</span>
-                          <button
-                            type="button"
-                            onClick={() => setPayAmount(String(selectedPayInvoice?.balanceDue || customer.balance || customer.monthlyFee))}
-                            className="text-cyan-400 hover:underline cursor-pointer"
-                          >
-                            Pay Full Balance
-                          </button>
+                          <span>Statement Balance: {formatCurrency(selectedPayInvoice?.balanceDue || customer.balance || customer.monthlyFee)}</span>
+                          <span className="text-slate-500 font-mono">Account #{customer.accountNo}</span>
                         </div>
                       </div>
 
@@ -2244,8 +2435,8 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                             onClick={() => setXenditSubChannel('MULTI_CHANNEL')}
                             className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
                               xenditSubChannel === 'MULTI_CHANNEL'
-                                ? 'bg-cyan-950/50 border-cyan-500 text-cyan-200 shadow-sm'
-                                : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:border-slate-700'
+                                ? 'bg-cyan-950/60 border-cyan-500/80 text-cyan-300 shadow-glow-cyan'
+                                : 'bg-slate-950/40 border-slate-800 text-slate-400 hover:border-slate-700'
                             }`}
                           >
                             <span className="text-base block mb-0.5">🌐</span>
@@ -2253,15 +2444,15 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                             <span className="text-[9px] text-slate-500 block truncate">Customer chooses on checkout</span>
                           </button>
 
-                          {XENDIT_CHANNELS.slice(0, 7).map((ch) => (
+                          {xenditAvailableChannels.map((ch) => (
                             <button
                               type="button"
-                              key={ch.id}
-                              onClick={() => setXenditSubChannel(ch.id)}
+                              key={ch.code}
+                              onClick={() => setXenditSubChannel(ch.code)}
                               className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
-                                xenditSubChannel === ch.id
-                                  ? 'bg-cyan-950/50 border-cyan-500 text-cyan-200 shadow-sm'
-                                  : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:border-slate-700'
+                                xenditSubChannel === ch.code
+                                  ? 'bg-cyan-950/60 border-cyan-500/80 text-cyan-300 shadow-glow-cyan'
+                                  : 'bg-slate-950/40 border-slate-800 text-slate-400 hover:border-slate-700'
                               }`}
                             >
                               <span className="text-base block mb-0.5">{ch.icon}</span>
@@ -2283,7 +2474,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                         <span>
                           {isCreatingXenditInvoice
                             ? 'Generating Xendit Checkout Session...'
-                            : `Proceed to Pay ₱${Number(payAmount || 0).toLocaleString()} via Xendit`}
+                            : `Proceed to Pay ₱${Number(selectedPayInvoice?.balanceDue || customer.balance || customer.monthlyFee).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} via Xendit`}
                         </span>
                         <ArrowRight className="w-4 h-4" />
                       </button>
@@ -2566,9 +2757,9 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                                 merchantName: businessProfile.tradeName || 'SWIFTSTREAM TELECOM',
                                 merchantCity: businessProfile.address.city || 'LAGONOY',
                                 accountNumber: customer.accountNo,
-                                amount: Number(payAmount) || (customer.balance > 0 ? customer.balance : customer.monthlyFee),
+                                amount: Number(selectedPayInvoice?.balanceDue || (customer.balance > 0 ? customer.balance : customer.monthlyFee)),
                                 invoiceNumber: selectedPayInvoice?.invoiceNumber || 'BILL-2026',
-                                mobileNumber: (payMethod === 'maya' ? businessProfile.paymentGateways.mayaNumber : payMethod === 'bank_transfer' ? businessProfile.paymentGateways.bankAccountNumber : businessProfile.paymentGateways.gcashNumber) || '09638927819',
+                                mobileNumber: (payMethod === 'maya' ? businessProfile.paymentGateways.mayaNumber : businessProfile.paymentGateways.gcashNumber) || '09638927819',
                                 serviceProvider: payMethod === 'gcash' ? 'gcash' : payMethod === 'maya' ? 'maya' : 'qrph_national',
                               })}
                               size={150}
@@ -2576,8 +2767,8 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                             />
                           )}
 
-                          <div className="text-center text-[10px] text-slate-600 font-mono font-bold">
-                            ₱{(Number(payAmount) || (customer.balance > 0 ? customer.balance : customer.monthlyFee)).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          <div className="text-center text-[10px] text-slate-400 font-mono font-bold">
+                            ₱{(Number(selectedPayInvoice?.balanceDue || (customer.balance > 0 ? customer.balance : customer.monthlyFee))).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </div>
                         </div>
                       );
@@ -2653,46 +2844,28 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                   <form onSubmit={handleConfirmOnlinePayment} className="space-y-4 pt-4 border-t border-slate-800 text-xs">
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div>
-                        <label className="block text-slate-400 mb-1 font-medium">Amount Transferred (PHP ₱) *</label>
-                        <input
-                          type="number"
-                          step="any"
-                          required
-                          value={payAmount}
-                          onChange={(e) => setPayAmount(e.target.value)}
-                          placeholder="1299.00"
-                          className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 font-mono font-bold text-base focus:outline-none focus:border-cyan-500 text-center"
-                        />
-                        <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-                          {customer.balance > 0 && (
-                            <button
-                              type="button"
-                              onClick={() => setPayAmount(customer.balance.toString())}
-                              className="px-2 py-0.5 rounded-lg bg-rose-950 text-rose-300 border border-rose-800/40 text-[10px] font-semibold hover:bg-rose-900/50 cursor-pointer"
-                            >
-                              Full Due: {formatCurrency(customer.balance)}
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => setPayAmount(customer.monthlyFee.toString())}
-                            className="px-2 py-0.5 rounded-lg bg-slate-800 text-slate-300 border border-slate-700 text-[10px] font-semibold hover:bg-slate-700 cursor-pointer"
-                          >
-                            1 Mo: {formatCurrency(customer.monthlyFee)}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setPayAmount((customer.monthlyFee * 2).toString())}
-                            className="px-2 py-0.5 rounded-lg bg-slate-800 text-slate-300 border border-slate-700 text-[10px] font-semibold hover:bg-slate-700 cursor-pointer"
-                          >
-                            2 Mo Advance: {formatCurrency(customer.monthlyFee * 2)}
-                          </button>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block text-slate-400 font-medium">Payment Amount (PHP ₱)</label>
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-mono flex items-center gap-1 border border-slate-700/60">
+                            <Lock className="w-3 h-3 text-cyan-400" />
+                            <span>Fixed Bill Due</span>
+                          </span>
                         </div>
+                        <input
+                          type="text"
+                          readOnly
+                          disabled
+                          value={`₱${Number(selectedPayInvoice?.balanceDue || (customer.balance > 0 ? customer.balance : customer.monthlyFee)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                          className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-cyan-300 font-mono font-black text-base cursor-not-allowed select-none text-center shadow-inner"
+                        />
+                        <span className="text-[10px] text-slate-500 block mt-1.5 text-center">
+                          Official Bill Balance for Account #{customer.accountNo}
+                        </span>
                       </div>
 
                       <div>
                         <label className="block text-slate-400 mb-1 font-medium">
-                          {payMethod === 'gcash' ? 'GCash Ref No. (e.g. 9018247192) *' : payMethod === 'maya' ? 'Maya Ref No. *' : 'Bank Reference # *'}
+                          {payMethod === 'gcash' ? 'GCash Ref No. (e.g. 9018247192) *' : payMethod === 'maya' ? 'Maya Ref No. *' : 'Transaction Ref No. *'}
                         </label>
                         <input
                           type="text"
@@ -3939,7 +4112,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
             {/* Scrollable Body */}
             <div className="overflow-y-auto p-5 space-y-4 text-xs">
               {/* Channel Selector */}
-              <div className="grid grid-cols-4 gap-1.5 rounded-2xl bg-slate-950 p-1.5 border border-slate-800">
+              <div className="grid grid-cols-3 gap-1.5 rounded-2xl bg-slate-950 p-1.5 border border-slate-800">
                 <button
                   type="button"
                   onClick={() => setPayMethod('gcash')}
@@ -3950,7 +4123,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                   }`}
                 >
                   <Smartphone className="w-3.5 h-3.5 shrink-0" />
-                  <span className="truncate">GCash</span>
+                  <span>GCash QR</span>
                 </button>
                 <button
                   type="button"
@@ -3962,19 +4135,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                   }`}
                 >
                   <Smartphone className="w-3.5 h-3.5 shrink-0" />
-                  <span className="truncate">Maya</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPayMethod('bank_transfer')}
-                  className={`py-2 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                    payMethod === 'bank_transfer'
-                      ? 'bg-indigo-600 text-white shadow-md'
-                      : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  <Building2 className="w-3.5 h-3.5 shrink-0" />
-                  <span className="truncate">Bank</span>
+                  <span>Maya QR</span>
                 </button>
                 <button
                   type="button"
@@ -3986,67 +4147,35 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                   className="py-2 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1 text-slate-400 hover:text-cyan-300 hover:bg-slate-900 cursor-pointer"
                 >
                   <Zap className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                  <span className="truncate">Xendit</span>
+                  <span>Xendit (Auto)</span>
                 </button>
               </div>
 
-              {/* Amount Quick Selector */}
-              <div>
-                <div className="flex items-center justify-between text-xs mb-1.5">
-                  <span className="text-slate-400 font-medium">Payment Amount:</span>
-                  <span className="font-mono font-bold text-cyan-300 text-sm">
-                    ₱{Number(payAmount || (customer.balance > 0 ? customer.balance : customer.monthlyFee)).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                  </span>
+              {/* Fixed Statement Bill Due Display */}
+              <div className="p-3 rounded-2xl bg-slate-950 border border-slate-800 flex items-center justify-between">
+                <div>
+                  <span className="text-[10px] text-slate-400 block font-medium">Payment Amount (Bill Due):</span>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <span className="font-mono font-black text-cyan-300 text-lg">
+                      ₱{Number(latestUnpaidInvoice?.balanceDue || (customer.balance > 0 ? customer.balance : customer.monthlyFee)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                    <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-950 text-emerald-300 font-bold border border-emerald-800/40">
+                      Exact Statement Balance
+                    </span>
+                  </div>
                 </div>
-                <div className="grid grid-cols-3 gap-2 text-xs">
-                  {customer.balance > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => setPayAmount(String(customer.balance))}
-                      className={`py-1.5 px-2 rounded-xl font-bold border transition-all text-[11px] cursor-pointer ${
-                        payAmount === String(customer.balance)
-                          ? 'bg-emerald-600/20 text-emerald-300 border-emerald-500/50'
-                          : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
-                      }`}
-                    >
-                      Due: {formatCurrency(customer.balance)}
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => setPayAmount(String(customer.monthlyFee))}
-                    className={`py-1.5 px-2 rounded-xl font-bold border transition-all text-[11px] cursor-pointer ${
-                      payAmount === String(customer.monthlyFee)
-                        ? 'bg-cyan-600/20 text-cyan-300 border-cyan-500/50'
-                        : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
-                    }`}
-                  >
-                    1 Mo: {formatCurrency(customer.monthlyFee)}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPayAmount(String(customer.monthlyFee * 2))}
-                    className={`py-1.5 px-2 rounded-xl font-bold border transition-all text-[11px] cursor-pointer ${
-                      payAmount === String(customer.monthlyFee * 2)
-                        ? 'bg-purple-600/20 text-purple-300 border-purple-500/50'
-                        : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
-                    }`}
-                  >
-                    2 Mos: {formatCurrency(customer.monthlyFee * 2)}
-                  </button>
+                <div className="flex items-center gap-1 text-[10px] text-slate-400 font-mono bg-slate-900 px-2.5 py-1 rounded-xl border border-slate-800">
+                  <Lock className="w-3 h-3 text-cyan-400" />
+                  <span>Fixed</span>
                 </div>
               </div>
 
               {/* QR Code Render (Official Merchant Standee or Dynamic QR Ph) */}
               {(() => {
                 const customQr =
-                  payMethod === 'gcash'
-                    ? businessProfile.paymentGateways.gcashQrImage
-                    : payMethod === 'maya'
+                  payMethod === 'maya'
                     ? businessProfile.paymentGateways.mayaQrImage
-                    : payMethod === 'bank_transfer'
-                    ? businessProfile.paymentGateways.bankQrImage
-                    : undefined;
+                    : businessProfile.paymentGateways.gcashQrImage;
 
                 const hasCustomQr = Boolean(
                   customQr &&
@@ -4056,28 +4185,19 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
 
                 const isShowingCustom = hasCustomQr && qrDisplayMode === 'merchant';
 
-                const activeChannelLabel =
-                  payMethod === 'gcash'
-                    ? 'GCash'
-                    : payMethod === 'maya'
-                    ? 'Maya'
-                    : businessProfile.paymentGateways.bankName || 'Bank';
+                const activeChannelLabel = payMethod === 'maya' ? 'Maya' : 'GCash';
 
                 const targetNumber =
-                  payMethod === 'gcash'
-                    ? businessProfile.paymentGateways.gcashNumber
-                    : payMethod === 'maya'
+                  payMethod === 'maya'
                     ? businessProfile.paymentGateways.mayaNumber
-                    : businessProfile.paymentGateways.bankAccountNumber;
+                    : businessProfile.paymentGateways.gcashNumber;
 
                 const targetAccountName =
-                  payMethod === 'gcash'
-                    ? businessProfile.paymentGateways.gcashName
-                    : payMethod === 'maya'
+                  payMethod === 'maya'
                     ? businessProfile.paymentGateways.mayaName
-                    : businessProfile.paymentGateways.bankAccountName;
+                    : businessProfile.paymentGateways.gcashName;
 
-                const currentAmount = Number(payAmount) || (customer.balance > 0 ? customer.balance : customer.monthlyFee);
+                const currentAmount = Number(latestUnpaidInvoice?.balanceDue || (customer.balance > 0 ? customer.balance : customer.monthlyFee));
 
                 return (
                   <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 flex flex-col items-center justify-center space-y-3">
@@ -4148,15 +4268,9 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                     {/* Account Quick Info Card */}
                     <div className="w-full max-w-[280px] p-2.5 rounded-xl bg-slate-900/90 border border-slate-800 space-y-1.5 text-[11px]">
                       <div className="flex items-center justify-between">
-                        <span className="text-slate-400 text-[10px]">
-                          {payMethod === 'bank_transfer' ? 'Bank:' : 'Channel:'}
-                        </span>
+                        <span className="text-slate-400 text-[10px]">Channel:</span>
                         <span className="font-bold text-slate-200">
-                          {payMethod === 'bank_transfer'
-                            ? businessProfile.paymentGateways.bankName || 'Direct Bank Transfer'
-                            : payMethod === 'gcash'
-                            ? 'GCash Direct'
-                            : 'Maya Direct'}
+                          {payMethod === 'maya' ? 'Maya Direct' : 'GCash Direct'}
                         </span>
                       </div>
                       <div className="flex items-center justify-between">
@@ -4166,9 +4280,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                         </span>
                       </div>
                       <div className="flex items-center justify-between">
-                        <span className="text-slate-400 text-[10px]">
-                          {payMethod === 'bank_transfer' ? 'Account No:' : 'Mobile No:'}
-                        </span>
+                        <span className="text-slate-400 text-[10px]">Mobile Number:</span>
                         <span className="font-mono font-bold text-cyan-300">
                           {targetNumber || 'Not set'}
                         </span>
@@ -4222,13 +4334,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                         ) : (
                           <Copy className="w-3.5 h-3.5 text-slate-400" />
                         )}
-                        <span>
-                          {copiedField === 'express_num'
-                            ? 'Copied!'
-                            : payMethod === 'bank_transfer'
-                            ? 'Copy Acct #'
-                            : 'Copy Number'}
-                        </span>
+                        <span>{copiedField === 'express_num' ? 'Copied Number' : 'Copy Number'}</span>
                       </button>
                     </div>
                   </div>
@@ -4239,18 +4345,16 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
               <div className="space-y-3">
                 <div>
                   <label className="block text-[11px] font-semibold text-slate-300 mb-1">
-                    Enter {payMethod === 'gcash' ? 'GCash' : payMethod === 'maya' ? 'Maya' : payMethod === 'bank_transfer' ? 'Bank Transfer' : 'Payment'} Reference / Trace Number:
+                    Enter {payMethod === 'maya' ? 'Maya' : 'GCash'} Reference Number:
                   </label>
                   <input
                     type="text"
                     value={payReference}
                     onChange={(e) => setPayReference(e.target.value)}
                     placeholder={
-                      payMethod === 'gcash'
-                        ? 'e.g. 100982347891 (GCash Ref)'
-                        : payMethod === 'maya'
+                      payMethod === 'maya'
                         ? 'e.g. 9847291039 (Maya Ref)'
-                        : 'e.g. BDO-98471203 (Bank Trace / Ref)'
+                        : 'e.g. 100982347891 (GCash Ref)'
                     }
                     className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-100 font-mono placeholder-slate-500 focus:outline-none focus:border-cyan-500"
                   />
