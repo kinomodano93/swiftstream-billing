@@ -101,42 +101,31 @@ export const PaymentList: React.FC<PaymentListProps> = ({
       {/* Header Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2">
-            <CreditCard className="w-5 h-5 text-emerald-400" />
-            <span>Admin Collections & Payment Register</span>
           <h2 className="text-xl sm:text-2xl font-bold text-slate-100 flex items-center gap-2.5">
             <Receipt className="w-6 h-6 text-emerald-400" />
             <span>Payments & Official Receipts</span>
           </h2>
-          <p className="text-xs text-slate-400 mt-1">
-            Track GCash, Maya, Cash, and Bank deposits with instant Official Receipts (OR).
           <p className="text-xs sm:text-sm text-slate-400 mt-1">
             Track daily customer cash receipts, online gateway settlements, and cashier EOD logs.
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5">
         <div className="flex items-center gap-2">
           <button
             onClick={() => setShowEODModal(true)}
-            className="flex items-center gap-1.5 px-3 py-2 bg-emerald-950/70 hover:bg-emerald-900 text-emerald-300 border border-emerald-500/40 rounded-xl text-xs font-semibold transition-all hover:scale-105"
-            title="Generate Admin End-of-Day (EOD) Z-Reading"
             className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold transition-all hover:scale-105"
             title="Generate Daily Cashier Z-Reading Report"
           >
             <Receipt className="w-3.5 h-3.5 text-emerald-400" />
-            <Calendar className="w-4 h-4 text-emerald-400" />
             <span>EOD Z-Reading</span>
           </button>
 
           <button
             onClick={exportPaymentsToCSV}
-            className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold transition-colors"
             className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold transition-all hover:scale-105"
             title="Download Payments CSV"
           >
             <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
-            <FileSpreadsheet className="w-4 h-4 text-cyan-400" />
             <span>Export CSV</span>
           </button>
 
@@ -201,35 +190,22 @@ export const PaymentList: React.FC<PaymentListProps> = ({
       ) : (
         <>
           {/* Payment Channel Breakdown Cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800">
-              <span className="text-[11px] text-slate-400 font-medium">📱 GCash Collections</span>
-              <h4 className="text-lg font-bold text-cyan-400 mt-1">{formatCurrency(gcashTotal)}</h4>
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
             <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800">
               <span className="text-[10px] text-slate-400 font-medium">📱 GCash Collections</span>
               <h4 className="text-base sm:text-lg font-bold text-cyan-400 mt-1">{formatCurrency(gcashTotal)}</h4>
             </div>
 
-            <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800">
-              <span className="text-[11px] text-slate-400 font-medium">💵 Cash Over Counter</span>
-              <h4 className="text-lg font-bold text-emerald-400 mt-1">{formatCurrency(cashTotal)}</h4>
             <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800">
               <span className="text-[10px] text-slate-400 font-medium">💵 Cash Over Counter</span>
               <h4 className="text-base sm:text-lg font-bold text-emerald-400 mt-1">{formatCurrency(cashTotal)}</h4>
             </div>
 
-            <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800">
-              <span className="text-[11px] text-slate-400 font-medium">💳 Maya (PayMaya)</span>
-              <h4 className="text-lg font-bold text-purple-400 mt-1">{formatCurrency(mayaTotal)}</h4>
             <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800">
               <span className="text-[10px] text-slate-400 font-medium">💳 Maya (PayMaya)</span>
               <h4 className="text-base sm:text-lg font-bold text-purple-400 mt-1">{formatCurrency(mayaTotal)}</h4>
             </div>
 
-            <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800">
-              <span className="text-[11px] text-slate-400 font-medium">🏦 Bank / Check</span>
-              <h4 className="text-lg font-bold text-amber-400 mt-1">{formatCurrency(bankTotal)}</h4>
             <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800">
               <span className="text-[10px] text-slate-400 font-medium">⚡ Xendit Gateway</span>
               <h4 className="text-base sm:text-lg font-bold text-amber-400 mt-1">{formatCurrency(xenditTotal)}</h4>
@@ -252,7 +228,6 @@ export const PaymentList: React.FC<PaymentListProps> = ({
                   { id: 'maya', label: 'Maya' },
                   { id: 'bank_transfer', label: 'Bank Transfer' },
                   { id: 'xendit', label: '⚡ Xendit' },
-                  { id: 'bank_transfer', label: 'Bank Deposit' },
                   { id: 'check', label: 'Check' },
                 ].map((tab) => (
                   <button
