@@ -93,8 +93,11 @@ export const buildPonCascadeChain = (
     const chain: NapBox[] = [];
     const visited = new Set<string>();
 
-    // 1. Find root feeder NAP (explicit feedSourceType === 'olt' or no upstreamNapId)
-    let root = napsOnPon.find((n) => n.feedSourceType === 'olt' || !n.upstreamNapId);
+    // 1. Find root feeder NAP (explicit feedSourceType === 'olt', or no upstreamNapId and feedSourceType !== 'nap')
+    let root = napsOnPon.find((n) => n.feedSourceType === 'olt');
+    if (!root) {
+      root = napsOnPon.find((n) => !n.upstreamNapId && n.feedSourceType !== 'nap');
+    }
     if (!root) {
       // Fallback to closest to OLT
       root = [...napsOnPon].sort(
@@ -116,6 +119,17 @@ export const buildPonCascadeChain = (
         visited.add(nextChild.id);
         current = nextChild;
       } else {
+        // Look for any unvisited box whose parent was already visited in the chain
+        const childOfVisited = napsOnPon.find(
+          (n) => !visited.has(n.id) && n.upstreamNapId && visited.has(n.upstreamNapId)
+        );
+        if (childOfVisited) {
+          chain.push(childOfVisited);
+          visited.add(childOfVisited.id);
+          current = childOfVisited;
+          continue;
+        }
+
         // Look for any unvisited box closest to current
         const unvisited = napsOnPon.filter((n) => !visited.has(n.id));
         if (unvisited.length === 0) break;
@@ -203,15 +217,35 @@ export const calculateCascadeTelemetry = (
   for (let i = 0; i < chain.length; i++) {
     const nap = chain[i];
     const hopIndex = i + 1;
-    const isFeeder = hopIndex === 1;
+
+    // Check if the NAP box has an explicit upstream NAP link
+    const explicitUpstream = nap.upstreamNapId
+      ? chain.find((b) => b.id === nap.upstreamNapId)
+      : null;
+
+    const isFeeder = (nap.feedSourceType === 'olt' || !nap.upstreamNapId) && !explicitUpstream;
     const isTerminal = hopIndex === totalHops || nap.fbtRatio === 'terminal';
 
     const upstreamType: 'olt' | 'nap' = isFeeder ? 'olt' : 'nap';
-    const upstreamId = isFeeder ? olt.id : chain[i - 1].id;
-    const upstreamName = isFeeder ? (olt.code || olt.name || 'Central OLT') : chain[i - 1].code;
+    const upstreamId = isFeeder
+      ? olt.id
+      : explicitUpstream
+      ? explicitUpstream.id
+      : chain[i - 1]?.id || olt.id;
+
+    const upstreamName = isFeeder
+      ? (olt.code || olt.name || 'Central OLT')
+      : explicitUpstream
+      ? explicitUpstream.code
+      : chain[i - 1]?.code || olt.code || 'Central OLT';
+
     const upstreamCoords = isFeeder
       ? { lat: olt.latitude, lng: olt.longitude }
-      : { lat: chain[i - 1].latitude, lng: chain[i - 1].longitude };
+      : explicitUpstream
+      ? { lat: explicitUpstream.latitude, lng: explicitUpstream.longitude }
+      : chain[i - 1]
+      ? { lat: chain[i - 1].latitude, lng: chain[i - 1].longitude }
+      : { lat: olt.latitude, lng: olt.longitude };
 
     // Hop Distance from immediate upstream node
     const hopSpan = calculateSpanMetrics(
