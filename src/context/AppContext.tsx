@@ -1028,13 +1028,43 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     });
     const unsubNapBoxes = subscribeToCollection<NapBox>(COLLECTIONS.NAP_BOXES, (data) => {
-      setNapBoxes(data || []);
+      if (data && data.length > 0) {
+        setNapBoxes(data);
+      } else if (data && data.length === 0) {
+        setNapBoxes((prev) => {
+          if (prev.length > 0) {
+            prev.forEach((box) => saveFirestoreDoc(COLLECTIONS.NAP_BOXES, box));
+            return prev;
+          }
+          return [];
+        });
+      }
     });
     const unsubFiberCables = subscribeToCollection<FiberCable>(COLLECTIONS.FIBER_CABLES, (data) => {
-      setFiberCables(data || []);
+      if (data && data.length > 0) {
+        setFiberCables(data);
+      } else if (data && data.length === 0) {
+        setFiberCables((prev) => {
+          if (prev.length > 0) {
+            prev.forEach((cable) => saveFirestoreDoc(COLLECTIONS.FIBER_CABLES, cable));
+            return prev;
+          }
+          return [];
+        });
+      }
     });
     const unsubFiberClosures = subscribeToCollection<FiberClosure>(COLLECTIONS.FIBER_CLOSURES, (data) => {
-      setFiberClosures(data || []);
+      if (data && data.length > 0) {
+        setFiberClosures(data);
+      } else if (data && data.length === 0) {
+        setFiberClosures((prev) => {
+          if (prev.length > 0) {
+            prev.forEach((closure) => saveFirestoreDoc(COLLECTIONS.FIBER_CLOSURES, closure));
+            return prev;
+          }
+          return [];
+        });
+      }
     });
     const unsubMikrotik = subscribeToCollection<MikrotikDevice>(COLLECTIONS.MIKROTIK_DEVICES, (data) => {
       setMikrotikDevices(data || []);

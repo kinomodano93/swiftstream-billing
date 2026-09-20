@@ -5,6 +5,8 @@ export const FBT_LOSS_SPECS: Record<
   FbtSplitterRatio,
   { throughLoss: number; tapLoss: number; label: string; percentThrough: number; percentTap: number }
 > = {
+  '98/2': { throughLoss: 0.2, tapLoss: 17.2, label: '98/2 FBT Coupler', percentThrough: 98, percentTap: 2 },
+  '95/5': { throughLoss: 0.4, tapLoss: 13.4, label: '95/5 FBT Coupler', percentThrough: 95, percentTap: 5 },
   '90/10': { throughLoss: 0.6, tapLoss: 10.6, label: '90/10 FBT Coupler', percentThrough: 90, percentTap: 10 },
   '85/15': { throughLoss: 0.9, tapLoss: 8.8, label: '85/15 FBT Coupler', percentThrough: 85, percentTap: 15 },
   '80/20': { throughLoss: 1.2, tapLoss: 7.4, label: '80/20 FBT Coupler', percentThrough: 80, percentTap: 20 },
@@ -78,9 +80,18 @@ export const resolvePlcType = (nap: NapBox): PlcSplitterType => {
  */
 export const getDefaultFbtForHop = (hopIndex: number, totalHops: number): FbtSplitterRatio => {
   if (hopIndex >= totalHops) return 'terminal';
-  if (hopIndex === 1) return totalHops >= 5 ? '90/10' : '85/15';
-  if (hopIndex === 2) return '80/20';
-  if (hopIndex === 3) return '70/30';
+  if (hopIndex === 1) {
+    if (totalHops >= 8) return '98/2';
+    if (totalHops >= 6) return '95/5';
+    if (totalHops >= 5) return '90/10';
+    return '85/15';
+  }
+  if (hopIndex === 2) {
+    if (totalHops >= 8) return '95/5';
+    if (totalHops >= 6) return '90/10';
+    return '80/20';
+  }
+  if (hopIndex === 3) return totalHops >= 7 ? '80/20' : '70/30';
   if (hopIndex === 4) return '60/40';
   return '50/50';
 };

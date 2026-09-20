@@ -208,13 +208,18 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
         (b.oltId === selectedOltId || (!b.oltId && selectedOltId === oltNodes[0]?.id)) &&
         (b.ponPortNumber || 1) === Number(ponPortNumber)
     );
+
+    // If there are no existing boxes on this PON, it cannot be fed from another NAP; it must be fed from OLT
+    const effectiveFeedSourceType: 'olt' | 'nap' =
+      feedSourceType === 'nap' && candidatesOnPon.length === 0 ? 'olt' : feedSourceType;
+
     const resolvedUpstreamNapId =
-      feedSourceType === 'nap'
+      effectiveFeedSourceType === 'nap'
         ? upstreamNapId || candidatesOnPon[candidatesOnPon.length - 1]?.id || candidatesOnPon[0]?.id || undefined
         : undefined;
 
     const resolvedFeedLeg: FeedLegType =
-      feedSourceType === 'olt'
+      effectiveFeedSourceType === 'olt'
         ? 'feeder_olt'
         : feedLegType;
 
@@ -238,8 +243,7 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
         longitude: Number(longitude) || 123.5210,
         oltId: selectedOltId || oltNodes[0]?.id || 'olt-01-headend',
         ponPortNumber: Number(ponPortNumber) || 1,
-        feedSourceType,
-        upstreamNapId: resolvedUpstreamNapId,
+        feedSourceType: effectiveFeedSourceType,
         feedLegType: resolvedFeedLeg,
         fbtRatio,
         tapSubSplitEnabled: true,
@@ -250,7 +254,8 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
         fiberCoreColor,
         splitterType: `${plcSplitterType} PLC (${fbtRatio} FBT ➔ 50/50 Left)`,
         ports: [...ports],
-        notes: `${notes ? `${notes} | ` : ''}Left Branch of ${fbtRatio} FBT (50/50 Sub-Split). Paired with ${rightCode}.`,
+        ...(resolvedUpstreamNapId ? { upstreamNapId: resolvedUpstreamNapId } : {}),
+        notes: `${notes.trim() ? `${notes.trim()} | ` : ''}Left Branch of ${fbtRatio} FBT (50/50 Sub-Split). Paired with ${rightCode}.`,
       });
 
       // 2. Right Branch (co-located at the exact same physical pole GPS coordinates)
@@ -281,7 +286,7 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
         fiberCoreColor: 'Orange (Core 2)',
         splitterType: `${plcSplitterType} PLC (${fbtRatio} FBT ➔ 50/50 Right)`,
         ports: rightPorts,
-        notes: `${notes ? `${notes} | ` : ''}Right Branch of ${fbtRatio} FBT (50/50 Sub-Split). Paired with ${leftCode}.`,
+        notes: `${notes.trim() ? `${notes.trim()} | ` : ''}Right Branch of ${fbtRatio} FBT (50/50 Sub-Split). Paired with ${leftCode}.`,
       });
     } else {
       const isSub = tapSubSplitEnabled && fbtRatio !== 'terminal';
@@ -290,16 +295,15 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
         : `${plcSplitterType} PLC (${fbtRatio === 'terminal' ? '100% Terminal' : `${fbtRatio} FBT`})`;
 
       addNapBox({
-        code,
-        name,
-        location,
+        code: code.trim(),
+        name: name.trim() || 'Distribution Hub',
+        location: location.trim(),
         barangay: finalBarangay,
         latitude: Number(latitude) || 13.6870,
         longitude: Number(longitude) || 123.5210,
         oltId: selectedOltId || oltNodes[0]?.id || 'olt-01-headend',
         ponPortNumber: Number(ponPortNumber) || 1,
-        feedSourceType,
-        upstreamNapId: resolvedUpstreamNapId,
+        feedSourceType: effectiveFeedSourceType,
         feedLegType: resolvedFeedLeg,
         fbtRatio,
         tapSubSplitEnabled: isSub,
@@ -309,7 +313,8 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
         fiberCoreColor,
         splitterType: finalSplitterType,
         ports,
-        notes,
+        ...(resolvedUpstreamNapId ? { upstreamNapId: resolvedUpstreamNapId } : {}),
+        ...(notes.trim() ? { notes: notes.trim() } : {}),
       });
     }
 
@@ -847,13 +852,15 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
                             }}
                             className="px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-amber-300 font-mono text-[10px] font-bold focus:outline-none focus:border-amber-400"
                           >
-                            <option value="60/40">60/40 FBT (~2.5dB / ~4.3dB)</option>
-                            <option value="70/30">70/30 FBT (~1.8dB / ~5.6dB)</option>
-                            <option value="80/20">80/20 FBT (~1.2dB / ~7.4dB)</option>
-                            <option value="85/15">85/15 FBT (~0.9dB / ~8.8dB)</option>
-                            <option value="75/25">75/25 FBT (~1.5dB / ~6.5dB)</option>
-                            <option value="50/50">50/50 Symmetrical (~3.4dB)</option>
+                            <option value="98/2">98/2 FBT (~0.2dB / ~17.2dB)</option>
+                            <option value="95/5">95/5 FBT (~0.4dB / ~13.4dB)</option>
                             <option value="90/10">90/10 FBT (~0.6dB / ~10.6dB)</option>
+                            <option value="85/15">85/15 FBT (~0.9dB / ~8.8dB)</option>
+                            <option value="80/20">80/20 FBT (~1.2dB / ~7.4dB)</option>
+                            <option value="75/25">75/25 FBT (~1.5dB / ~6.5dB)</option>
+                            <option value="70/30">70/30 FBT (~1.8dB / ~5.6dB)</option>
+                            <option value="60/40">60/40 FBT (~2.5dB / ~4.3dB)</option>
+                            <option value="50/50">50/50 Symmetrical (~3.4dB)</option>
                             <option value="terminal">Terminal (100% Direct)</option>
                           </select>
                         </div>
@@ -1282,42 +1289,51 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
                         </span>
                       </button>
 
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setFeedSourceType('nap');
-                          const candidates = napBoxes.filter(
-                            (b) =>
-                              (b.oltId === selectedOltId || (!b.oltId && selectedOltId === oltNodes[0]?.id)) &&
-                              (b.ponPortNumber || 1) === Number(ponPortNumber)
-                          );
-                          const targetParent = candidates[0] || napBoxes[0];
-                          if (targetParent) {
-                            setUpstreamNapId(targetParent.id);
-                            if (!isCustomBarangay) {
-                              setBarangay(targetParent.barangay);
-                            }
-                            if (!isUserCoordSet) {
-                              // Only suggest coordinate offset if user hasn't explicitly specified pole coordinates
-                              setLatitude(Number((targetParent.latitude + 0.0018).toFixed(4)));
-                              setLongitude(Number((targetParent.longitude + 0.0015).toFixed(4)));
-                            }
-                          }
-                        }}
-                        className={`p-2 rounded-xl border text-left text-xs font-semibold transition-all ${
-                          feedSourceType === 'nap'
-                            ? 'bg-cyan-950/60 border-cyan-500 text-cyan-200 shadow-sm'
-                            : 'bg-slate-950/80 border-slate-800 text-slate-400 hover:border-slate-700'
-                        }`}
-                      >
-                        <div className="flex items-center gap-1.5">
-                          <Radio className="w-3 h-3 text-cyan-400" />
-                          <span className="text-[11px]">Upstream NAP (Hop)</span>
-                        </div>
-                        <span className="text-[10px] text-slate-400 font-normal block mt-0.5">
-                          Daisy-chain from box
-                        </span>
-                      </button>
+                      {(() => {
+                        const candidates = napBoxes.filter(
+                          (b) =>
+                            (b.oltId === selectedOltId || (!b.oltId && selectedOltId === oltNodes[0]?.id)) &&
+                            (b.ponPortNumber || 1) === Number(ponPortNumber)
+                        );
+                        const hasCandidates = candidates.length > 0;
+
+                        return (
+                          <button
+                            type="button"
+                            disabled={!hasCandidates}
+                            onClick={() => {
+                              if (!hasCandidates) return;
+                              setFeedSourceType('nap');
+                              const targetParent = candidates.find((b) => b.id === upstreamNapId) || candidates[candidates.length - 1] || candidates[0];
+                              if (targetParent) {
+                                setUpstreamNapId(targetParent.id);
+                                if (!isCustomBarangay) {
+                                  setBarangay(targetParent.barangay);
+                                }
+                                if (!isUserCoordSet) {
+                                  setLatitude(Number((targetParent.latitude + 0.0018).toFixed(4)));
+                                  setLongitude(Number((targetParent.longitude + 0.0015).toFixed(4)));
+                                }
+                              }
+                            }}
+                            className={`p-2 rounded-xl border text-left text-xs font-semibold transition-all ${
+                              feedSourceType === 'nap'
+                                ? 'bg-cyan-950/60 border-cyan-500 text-cyan-200 shadow-sm'
+                                : hasCandidates
+                                ? 'bg-slate-950/80 border-slate-800 text-slate-400 hover:border-slate-700'
+                                : 'bg-slate-950/40 border-slate-800/40 text-slate-600 cursor-not-allowed opacity-60'
+                            }`}
+                          >
+                            <div className="flex items-center gap-1.5">
+                              <Radio className={`w-3 h-3 ${hasCandidates ? 'text-cyan-400' : 'text-slate-600'}`} />
+                              <span className="text-[11px]">Upstream NAP (Hop)</span>
+                            </div>
+                            <span className="text-[10px] text-slate-400 font-normal block mt-0.5">
+                              {hasCandidates ? 'Daisy-chain from box' : `No prior boxes on PON #${ponPortNumber}`}
+                            </span>
+                          </button>
+                        );
+                      })()}
                     </div>
 
                     {feedSourceType === 'nap' && (
@@ -1413,12 +1429,14 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
                         }}
                         className="w-full px-2.5 py-1.5 bg-slate-950 border border-amber-600/50 rounded-xl text-slate-100 font-mono text-xs font-bold focus:outline-none focus:border-amber-400"
                       >
-                        <option value="60/40">60/40 FBT (60% Trunk ➔ +0.95dBm / 40% Tap ➔ 50/50 Dual 16-Port NAPs)</option>
-                        <option value="70/30">70/30 FBT (~1.8dB thru / ~5.6dB tap)</option>
-                        <option value="75/25">75/25 FBT (~1.5dB thru / ~6.5dB tap)</option>
-                        <option value="80/20">80/20 FBT (~1.2dB thru / ~7.4dB tap)</option>
-                        <option value="85/15">85/15 FBT (~0.9dB thru / ~8.8dB tap)</option>
+                        <option value="98/2">98/2 FBT (~0.2dB thru / ~17.2dB tap - Ultra-low through loss)</option>
+                        <option value="95/5">95/5 FBT (~0.4dB thru / ~13.4dB tap - High trunk continuation)</option>
                         <option value="90/10">90/10 FBT (~0.6dB thru / ~10.6dB tap)</option>
+                        <option value="85/15">85/15 FBT (~0.9dB thru / ~8.8dB tap)</option>
+                        <option value="80/20">80/20 FBT (~1.2dB thru / ~7.4dB tap)</option>
+                        <option value="75/25">75/25 FBT (~1.5dB thru / ~6.5dB tap)</option>
+                        <option value="70/30">70/30 FBT (~1.8dB thru / ~5.6dB tap)</option>
+                        <option value="60/40">60/40 FBT (60% Trunk ➔ +0.95dBm / 40% Tap ➔ 50/50 Dual 16-Port NAPs)</option>
                         <option value="50/50">50/50 Symmetrical (1x2 ~3.4dB split)</option>
                         <option value="terminal">Terminal (100% Direct to PLC - End Box)</option>
                       </select>

@@ -122,19 +122,57 @@ export const subscribeToDocument = <T>(
 };
 
 /**
+ * Recursively cleanses an object or array of any properties whose value is `undefined`.
+ * Firebase Firestore v9/v10 rejects objects containing `undefined` values with an Unsupported field value error.
+ * Preserves Date instances, Firestore FieldValue instances (deleteField, serverTimestamp, etc.), and arrays.
+ */
+export const cleanUndefinedFields = (obj: any): any => {
+  if (obj === null || obj === undefined) {
+    return null;
+  }
+  if (typeof obj !== 'object') {
+    return obj;
+  }
+  // Preserve Date instances
+  if (obj instanceof Date) {
+    return obj;
+  }
+  // Preserve Firestore FieldValue instances (deleteField, serverTimestamp, arrayUnion, arrayRemove, increment, etc.)
+  if (
+    (obj.constructor && obj.constructor.name !== 'Object' && !Array.isArray(obj)) ||
+    (obj as any)._methodName !== undefined
+  ) {
+    return obj;
+  }
+  if (Array.isArray(obj)) {
+    return obj
+      .filter((item) => item !== undefined)
+      .map((item) => cleanUndefinedFields(item));
+  }
+  const result: Record<string, any> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value !== undefined) {
+      result[key] = cleanUndefinedFields(value);
+    }
+  }
+  return result;
+};
+
+/**
  * Sanitizes documents before writing to Cloud Firestore.
  * Ensures subscriber PPPoE secrets / passwords are NEVER stored in Firebase Cloud storage,
- * and purges any legacy cloud fields via deleteField().
+ * purges any legacy cloud fields via deleteField(), and recursively strips all `undefined` fields.
  */
 export const sanitizeDocForFirestore = <T extends { id: string }>(
   collectionName: string,
   data: T
 ): Record<string, any> => {
+  let processed: any = data;
   if (collectionName === COLLECTIONS.CUSTOMERS) {
     const cust = data as unknown as Customer;
     if (cust.network) {
       const { pppoePassword, ...safeNetwork } = cust.network;
-      return {
+      processed = {
         ...cust,
         network: {
           ...safeNetwork,
@@ -144,7 +182,7 @@ export const sanitizeDocForFirestore = <T extends { id: string }>(
       };
     }
   }
-  return data as Record<string, any>;
+  return cleanUndefinedFields(processed);
 };
 
 /**
@@ -339,11 +377,11 @@ export const seedFirestoreFromLocalData = async (
     const nodesToUpload = data.oltNodes && data.oltNodes.length > 0 ? data.oltNodes : [data.oltNode];
     nodesToUpload.forEach((node) => {
       if (node && node.id) {
-        singletonsBatch.set(doc(db, COLLECTIONS.OLT_NODES, node.id), node, { merge: true });
+        singletonsBatch.set(doc(db, COLLECTIONS.OLT_NODES, node.id), cleanUndefinedFields(node), { merge: true });
         totalUploaded++;
       }
     });
-    singletonsBatch.set(doc(db, COLLECTIONS.BUSINESS_PROFILE, 'company_profile'), data.businessProfile, { merge: true });
+    singletonsBatch.set(doc(db, COLLECTIONS.BUSINESS_PROFILE, 'company_profile'), cleanUndefinedFields(data.businessProfile), { merge: true });
     totalUploaded++;
     await singletonsBatch.commit();
 

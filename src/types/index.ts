@@ -585,6 +585,8 @@ export interface NapPort {
 }
 
 export type FbtSplitterRatio =
+  | '98/2'
+  | '95/5'
   | '90/10'
   | '85/15'
   | '80/20'

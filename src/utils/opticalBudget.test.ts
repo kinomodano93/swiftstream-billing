@@ -11,6 +11,58 @@ import {
 } from './opticalBudget.ts';
 import { NapBox, OltPopNode } from '../types';
 
+test('FBT loss specs contains accurate 98/2 and 95/5 values', () => {
+  const spec98 = FBT_LOSS_SPECS['98/2'];
+  assert.strictEqual(spec98.percentThrough, 98);
+  assert.strictEqual(spec98.percentTap, 2);
+  assert.strictEqual(spec98.throughLoss, 0.2);
+  assert.strictEqual(spec98.tapLoss, 17.2);
+
+  const spec95 = FBT_LOSS_SPECS['95/5'];
+  assert.strictEqual(spec95.percentThrough, 95);
+  assert.strictEqual(spec95.percentTap, 5);
+  assert.strictEqual(spec95.throughLoss, 0.4);
+  assert.strictEqual(spec95.tapLoss, 13.4);
+});
+
+test('calculateSingleHopBudgetPreview computes 98/2 with 1:8 PLC accurately', () => {
+  const result = calculateSingleHopBudgetPreview({
+    baseTxPowerDbm: 4.0,
+    upstreamThroughPowerDbm: null,
+    routeCableMeters: 1000,
+    fbtRatio: '98/2',
+    plcSplitterType: '1:8',
+    tapSubSplitEnabled: false,
+    branchDirection: 'direct',
+  });
+
+  assert.strictEqual(result.hopFiberLossDb, 0.35);
+  assert.strictEqual(result.arrivingInputPowerDbm, 3.55);
+  assert.strictEqual(result.throughOutputPowerDbm, 3.25);
+  assert.strictEqual(result.tapOutputPowerDbm, -13.75);
+  assert.strictEqual(result.dropPortRxPowerDbm, -24.25);
+  assert.strictEqual(result.health.status, 'acceptable');
+});
+
+test('calculateSingleHopBudgetPreview computes 95/5 with 1:8 PLC accurately', () => {
+  const result = calculateSingleHopBudgetPreview({
+    baseTxPowerDbm: 4.0,
+    upstreamThroughPowerDbm: null,
+    routeCableMeters: 1000,
+    fbtRatio: '95/5',
+    plcSplitterType: '1:8',
+    tapSubSplitEnabled: false,
+    branchDirection: 'direct',
+  });
+
+  assert.strictEqual(result.hopFiberLossDb, 0.35);
+  assert.strictEqual(result.arrivingInputPowerDbm, 3.55);
+  assert.strictEqual(result.throughOutputPowerDbm, 3.05);
+  assert.strictEqual(result.tapOutputPowerDbm, -9.95);
+  assert.strictEqual(result.dropPortRxPowerDbm, -20.45);
+  assert.strictEqual(result.health.status, 'optimal');
+});
+
 test('FBT loss specs contains accurate 60/40 values', () => {
   const spec = FBT_LOSS_SPECS['60/40'];
   assert.strictEqual(spec.percentThrough, 60);
