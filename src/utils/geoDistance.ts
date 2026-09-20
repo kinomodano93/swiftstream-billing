@@ -87,6 +87,73 @@ export const calculateSpanMetrics = (
 };
 
 /**
+ * Calculates Outside Plant (OSP) span metrics along an interactive multi-point pole route.
+ * Accurately calculates the exact path distance traversing through intermediate utility poles.
+ */
+export const calculatePathMetrics = (
+  path: Array<{ lat: number; lng: number }>,
+  slackPerPoleMeters = 3
+): SpanMetrics => {
+  if (!path || path.length < 2) {
+    return {
+      directMeters: 0,
+      directKm: 0,
+      routeCableMeters: 0,
+      routeCableKm: 0,
+      opticalLossDb: 0,
+      propagationDelayMicroseconds: 0,
+      formattedDirect: '0 m',
+      formattedRoute: '0 m',
+    };
+  }
+
+  const directMeters = calculateHaversineDistance(
+    path[0].lat,
+    path[0].lng,
+    path[path.length - 1].lat,
+    path[path.length - 1].lng
+  );
+
+  let routedMeters = 0;
+  for (let i = 0; i < path.length - 1; i++) {
+    routedMeters += calculateHaversineDistance(
+      path[i].lat,
+      path[i].lng,
+      path[i + 1].lat,
+      path[i + 1].lng
+    );
+  }
+
+  // Add small drip-loop/sag slack allowance per intermediate utility pole
+  if (path.length > 2) {
+    routedMeters += (path.length - 2) * slackPerPoleMeters;
+  }
+
+  const directKm = Number((directMeters / 1000).toFixed(2));
+  const routeCableKm = Number((routedMeters / 1000).toFixed(2));
+  const opticalLossDb = Number(((routedMeters / 1000) * 0.35).toFixed(2));
+  const propagationDelayMicroseconds = Number(((routedMeters / 1000) * 5.0).toFixed(1));
+
+  const formatDist = (meters: number) => {
+    if (meters >= 1000) {
+      return `${(meters / 1000).toFixed(2)} km (${meters.toLocaleString()} m)`;
+    }
+    return `${meters.toLocaleString()} m`;
+  };
+
+  return {
+    directMeters,
+    directKm,
+    routeCableMeters: routedMeters,
+    routeCableKm,
+    opticalLossDb,
+    propagationDelayMicroseconds,
+    formattedDirect: formatDist(directMeters),
+    formattedRoute: formatDist(routedMeters),
+  };
+};
+
+/**
  * Calculates distance metrics between an OLT POP and a downstream NAP box.
  */
 export const getOltToNapDistance = (olt: OltPopNode, nap: NapBox): SpanMetrics => {

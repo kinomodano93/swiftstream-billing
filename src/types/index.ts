@@ -596,6 +596,10 @@ export type FbtSplitterRatio =
 
 export type PlcSplitterType = '1:4' | '1:8' | '1:16' | '1:32';
 
+export type BranchDirection = 'left' | 'right' | 'through' | 'direct';
+
+export type FeedLegType = 'trunk_through' | 'tap_subsplit' | 'tap_direct' | 'feeder_olt';
+
 export interface NapBox {
   id: string;
   code: string;
@@ -612,9 +616,14 @@ export interface NapBox {
   ponPortNumber?: number; // PON Port on the parent OLT (e.g. 1..16)
   feedSourceType?: 'olt' | 'nap'; // 'olt' = First box fed directly from OLT, 'nap' = Daisy-chained from upstream NAP
   upstreamNapId?: string; // ID of the parent upstream NAP box in the daisy-chain cascade
-  fbtRatio?: FbtSplitterRatio; // FBT asymmetrical coupler ratio (e.g. 85/15, 80/20, terminal)
+  feedLegType?: FeedLegType; // 'trunk_through' = Fed from 60% through leg, 'tap_subsplit' = Fed from 50/50 sub-split on tap, etc.
+  fbtRatio?: FbtSplitterRatio; // FBT asymmetrical coupler ratio (e.g. 60/40, 85/15, 80/20, terminal)
+  tapSubSplitEnabled?: boolean; // When true, the tap leg (e.g. 40%) is split 50/50 to feed dual NAP boxes
+  branchDirection?: BranchDirection; // 'left' = Left Branch box, 'right' = Right Branch box, 'through' = Main trunk through, 'direct' = Direct tap
+  pairedBranchNapId?: string; // ID of the twin paired NAP box sharing the 50/50 tap sub-split
   plcSplitterType?: PlcSplitterType; // PLC symmetrical drop splitter inside the box
   cascadeHopIndex?: number; // 1-based index in the cascade chain (1 = Feeder NAP, 2 = Hop 2, etc.)
+  customPathCoordinates?: GeoPoint[]; // Intermediate utility pole waypoints along the route from upstream feeder/parent to this NAP
   parentCableId?: string;
   opticalInputPowerDbm?: number;
   calculatedRxPowerDbm?: number;

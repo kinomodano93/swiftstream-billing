@@ -18,9 +18,12 @@ import {
   Ruler,
   ArrowRight,
   Waypoints,
+  GitFork,
+  Split,
+  ArrowLeftRight,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { NapBox, NapPort, FbtSplitterRatio, PlcSplitterType } from '../../types';
+import { NapBox, NapPort, FbtSplitterRatio, PlcSplitterType, BranchDirection, FeedLegType } from '../../types';
 import { FiberGisMap } from './FiberGisMap';
 import { CoverageAreaManager, LAGONOY_BARANGAYS, PRESENTACION_BARANGAYS } from './CoverageAreaManager';
 import { getBarangayCoordinates } from '../../data/networkGeo';
@@ -34,10 +37,13 @@ import {
 import {
   FBT_LOSS_SPECS,
   PLC_LOSS_SPECS,
+  SUB_SPLIT_50_50_LOSS_DB,
   buildPonCascadeChain,
   calculateCascadeTelemetry,
+  calculateSingleHopBudgetPreview,
   evaluateOpticalPowerHealth,
 } from '../../utils/opticalBudget';
+import { generateId } from '../../utils/formatters';
 
 interface NapBoxManagerProps {
   onSelectCustomer: (customerId: string) => void;
@@ -91,11 +97,16 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
   const [customBarangay, setCustomBarangay] = useState('');
   const [latitude, setLatitude] = useState<number>(13.6838);
   const [longitude, setLongitude] = useState<number>(123.5175);
+  const [isUserCoordSet, setIsUserCoordSet] = useState<boolean>(false);
   const [selectedOltId, setSelectedOltId] = useState<string>(oltNodes[0]?.id || 'olt-01-headend');
   const [ponPortNumber, setPonPortNumber] = useState<number>(1);
   const [feedSourceType, setFeedSourceType] = useState<'olt' | 'nap'>('olt');
   const [upstreamNapId, setUpstreamNapId] = useState<string>('');
-  const [fbtRatio, setFbtRatio] = useState<FbtSplitterRatio>('85/15');
+  const [fbtRatio, setFbtRatio] = useState<FbtSplitterRatio>('60/40');
+  const [tapSubSplitEnabled, setTapSubSplitEnabled] = useState<boolean>(true);
+  const [branchDirection, setBranchDirection] = useState<BranchDirection>('left');
+  const [autoCreateTwin, setAutoCreateTwin] = useState<boolean>(true);
+  const [feedLegType, setFeedLegType] = useState<FeedLegType>('trunk_through');
   const [plcSplitterType, setPlcSplitterType] = useState<PlcSplitterType>('1:16');
   const [totalPorts, setTotalPorts] = useState<number>(16);
   const [fiberCoreColor, setFiberCoreColor] = useState('Blue (Core 1)');
@@ -109,9 +120,12 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
     } else {
       setIsCustomBarangay(false);
       setBarangay(selected);
-      const coords = getBarangayCoordinates(selected);
-      setLatitude(Number(coords.lat.toFixed(4)));
-      setLongitude(Number(coords.lng.toFixed(4)));
+      // Only align coordinates to barangay center if the engineer hasn't explicitly set GPS coordinates
+      if (!isUserCoordSet) {
+        const coords = getBarangayCoordinates(selected);
+        setLatitude(Number(coords.lat.toFixed(4)));
+        setLongitude(Number(coords.lng.toFixed(4)));
+      }
     }
   };
 
@@ -128,31 +142,50 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
       const targetParent = candidates[candidates.length - 1];
       setFeedSourceType('nap');
       setUpstreamNapId(targetParent.id);
-      setFbtRatio(candidates.length === 1 ? '80/20' : candidates.length === 2 ? '70/30' : 'terminal');
+      setFeedLegType('trunk_through');
+      const defaultFbt: FbtSplitterRatio = candidates.length === 1 ? '60/40' : candidates.length === 2 ? '70/30' : 'terminal';
+      setFbtRatio(defaultFbt);
+      if (defaultFbt === '60/40') {
+        setTapSubSplitEnabled(true);
+        setAutoCreateTwin(true);
+        setBranchDirection('left');
+      } else {
+        setTapSubSplitEnabled(false);
+        setAutoCreateTwin(false);
+        setBranchDirection('direct');
+      }
       if (!isCustomBarangay) {
         setBarangay(targetParent.barangay);
       }
       if (initialCoords) {
+        setIsUserCoordSet(true);
         setLatitude(Number(initialCoords.lat.toFixed(4)));
         setLongitude(Number(initialCoords.lng.toFixed(4)));
       } else {
+        setIsUserCoordSet(false);
         // Auto-align ~250m downstream from upstream parent
         setLatitude(Number((targetParent.latitude + 0.0018).toFixed(4)));
         setLongitude(Number((targetParent.longitude + 0.0015).toFixed(4)));
       }
     } else {
-      // First box on this PON! Default to OLT POP Feeder
+      // First box on this PON! Default to OLT POP Feeder with 60/40 FBT & 50/50 sub-split
       setFeedSourceType('olt');
       setUpstreamNapId('');
-      setFbtRatio('85/15');
+      setFeedLegType('feeder_olt');
+      setFbtRatio('60/40');
+      setTapSubSplitEnabled(true);
+      setAutoCreateTwin(true);
+      setBranchDirection('left');
       const targetOlt = oltNodes.find((o) => o.id === selectedOltId) || oltNodes[0] || oltNode;
       if (targetOlt && !isCustomBarangay) {
         setBarangay(targetOlt.barangay);
       }
       if (initialCoords) {
+        setIsUserCoordSet(true);
         setLatitude(Number(initialCoords.lat.toFixed(4)));
         setLongitude(Number(initialCoords.lng.toFixed(4)));
       } else if (targetOlt) {
+        setIsUserCoordSet(false);
         setLatitude(Number((targetOlt.latitude - 0.0032).toFixed(4)));
         setLongitude(Number((targetOlt.longitude - 0.0035).toFixed(4)));
       }
@@ -168,7 +201,6 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
     }));
 
     const finalBarangay = isCustomBarangay ? (customBarangay.trim() || 'Lagonoy') : barangay;
-    const finalSplitterType = `${plcSplitterType} PLC (${fbtRatio === 'terminal' ? '100% Terminal' : `${fbtRatio} FBT`})`;
 
     // Resolve upstream parent for cascaded hops (defaults to latest box in cascade if not explicitly chosen)
     const candidatesOnPon = napBoxes.filter(
@@ -181,25 +213,105 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
         ? upstreamNapId || candidatesOnPon[candidatesOnPon.length - 1]?.id || candidatesOnPon[0]?.id || undefined
         : undefined;
 
-    addNapBox({
-      code,
-      name,
-      location,
-      barangay: finalBarangay,
-      latitude: Number(latitude) || 13.6870,
-      longitude: Number(longitude) || 123.5210,
-      oltId: selectedOltId || oltNodes[0]?.id || 'olt-01-headend',
-      ponPortNumber: Number(ponPortNumber) || 1,
-      feedSourceType,
-      upstreamNapId: resolvedUpstreamNapId,
-      fbtRatio,
-      plcSplitterType,
-      totalPorts,
-      fiberCoreColor,
-      splitterType: finalSplitterType,
-      ports,
-      notes,
-    });
+    const resolvedFeedLeg: FeedLegType =
+      feedSourceType === 'olt'
+        ? 'feeder_olt'
+        : feedLegType;
+
+    // If 50/50 Sub-Split with Auto-create Twin is chosen: create both Left & Right boxes!
+    if (tapSubSplitEnabled && autoCreateTwin && fbtRatio !== 'terminal') {
+      const leftId = generateId('NAP');
+      const rightId = generateId('NAP');
+      const baseCode = code.trim() || 'NAP-NEW';
+      const leftCode = `${baseCode}-L`;
+      const rightCode = `${baseCode}-R`;
+      const baseName = name.trim() || 'Distribution Hub';
+
+      // 1. Left Branch
+      addNapBox({
+        id: leftId,
+        code: leftCode,
+        name: `${baseName} (Left Branch)`,
+        location: `${location} (Left Branch)`,
+        barangay: finalBarangay,
+        latitude: Number(latitude) || 13.6870,
+        longitude: Number(longitude) || 123.5210,
+        oltId: selectedOltId || oltNodes[0]?.id || 'olt-01-headend',
+        ponPortNumber: Number(ponPortNumber) || 1,
+        feedSourceType,
+        upstreamNapId: resolvedUpstreamNapId,
+        feedLegType: resolvedFeedLeg,
+        fbtRatio,
+        tapSubSplitEnabled: true,
+        branchDirection: 'left',
+        pairedBranchNapId: rightId,
+        plcSplitterType,
+        totalPorts,
+        fiberCoreColor,
+        splitterType: `${plcSplitterType} PLC (${fbtRatio} FBT ➔ 50/50 Left)`,
+        ports: [...ports],
+        notes: `${notes ? `${notes} | ` : ''}Left Branch of ${fbtRatio} FBT (50/50 Sub-Split). Paired with ${rightCode}.`,
+      });
+
+      // 2. Right Branch (co-located at the exact same physical pole GPS coordinates)
+      const rightPorts: NapPort[] = Array.from({ length: totalPorts }, (_, i) => ({
+        portNumber: i + 1,
+        status: 'available',
+      }));
+
+      addNapBox({
+        id: rightId,
+        code: rightCode,
+        name: `${baseName} (Right Branch)`,
+        location: `${location} (Right Branch)`,
+        barangay: finalBarangay,
+        latitude: Number(latitude) || 13.6870,
+        longitude: Number(longitude) || 123.5210,
+        oltId: selectedOltId || oltNodes[0]?.id || 'olt-01-headend',
+        ponPortNumber: Number(ponPortNumber) || 1,
+        feedSourceType: 'nap',
+        upstreamNapId: leftId, // logically branch off from the same FBT location
+        feedLegType: 'tap_subsplit',
+        fbtRatio,
+        tapSubSplitEnabled: true,
+        branchDirection: 'right',
+        pairedBranchNapId: leftId,
+        plcSplitterType,
+        totalPorts,
+        fiberCoreColor: 'Orange (Core 2)',
+        splitterType: `${plcSplitterType} PLC (${fbtRatio} FBT ➔ 50/50 Right)`,
+        ports: rightPorts,
+        notes: `${notes ? `${notes} | ` : ''}Right Branch of ${fbtRatio} FBT (50/50 Sub-Split). Paired with ${leftCode}.`,
+      });
+    } else {
+      const isSub = tapSubSplitEnabled && fbtRatio !== 'terminal';
+      const finalSplitterType = isSub
+        ? `${plcSplitterType} PLC (${fbtRatio} FBT ➔ 50/50 ${branchDirection === 'left' ? 'Left' : branchDirection === 'right' ? 'Right' : 'Branch'})`
+        : `${plcSplitterType} PLC (${fbtRatio === 'terminal' ? '100% Terminal' : `${fbtRatio} FBT`})`;
+
+      addNapBox({
+        code,
+        name,
+        location,
+        barangay: finalBarangay,
+        latitude: Number(latitude) || 13.6870,
+        longitude: Number(longitude) || 123.5210,
+        oltId: selectedOltId || oltNodes[0]?.id || 'olt-01-headend',
+        ponPortNumber: Number(ponPortNumber) || 1,
+        feedSourceType,
+        upstreamNapId: resolvedUpstreamNapId,
+        feedLegType: resolvedFeedLeg,
+        fbtRatio,
+        tapSubSplitEnabled: isSub,
+        branchDirection: isSub ? branchDirection : 'direct',
+        plcSplitterType,
+        totalPorts,
+        fiberCoreColor,
+        splitterType: finalSplitterType,
+        ports,
+        notes,
+      });
+    }
 
     setShowAddBoxModal(false);
     setCode('');
@@ -207,6 +319,9 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
     setLocation('');
     setIsCustomBarangay(false);
     setCustomBarangay('');
+    setTapSubSplitEnabled(false);
+    setBranchDirection('direct');
+    setAutoCreateTwin(false);
   };
 
   const getPortStatusStyles = (status: string) => {
@@ -413,13 +528,19 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
                 >
               <div className="flex items-start justify-between">
                 <div>
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1.5 flex-wrap">
                     <span className="font-mono text-xs font-bold text-cyan-400 bg-cyan-950 px-2 py-0.5 rounded border border-cyan-800/40">
                       {box.code}
                     </span>
                     {box.fbtRatio && (
                       <span className="font-mono text-[10px] font-bold text-amber-300 bg-amber-950/60 px-1.5 py-0.5 rounded border border-amber-800/40">
                         {box.fbtRatio === 'terminal' ? 'Terminal' : `${box.fbtRatio} FBT`}
+                      </span>
+                    )}
+                    {box.tapSubSplitEnabled && (
+                      <span className="font-mono text-[9px] font-bold text-cyan-300 bg-cyan-950/70 px-1.5 py-0.5 rounded border border-cyan-700/50 flex items-center gap-1">
+                        <Split className="w-2.5 h-2.5" />
+                        <span>50/50 {box.branchDirection ? box.branchDirection.toUpperCase() : 'SUB'}</span>
                       </span>
                     )}
                   </div>
@@ -702,21 +823,151 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
                     </div>
 
                     {currentHop ? (
-                      <div className="space-y-1.5 font-mono text-[11px]">
+                      <div className="space-y-2 font-mono text-[11px]">
                         <div className="flex items-center justify-between">
                           <span className="text-slate-400">Arriving Input Power:</span>
                           <span className="text-cyan-300 font-bold">{currentHop.arrivingInputPowerDbm} dBm</span>
                         </div>
+
+                        {/* FBT Ratio Selector */}
                         <div className="flex items-center justify-between">
-                          <span className="text-slate-400">FBT Coupler Ratio:</span>
-                          <span className="text-amber-300 font-bold">
-                            {currentHop.isTerminal ? 'Terminal (100% PLC)' : `${currentHop.fbtRatio} (Tap -${currentHop.fbtTapLossDb}dB, Thru -${currentHop.fbtThroughLossDb}dB)`}
-                          </span>
+                          <span className="text-slate-400">FBT Coupler:</span>
+                          <select
+                            value={activeBox.fbtRatio || '85/15'}
+                            onChange={(e) => {
+                              const newRatio = e.target.value as FbtSplitterRatio;
+                              const isSub = activeBox.tapSubSplitEnabled && newRatio !== 'terminal';
+                              const newSplitterType = isSub
+                                ? `${activeBox.plcSplitterType || '1:16'} PLC (${newRatio} FBT ➔ 50/50 ${activeBox.branchDirection === 'left' ? 'Left' : activeBox.branchDirection === 'right' ? 'Right' : 'Branch'})`
+                                : `${activeBox.plcSplitterType || '1:16'} PLC (${newRatio === 'terminal' ? '100% Terminal' : `${newRatio} FBT`})`;
+                              updateNapBox(activeBox.id, {
+                                fbtRatio: newRatio,
+                                splitterType: newSplitterType,
+                              });
+                            }}
+                            className="px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-amber-300 font-mono text-[10px] font-bold focus:outline-none focus:border-amber-400"
+                          >
+                            <option value="60/40">60/40 FBT (~2.5dB / ~4.3dB)</option>
+                            <option value="70/30">70/30 FBT (~1.8dB / ~5.6dB)</option>
+                            <option value="80/20">80/20 FBT (~1.2dB / ~7.4dB)</option>
+                            <option value="85/15">85/15 FBT (~0.9dB / ~8.8dB)</option>
+                            <option value="75/25">75/25 FBT (~1.5dB / ~6.5dB)</option>
+                            <option value="50/50">50/50 Symmetrical (~3.4dB)</option>
+                            <option value="90/10">90/10 FBT (~0.6dB / ~10.6dB)</option>
+                            <option value="terminal">Terminal (100% Direct)</option>
+                          </select>
                         </div>
+
+                        {/* Through & Tap breakdown */}
+                        {!currentHop.isTerminal && (
+                          <div className="grid grid-cols-2 gap-1.5 p-2 rounded-lg bg-slate-900/60 border border-slate-800">
+                            <div>
+                              <span className="text-purple-300 font-bold block text-[10px]">
+                                ➡️ Trunk Through ({FBT_LOSS_SPECS[currentHop.fbtRatio].percentThrough}%)
+                              </span>
+                              <span className="text-slate-400 text-[10px]">Loss: -{currentHop.fbtThroughLossDb} dB</span>
+                              <span className="text-purple-200 font-bold block text-[11px]">
+                                {currentHop.throughOutputPowerDbm} dBm
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-amber-300 font-bold block text-[10px]">
+                                🔀 Trunk Tap ({FBT_LOSS_SPECS[currentHop.fbtRatio].percentTap}%)
+                              </span>
+                              <span className="text-slate-400 text-[10px]">Loss: -{currentHop.fbtTapLossDb} dB</span>
+                              <span className="text-amber-200 font-bold block text-[11px]">
+                                {currentHop.tapOutputPowerDbm} dBm
+                              </span>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 50/50 Sub-Split Controls */}
+                        {!currentHop.isTerminal && (
+                          <div className="p-2 rounded-lg bg-amber-950/20 border border-amber-800/40 space-y-1.5">
+                            <div className="flex items-center justify-between">
+                              <label className="flex items-center gap-1.5 text-slate-300 cursor-pointer text-[10px]">
+                                <input
+                                  type="checkbox"
+                                  checked={Boolean(activeBox.tapSubSplitEnabled)}
+                                  onChange={(e) => {
+                                    const checked = e.target.checked;
+                                    const dir = checked ? (activeBox.branchDirection === 'direct' ? 'left' : (activeBox.branchDirection || 'left')) : 'direct';
+                                    const newSplitterType = checked
+                                      ? `${activeBox.plcSplitterType || '1:16'} PLC (${activeBox.fbtRatio || '60/40'} FBT ➔ 50/50 ${dir === 'left' ? 'Left' : 'Right'})`
+                                      : `${activeBox.plcSplitterType || '1:16'} PLC (${activeBox.fbtRatio || '85/15'} FBT)`;
+                                    updateNapBox(activeBox.id, {
+                                      tapSubSplitEnabled: checked,
+                                      branchDirection: dir,
+                                      splitterType: newSplitterType,
+                                    });
+                                  }}
+                                  className="rounded border-amber-600/50 text-amber-500 focus:ring-amber-400"
+                                />
+                                <span className="font-semibold text-amber-200">50/50 Tap Sub-Split (Dual NAPs)</span>
+                              </label>
+                              {currentHop.tapSubSplitEnabled && (
+                                <span className="text-amber-300 font-bold text-[10px]">-3.4 dB</span>
+                              )}
+                            </div>
+
+                            {activeBox.tapSubSplitEnabled && (
+                              <div className="flex items-center justify-between pt-1 border-t border-amber-900/30">
+                                <span className="text-slate-400 text-[10px]">Branch:</span>
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const newSplitterType = `${activeBox.plcSplitterType || '1:16'} PLC (${activeBox.fbtRatio || '60/40'} FBT ➔ 50/50 Left)`;
+                                      updateNapBox(activeBox.id, { branchDirection: 'left', splitterType: newSplitterType });
+                                    }}
+                                    className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                      activeBox.branchDirection === 'left'
+                                        ? 'bg-amber-500 text-slate-950'
+                                        : 'bg-slate-900 text-slate-400 hover:text-slate-200'
+                                    }`}
+                                  >
+                                    Left
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const newSplitterType = `${activeBox.plcSplitterType || '1:16'} PLC (${activeBox.fbtRatio || '60/40'} FBT ➔ 50/50 Right)`;
+                                      updateNapBox(activeBox.id, { branchDirection: 'right', splitterType: newSplitterType });
+                                    }}
+                                    className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                      activeBox.branchDirection === 'right'
+                                        ? 'bg-amber-500 text-slate-950'
+                                        : 'bg-slate-900 text-slate-400 hover:text-slate-200'
+                                    }`}
+                                  >
+                                    Right
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+
+                            {activeBox.pairedBranchNapId && (
+                              <div className="flex items-center justify-between pt-1 border-t border-amber-900/30 text-[10px]">
+                                <span className="text-slate-400">Twin Branch:</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedBoxId(activeBox.pairedBranchNapId!)}
+                                  className="text-cyan-400 hover:text-cyan-200 underline font-bold flex items-center gap-1"
+                                >
+                                  <span>{napBoxes.find((b) => b.id === activeBox.pairedBranchNapId)?.code || 'View Twin'}</span>
+                                  <ArrowRight className="w-2.5 h-2.5" />
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
                         <div className="flex items-center justify-between">
                           <span className="text-slate-400">PLC Drop Splitter:</span>
-                          <span className="text-slate-200 font-bold">{currentHop.plcType} (-${currentHop.plcLossDb}dB)</span>
+                          <span className="text-slate-200 font-bold">{currentHop.plcType} (-{currentHop.plcLossDb}dB)</span>
                         </div>
+
                         <div className="flex items-center justify-between pt-1 border-t border-slate-900">
                           <span className="text-slate-400 font-semibold">Subscriber Drop Port Rx:</span>
                           <span
@@ -975,6 +1226,8 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
                             setUpstreamNapId(p.id);
                             if (!isCustomBarangay) {
                               setBarangay(p.barangay);
+                            }
+                            if (!isUserCoordSet) {
                               setLatitude(Number((p.latitude + 0.0018).toFixed(4)));
                               setLongitude(Number((p.longitude + 0.0015).toFixed(4)));
                             }
@@ -1043,7 +1296,9 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
                             setUpstreamNapId(targetParent.id);
                             if (!isCustomBarangay) {
                               setBarangay(targetParent.barangay);
-                              // Auto-offset proposed pole coordinates ~250m downstream from upstream parent
+                            }
+                            if (!isUserCoordSet) {
+                              // Only suggest coordinate offset if user hasn't explicitly specified pole coordinates
                               setLatitude(Number((targetParent.latitude + 0.0018).toFixed(4)));
                               setLongitude(Number((targetParent.longitude + 0.0015).toFixed(4)));
                             }
@@ -1098,9 +1353,8 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
                                   const p = napBoxes.find((b) => b.id === newParentId);
                                   if (p && !isCustomBarangay) {
                                     setBarangay(p.barangay);
-                                    setLatitude(Number((p.latitude + 0.0018).toFixed(4)));
-                                    setLongitude(Number((p.longitude + 0.0015).toFixed(4)));
                                   }
+                                  // Do not wipe out coordinates when choosing parent — pole coordinates remain preserved!
                                 }}
                                 className="w-full px-2.5 py-1.5 bg-slate-950 border border-cyan-800/60 rounded-xl text-slate-100 font-mono text-xs focus:outline-none focus:border-cyan-400 font-bold"
                               >
@@ -1120,6 +1374,7 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
                                     onClick={() => {
                                       setLatitude(Number((activeParent.latitude + 0.0018).toFixed(4)));
                                       setLongitude(Number((activeParent.longitude + 0.0015).toFixed(4)));
+                                      setIsUserCoordSet(true);
                                     }}
                                     className="text-cyan-400 hover:text-cyan-200 underline font-mono text-[10px]"
                                   >
@@ -1143,16 +1398,28 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
                       </label>
                       <select
                         value={fbtRatio}
-                        onChange={(e) => setFbtRatio(e.target.value as FbtSplitterRatio)}
+                        onChange={(e) => {
+                          const val = e.target.value as FbtSplitterRatio;
+                          setFbtRatio(val);
+                          if (val === '60/40') {
+                            setTapSubSplitEnabled(true);
+                            setAutoCreateTwin(true);
+                            setBranchDirection('left');
+                          } else if (val === 'terminal') {
+                            setTapSubSplitEnabled(false);
+                            setAutoCreateTwin(false);
+                            setBranchDirection('direct');
+                          }
+                        }}
                         className="w-full px-2.5 py-1.5 bg-slate-950 border border-amber-600/50 rounded-xl text-slate-100 font-mono text-xs font-bold focus:outline-none focus:border-amber-400"
                       >
-                        <option value="85/15">85/15 FBT (~0.9dB thru / ~8.8dB tap)</option>
-                        <option value="80/20">80/20 FBT (~1.2dB thru / ~7.4dB tap)</option>
+                        <option value="60/40">60/40 FBT (60% Trunk ➔ +0.95dBm / 40% Tap ➔ 50/50 Dual 16-Port NAPs)</option>
                         <option value="70/30">70/30 FBT (~1.8dB thru / ~5.6dB tap)</option>
                         <option value="75/25">75/25 FBT (~1.5dB thru / ~6.5dB tap)</option>
-                        <option value="60/40">60/40 FBT (~2.5dB thru / ~4.3dB tap)</option>
-                        <option value="50/50">50/50 Symmetrical (1x2 ~3.4dB split)</option>
+                        <option value="80/20">80/20 FBT (~1.2dB thru / ~7.4dB tap)</option>
+                        <option value="85/15">85/15 FBT (~0.9dB thru / ~8.8dB tap)</option>
                         <option value="90/10">90/10 FBT (~0.6dB thru / ~10.6dB tap)</option>
+                        <option value="50/50">50/50 Symmetrical (1x2 ~3.4dB split)</option>
                         <option value="terminal">Terminal (100% Direct to PLC - End Box)</option>
                       </select>
                     </div>
@@ -1177,6 +1444,114 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
                       </select>
                     </div>
                   </div>
+
+                  {/* FBT Sub-Split Configuration */}
+                  {fbtRatio !== 'terminal' && (
+                    <div className="p-2.5 rounded-2xl bg-gradient-to-r from-amber-950/40 to-purple-950/30 border border-amber-800/50 space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={tapSubSplitEnabled}
+                            onChange={(e) => {
+                              const checked = e.target.checked;
+                              setTapSubSplitEnabled(checked);
+                              if (checked) {
+                                setAutoCreateTwin(true);
+                                setBranchDirection('left');
+                              } else {
+                                setBranchDirection('direct');
+                                setAutoCreateTwin(false);
+                              }
+                            }}
+                            className="rounded border-amber-600/60 text-amber-500 focus:ring-amber-500 w-3.5 h-3.5 bg-slate-900"
+                          />
+                          <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+                            <Split className="w-3.5 h-3.5 text-amber-400" />
+                            50/50 Sub-Split on Tap Leg (-3.4 dB)
+                          </span>
+                        </label>
+                        <span className="text-[10px] text-emerald-300 font-mono bg-emerald-950/70 px-2 py-0.5 rounded-full border border-emerald-700/60 font-bold">
+                          {tapSubSplitEnabled && autoCreateTwin ? '32 Ports Total (2x 16-Port NAPs)' : '16 Ports'}
+                        </span>
+                      </div>
+
+                      <div className="p-2 rounded-xl bg-slate-950/80 border border-amber-900/40 text-[10px] text-slate-300 space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="text-amber-300 font-semibold">⚡ 40% Tap Leg Split:</span>
+                          <span className="font-mono text-cyan-300">50/50 Sub-Split (-3.4 dB) ➔ 2x 16-Port NAPs</span>
+                        </div>
+                        <div className="flex items-center justify-between text-slate-400">
+                          <span>🔄 60% Through Leg:</span>
+                          <span className="font-mono text-purple-300">Cascades downstream to Hop #2 (NAP-02)</span>
+                        </div>
+                      </div>
+
+                      {tapSubSplitEnabled && (
+                        <div className="pt-1.5 border-t border-amber-900/40 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] text-amber-200 font-semibold">Deployment Architecture:</span>
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setAutoCreateTwin(true);
+                                  setBranchDirection('left');
+                                }}
+                                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold font-mono transition-all flex items-center gap-1 ${
+                                  autoCreateTwin
+                                    ? 'bg-gradient-to-r from-emerald-500 to-cyan-500 text-slate-950 shadow-md font-black'
+                                    : 'bg-slate-900 border border-slate-700 text-slate-400 hover:text-slate-200'
+                                }`}
+                              >
+                                <ArrowLeftRight className="w-3 h-3" />
+                                <span>Dual 16-Port Twin Hub (32 Ports)</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setAutoCreateTwin(false);
+                                  setBranchDirection('left');
+                                }}
+                                className={`px-2 py-1 rounded-lg text-[11px] font-bold font-mono transition-all ${
+                                  !autoCreateTwin && branchDirection === 'left'
+                                    ? 'bg-amber-500 text-slate-950 shadow-sm'
+                                    : 'bg-slate-900 border border-slate-700 text-slate-400 hover:text-slate-200'
+                                }`}
+                              >
+                                ◀ Left Only
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setAutoCreateTwin(false);
+                                  setBranchDirection('right');
+                                }}
+                                className={`px-2 py-1 rounded-lg text-[11px] font-bold font-mono transition-all ${
+                                  !autoCreateTwin && branchDirection === 'right'
+                                    ? 'bg-amber-500 text-slate-950 shadow-sm'
+                                    : 'bg-slate-900 border border-slate-700 text-slate-400 hover:text-slate-200'
+                                }`}
+                              >
+                                Right Only ▶
+                              </button>
+                            </div>
+                          </div>
+
+                          {autoCreateTwin && (
+                            <div className="px-2.5 py-1.5 rounded-xl bg-emerald-950/40 border border-emerald-800/60 text-[10px] text-emerald-300 flex items-center gap-2">
+                              <ArrowLeftRight className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                              <span>
+                                Will deploy <strong>{code || 'NAP'}-L</strong> (Left) & <strong>{code || 'NAP'}-R</strong> (Right) at the <strong>exact same pole GPS coordinates</strong> with 32 total subscriber ports.
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* Live Cascade Distance & Optical Power Telemetry Preview */}
                   {(() => {
@@ -1215,24 +1590,19 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
                       ? upstreamTelemetry.cumulativeCableMeters + hopSpan.routeCableMeters
                       : hopSpan.routeCableMeters;
 
-                    // Estimate optical attenuation
-                    const fbtSpec = FBT_LOSS_SPECS[fbtRatio] || FBT_LOSS_SPECS['85/15'];
-                    const plcSpec = PLC_LOSS_SPECS[plcSplitterType] || PLC_LOSS_SPECS['1:16'];
                     const baseTx = typeof targetOlt?.txPowerDbm === 'number' ? targetOlt.txPowerDbm : 4.0;
 
-                    // Arriving input power estimation
-                    const hopFiberLoss = Number(((hopSpan.routeCableMeters / 1000) * 0.35).toFixed(2));
-                    const arrivingInputDbm = upstreamTelemetry && typeof upstreamTelemetry.throughOutputPowerDbm === 'number'
-                      ? Number((upstreamTelemetry.throughOutputPowerDbm - hopFiberLoss - 0.1).toFixed(2))
-                      : upstreamNap
-                      ? Number((baseTx - 3.2 - hopFiberLoss).toFixed(2))
-                      : Number((baseTx - hopFiberLoss - 0.1).toFixed(2));
-
-                    const dropRxDbm = fbtRatio === 'terminal'
-                      ? Number((arrivingInputDbm - plcSpec.loss).toFixed(2))
-                      : Number((arrivingInputDbm - fbtSpec.tapLoss - plcSpec.loss).toFixed(2));
-
-                    const health = evaluateOpticalPowerHealth(dropRxDbm);
+                    const preview = calculateSingleHopBudgetPreview({
+                      baseTxPowerDbm: baseTx,
+                      upstreamThroughPowerDbm: upstreamTelemetry?.throughOutputPowerDbm,
+                      upstreamTapSubSplitPowerDbm: upstreamTelemetry?.branchInputPowerDbm,
+                      isFeedFromSubSplit: feedLegType === 'tap_subsplit',
+                      routeCableMeters: hopSpan.routeCableMeters,
+                      fbtRatio,
+                      plcSplitterType,
+                      tapSubSplitEnabled,
+                      branchDirection,
+                    });
 
                     return (
                       <div className="p-3 rounded-2xl bg-gradient-to-r from-purple-950/40 via-slate-950 to-cyan-950/40 border border-purple-800/60 space-y-2 font-mono text-xs">
@@ -1247,14 +1617,14 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
                           </div>
                           <span
                             className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
-                              health.status === 'optimal'
+                              preview.health.status === 'optimal'
                                 ? 'bg-emerald-950 text-emerald-400 border-emerald-800/60'
-                                : health.status === 'acceptable'
+                                : preview.health.status === 'acceptable'
                                 ? 'bg-cyan-950 text-cyan-300 border-cyan-800/60'
                                 : 'bg-amber-950 text-amber-400 border-amber-800/60'
                             }`}
                           >
-                            {health.label}
+                            {preview.health.label}
                           </span>
                         </div>
 
@@ -1266,21 +1636,61 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
                           </div>
 
                           <div>
-                            <span className="text-slate-500 block text-[10px]">Simulated Drop Rx Signal:</span>
+                            <span className="text-slate-500 block text-[10px]">
+                              Drop Rx Signal {tapSubSplitEnabled ? `(${branchDirection.toUpperCase()})` : ''}:
+                            </span>
                             <span
                               className={`font-black text-sm ${
-                                health.status === 'optimal'
+                                preview.health.status === 'optimal'
                                   ? 'text-emerald-400'
-                                  : health.status === 'acceptable'
+                                  : preview.health.status === 'acceptable'
                                   ? 'text-cyan-300'
                                   : 'text-amber-400'
                               }`}
                             >
-                              {dropRxDbm} dBm
+                              {preview.dropPortRxPowerDbm} dBm
                             </span>
-                            <span className="text-slate-500 text-[10px] block">Input: {arrivingInputDbm} dBm</span>
+                            <span className="text-slate-500 text-[10px] block">Input: {preview.arrivingInputPowerDbm} dBm</span>
                           </div>
                         </div>
+
+                        {/* FBT Output breakdown */}
+                        {preview.throughOutputPowerDbm !== null && (
+                          <div className="pt-1.5 border-t border-slate-900 grid grid-cols-2 gap-2 text-[10px]">
+                            <div className="p-1.5 rounded-lg bg-amber-950/30 border border-amber-900/40">
+                              <span className="text-amber-400/80 block font-medium">
+                                {fbtRatio.split('/')[0]}% Through (Next Hop):
+                              </span>
+                              <span className="text-amber-200 font-bold">{preview.throughOutputPowerDbm} dBm</span>
+                            </div>
+                            <div className="p-1.5 rounded-lg bg-cyan-950/30 border border-cyan-900/40">
+                              <span className="text-cyan-400/80 block font-medium">
+                                {fbtRatio.split('/')[1] || 'Tap'}% Local Tap:
+                              </span>
+                              <span className="text-cyan-200 font-bold">{preview.tapOutputPowerDbm} dBm</span>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Sub-split breakdown if enabled */}
+                        {tapSubSplitEnabled && (
+                          <div className="p-1.5 rounded-lg bg-purple-950/30 border border-purple-900/40 flex items-center justify-between text-[10px]">
+                            <div>
+                              <span className="text-purple-300 font-semibold block flex items-center gap-1">
+                                <Split className="w-3 h-3 text-purple-400" />
+                                50/50 Sub-Split Branch In:
+                              </span>
+                              <span className="text-slate-200 font-bold">{preview.branchInputPowerDbm} dBm</span>
+                              <span className="text-slate-500 ml-1">(-3.4 dB split + 0.1 dB splice)</span>
+                            </div>
+                            <div className="text-right">
+                              <span className="text-emerald-400 font-bold block">
+                                {autoCreateTwin ? '2 x 16 = 32 Ports' : '16 Ports (Branch)'}
+                              </span>
+                              <span className="text-slate-400 text-[9px]">Dual Branch Capacity</span>
+                            </div>
+                          </div>
+                        )}
 
                         {feedSourceType === 'nap' && upstreamNap && (
                           <div className="pt-1 border-t border-slate-900 flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-[10px] text-slate-400">
@@ -1393,6 +1803,24 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
 
                   {/* GPS Coordinates */}
                   <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400 font-medium text-[11px] flex items-center gap-1">
+                        <MapPin className="w-3 h-3 text-emerald-400" />
+                        <span>Roadside Utility Pole GPS</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowAddBoxModal(false);
+                          setViewMode('gis_map');
+                        }}
+                        className="text-cyan-400 hover:text-cyan-300 font-medium text-[10px] flex items-center gap-1 cursor-pointer bg-cyan-950/60 hover:bg-cyan-900/80 border border-cyan-800/60 px-2 py-0.5 rounded-lg transition-colors"
+                        title="Close modal and pick/drag pole location directly on satellite map"
+                      >
+                        <span>🗺️ Pick & Drag on Satellite Map</span>
+                      </button>
+                    </div>
+
                     <div className="grid grid-cols-2 gap-2.5">
                       <div>
                         <label className="block text-slate-400 mb-1 font-medium text-[11px]">GPS Latitude (North)</label>
@@ -1400,9 +1828,12 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
                           type="number"
                           step="0.0001"
                           value={latitude}
-                          onChange={(e) => setLatitude(Number(e.target.value))}
+                          onChange={(e) => {
+                            setLatitude(Number(e.target.value));
+                            setIsUserCoordSet(true);
+                          }}
                           placeholder="13.6870"
-                          className="w-full px-2.5 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-mono text-xs focus:outline-none focus:border-cyan-500"
+                          className="w-full px-2.5 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-mono text-xs focus:outline-none focus:border-cyan-500 font-bold"
                         />
                       </div>
 
@@ -1412,20 +1843,42 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
                           type="number"
                           step="0.0001"
                           value={longitude}
-                          onChange={(e) => setLongitude(Number(e.target.value))}
+                          onChange={(e) => {
+                            setLongitude(Number(e.target.value));
+                            setIsUserCoordSet(true);
+                          }}
                           placeholder="123.5210"
-                          className="w-full px-2.5 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-mono text-xs focus:outline-none focus:border-cyan-500"
+                          className="w-full px-2.5 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-mono text-xs focus:outline-none focus:border-cyan-500 font-bold"
                         />
                       </div>
                     </div>
 
                     {/* GPS Auto-align notice */}
-                    <div className="px-2.5 py-1 rounded-xl bg-cyan-950/40 border border-cyan-900/50 flex items-center justify-between text-[10px] text-cyan-300">
+                    <div className="px-2.5 py-1.5 rounded-xl bg-cyan-950/40 border border-cyan-900/50 flex items-center justify-between text-[10px] text-cyan-300">
                       <span className="flex items-center gap-1.5">
-                        <Compass className="w-3 h-3 text-cyan-400" />
-                        <span>GPS aligned to <strong>Brgy. {isCustomBarangay ? customBarangay || 'Custom' : barangay}</strong></span>
+                        <Compass className="w-3.5 h-3.5 text-cyan-400" />
+                        {isUserCoordSet ? (
+                          <span>
+                            📍 <strong className="text-emerald-400 font-bold">User Pole Coordinates Locked:</strong> ({latitude?.toFixed(4)}°, {longitude?.toFixed(4)}°)
+                          </span>
+                        ) : (
+                          <span>GPS aligned to <strong>Brgy. {isCustomBarangay ? customBarangay || 'Custom' : barangay}</strong></span>
+                        )}
                       </span>
-                      <span className="text-slate-400 text-[9px]">Fine-tune for exact pole</span>
+                      {isUserCoordSet && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const coords = getBarangayCoordinates(barangay);
+                            setLatitude(Number(coords.lat.toFixed(4)));
+                            setLongitude(Number(coords.lng.toFixed(4)));
+                            setIsUserCoordSet(false);
+                          }}
+                          className="text-slate-400 hover:text-cyan-300 text-[9px] underline"
+                        >
+                          Reset to Center
+                        </button>
+                      )}
                     </div>
                   </div>
 

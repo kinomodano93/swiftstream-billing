@@ -32,6 +32,9 @@ import {
   Trash2,
   Ruler,
   Waypoints,
+  Split,
+  ArrowLeftRight,
+  Move,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { FiberCable, FiberClosure, GeoPoint, NapBox, NapPort, OltPopNode, Customer } from '../../types';
@@ -106,7 +109,10 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
     businessProfile,
     addNapBox,
     addFiberCable,
+    updateFiberCable,
     addFiberClosure,
+    updateFiberClosure,
+    updateOltNode,
     updateNapBox,
     deleteNapBox,
   } = useApp();
@@ -152,6 +158,7 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
     data: any;
   } | null>(null);
   const [drawerInterNapTargetId, setDrawerInterNapTargetId] = useState<string>('');
+  const [externalRouteEditNapId, setExternalRouteEditNapId] = useState<string | null>(null);
 
   // OLT Registration Modal state
   const [showOltModal, setShowOltModal] = useState<boolean>(false);
@@ -689,6 +696,12 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
                 setEditingOltId(null);
                 setShowOltModal(true);
               }}
+              onUpdateNapBox={updateNapBox}
+              onUpdateFiberCable={updateFiberCable}
+              onUpdateFiberClosure={updateFiberClosure}
+              onUpdateOltNode={updateOltNode}
+              externalRouteEditNapId={externalRouteEditNapId}
+              onClearExternalRouteEdit={() => setExternalRouteEditNapId(null)}
               activeOtdrBreak={activeOtdrBreak}
               mapTileStyle={mapStyle}
               googleMapsApiKey={businessProfile?.apiKeys?.googleMapsApiKey}
@@ -1195,7 +1208,16 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
                   <div>
                     <h3 className="text-sm font-bold text-slate-100">{selectedAsset.data.name}</h3>
                     <p className="text-[11px] text-cyan-400 font-mono">{selectedAsset.data.code}</p>
-                    <p className="text-slate-400 mt-1">{selectedAsset.data.location}, Brgy. {selectedAsset.data.barangay}</p>
+                    <div className="flex items-center justify-between mt-1 text-[11px] font-mono text-slate-400">
+                      <span>{selectedAsset.data.location}, Brgy. {selectedAsset.data.barangay}</span>
+                      <span className="text-cyan-300 font-semibold">
+                        {selectedAsset.data.latitude?.toFixed(5)}°, {selectedAsset.data.longitude?.toFixed(5)}°
+                      </span>
+                    </div>
+                    <div className="mt-1.5 flex items-center gap-1.5 px-2 py-1 rounded-lg bg-emerald-950/40 border border-emerald-800/40 text-[10px] text-emerald-300">
+                      <Move className="w-3 h-3 text-emerald-400 shrink-0" />
+                      <span><strong>Draggable on Map:</strong> Drag marker directly onto roadside pole to update GPS.</span>
+                    </div>
 
                     {/* Cascade Hierarchy, Upstream Feed & Optical Waterfall Telemetry */}
                     {(() => {
@@ -1221,6 +1243,9 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
                       const currentIdx = chain.findIndex((b) => b.id === selectedAsset.data.id);
                       const upstreamNap = currentIdx > 0 ? chain[currentIdx - 1] : null;
                       const downstreamNap = currentIdx >= 0 && currentIdx < chain.length - 1 ? chain[currentIdx + 1] : null;
+                      const pairedBranchNap = selectedAsset.data.pairedBranchNapId
+                        ? napBoxes.find((b) => b.id === selectedAsset.data.pairedBranchNapId)
+                        : null;
 
                       return (
                         <div className="space-y-3">
@@ -1314,6 +1339,44 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
                               )}
                             </div>
 
+                            {/* Utility Pole Alignment Action Card */}
+                            <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 flex flex-col gap-2">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-1.5">
+                                  <Waypoints className="w-3.5 h-3.5 text-amber-400" />
+                                  <span className="text-[10px] text-amber-400 font-bold uppercase tracking-wider">
+                                    Roadside Utility Poles
+                                  </span>
+                                </div>
+                                <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 font-bold">
+                                  {selectedAsset.data.customPathCoordinates && selectedAsset.data.customPathCoordinates.length > 0
+                                    ? `🪵 ${selectedAsset.data.customPathCoordinates.length} Pole(s) Aligned`
+                                    : 'Direct Straight Span'}
+                                </span>
+                              </div>
+                              <div className="flex items-center justify-between gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => setExternalRouteEditNapId(selectedAsset.data.id)}
+                                  className="flex-1 py-1.5 px-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-[11px] rounded-lg flex items-center justify-center gap-1.5 transition-all shadow-md cursor-pointer"
+                                  title="Move cable line to physical utility poles on satellite map to get exact real-world distance"
+                                >
+                                  <Waypoints className="w-3.5 h-3.5 text-slate-950" />
+                                  <span>Align Cable Line to Poles</span>
+                                </button>
+                                {selectedAsset.data.customPathCoordinates && selectedAsset.data.customPathCoordinates.length > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => updateNapBox(selectedAsset.data.id, { customPathCoordinates: [] })}
+                                    className="py-1.5 px-2 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-amber-400 border border-slate-700 rounded-lg text-[10px] font-mono transition-colors cursor-pointer"
+                                    title="Reset this cable span back to straight line"
+                                  >
+                                    <RotateCcw className="w-3 h-3" />
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+
                             {/* Cascade Traversal Buttons */}
                             <div className="flex items-center gap-2 pt-1">
                               {upstreamNap ? (
@@ -1344,6 +1407,18 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
                                 >
                                   <span>Downstream →</span>
                                   <span className="text-emerald-400 font-mono">({downstreamNap.code})</span>
+                                </button>
+                              )}
+
+                              {pairedBranchNap && (
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedAsset({ type: 'nap', data: pairedBranchNap })}
+                                  className="flex-1 py-1 px-2 rounded-lg bg-amber-950/60 hover:bg-amber-900/60 border border-amber-800/60 text-amber-200 text-[10px] font-semibold flex items-center justify-center gap-1 transition-colors"
+                                >
+                                  <ArrowLeftRight className="w-3 h-3 text-amber-400" />
+                                  <span>Twin {selectedAsset.data.branchDirection === 'left' ? 'Right ▶' : '◀ Left'}</span>
+                                  <span className="text-amber-400 font-mono">({pairedBranchNap.code})</span>
                                 </button>
                               )}
                             </div>
@@ -1410,6 +1485,22 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
                                       : 'Terminal (End of Run)'}
                                   </span>
                                 </div>
+
+                                {currentHop.tapSubSplitEnabled && (
+                                  <div className="col-span-2 pt-1.5 mt-1 border-t border-slate-800 flex items-center justify-between text-[10px]">
+                                    <span className="text-purple-300 font-semibold flex items-center gap-1">
+                                      <Split className="w-3 h-3 text-purple-400" />
+                                      50/50 Sub-Split:
+                                      <strong className="text-purple-200 ml-1">
+                                        {selectedAsset.data.branchDirection ? selectedAsset.data.branchDirection.toUpperCase() : 'BRANCH'}
+                                      </strong>
+                                    </span>
+                                    <span className="text-slate-300 font-mono">
+                                      Branch In: <strong className="text-purple-300">{currentHop.branchInputPowerDbm} dBm</strong>
+                                      <span className="text-emerald-400 font-bold ml-2">({currentHop.totalBranchCapacityPorts} Ports)</span>
+                                    </span>
+                                  </div>
+                                )}
                               </div>
                             </div>
                           )}
@@ -1566,6 +1657,28 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
                     <p className="text-slate-400 text-[10px]">Total Fiber Loss: {((selectedAsset.data.lengthMeters / 1000) * selectedAsset.data.attenuationDbPerKm).toFixed(3)} dB</p>
                   </div>
 
+                  {/* Utility Pole Alignment for Cable */}
+                  <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between gap-2">
+                    <div>
+                      <span className="text-[10px] text-amber-400 font-bold uppercase tracking-wider block">
+                        Roadside Utility Poles
+                      </span>
+                      <span className="text-[11px] text-slate-300 font-mono">
+                        {selectedAsset.data.pathCoordinates?.length > 2
+                          ? `🪵 ${selectedAsset.data.pathCoordinates.length - 2} Pole(s) Routed`
+                          : 'Straight Segment'}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setExternalRouteEditNapId(selectedAsset.data.id)}
+                      className="py-1.5 px-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-[11px] rounded-lg flex items-center gap-1.5 transition-all shadow-md cursor-pointer"
+                    >
+                      <Waypoints className="w-3.5 h-3.5 text-slate-950" />
+                      <span>Align Cable to Poles</span>
+                    </button>
+                  </div>
+
                   {/* 12-Core TIA Color Code Strip */}
                   <div>
                     <span className="font-bold text-slate-300 block mb-2">TIA-598-A Core Tube Breakdown</span>
@@ -1590,7 +1703,16 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
                   <div>
                     <h3 className="text-sm font-bold text-slate-100">{selectedAsset.data.name}</h3>
                     <p className="text-[11px] text-amber-400 font-mono">{selectedAsset.data.code}</p>
-                    <p className="text-slate-400 mt-1">Utility Pole #{selectedAsset.data.poleNumber}</p>
+                    <div className="flex items-center justify-between mt-1 text-[11px] font-mono text-slate-400">
+                      <span>Utility Pole #{selectedAsset.data.poleNumber}</span>
+                      <span className="text-amber-300 font-semibold">
+                        {selectedAsset.data.latitude?.toFixed(5)}°, {selectedAsset.data.longitude?.toFixed(5)}°
+                      </span>
+                    </div>
+                    <div className="mt-1.5 flex items-center gap-1.5 px-2 py-1 rounded-lg bg-amber-950/40 border border-amber-800/40 text-[10px] text-amber-300">
+                      <Move className="w-3 h-3 text-amber-400 shrink-0" />
+                      <span><strong>Draggable on Map:</strong> Drag dome marker to reposition onto roadside pole.</span>
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-2 text-[11px]">
@@ -1683,8 +1805,12 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
                       <div className="mt-1 flex items-center gap-1 font-mono text-[10px] text-cyan-400">
                         <MapPin className="w-3 h-3" />
                         <span>
-                          {oltData.latitude?.toFixed(4)}° N, {oltData.longitude?.toFixed(4)}° E
+                          {oltData.latitude?.toFixed(5)}° N, {oltData.longitude?.toFixed(5)}° E
                         </span>
+                      </div>
+                      <div className="mt-1.5 flex items-center gap-1.5 px-2 py-1 rounded-lg bg-purple-950/40 border border-purple-800/40 text-[10px] text-purple-300">
+                        <Move className="w-3 h-3 text-purple-400 shrink-0" />
+                        <span><strong>Draggable on Map:</strong> Drag OLT node to relocate central headend.</span>
                       </div>
                     </div>
 

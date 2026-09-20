@@ -251,7 +251,7 @@ interface AppContextType {
   toggleCoverageFiberReady: (id: string) => void;
 
   // NAP Box Actions
-  addNapBox: (napBox: Omit<NapBox, 'id'>) => void;
+  addNapBox: (napBox: Omit<NapBox, 'id'> & { id?: string }) => void;
   updateNapBox: (id: string, updates: Partial<NapBox>) => void;
   deleteNapBox: (id: string) => void;
 
@@ -2987,8 +2987,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // --- NAP Box Operations ---
-  const addNapBox = (boxData: Omit<NapBox, 'id'>) => {
-    const newBox: NapBox = { ...boxData, id: generateId('NAP') };
+  const addNapBox = (boxData: Omit<NapBox, 'id'> & { id?: string }) => {
+    const newBox: NapBox = { ...boxData, id: boxData.id || generateId('NAP') };
     setNapBoxes((prev) => [...prev, newBox]);
     saveFirestoreDoc(COLLECTIONS.NAP_BOXES, newBox);
     showToast('success', 'NAP Box Deployed', `NAP Box "${newBox.code}" registered.`);

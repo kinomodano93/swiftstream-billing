@@ -1,5 +1,5 @@
-import { NapBox, OltPopNode, FbtSplitterRatio, PlcSplitterType } from '../types';
-import { calculateSpanMetrics, SpanMetrics } from './geoDistance';
+import { NapBox, OltPopNode, FbtSplitterRatio, PlcSplitterType, BranchDirection, FeedLegType } from '../types';
+import { calculateSpanMetrics, calculatePathMetrics, SpanMetrics } from './geoDistance';
 
 export const FBT_LOSS_SPECS: Record<
   FbtSplitterRatio,
@@ -24,6 +24,7 @@ export const PLC_LOSS_SPECS: Record<PlcSplitterType, { loss: number; ports: numb
 
 export const FIBER_LOSS_PER_KM = 0.35; // ITU-T G.652.D at 1310/1490nm (dB/km)
 export const SPLICE_LOSS_DB = 0.1; // Fusion splice insertion loss (dB)
+export const SUB_SPLIT_50_50_LOSS_DB = 3.4; // 1x2 Symmetrical sub-split insertion loss (dB)
 
 export interface CascadeHopTelemetry {
   nap: NapBox;
@@ -44,7 +45,16 @@ export interface CascadeHopTelemetry {
   fbtRatio: FbtSplitterRatio;
   fbtThroughLossDb: number;
   fbtTapLossDb: number;
-  throughOutputPowerDbm: number | null; // null if terminal
+  throughOutputPowerDbm: number | null; // null if terminal (e.g. 60% leg continuing downstream)
+  tapOutputPowerDbm: number; // Optical power on the tap leg (e.g. 40% leg)
+  tapSubSplitEnabled: boolean; // True if tap is split 50/50 for dual NAPs
+  subSplitLossDb: number; // 3.4 dB if enabled, 0 otherwise
+  branchDirection: BranchDirection; // 'left' | 'right' | 'through' | 'direct'
+  branchInputPowerDbm: number; // Optical power arriving at the box internal PLC splitter
+  leftBranchRxDbm?: number; // Simulated Drop Rx for Left Branch 16-port NAP
+  rightBranchRxDbm?: number; // Simulated Drop Rx for Right Branch 16-port NAP
+  pairedBranchNapId?: string; // ID of paired twin box
+  totalBranchCapacityPorts: number; // 32 ports for dual 16-port NAPs, or 16 ports for single
   plcType: PlcSplitterType;
   plcLossDb: number;
   dropPortRxPowerDbm: number;
@@ -110,11 +120,23 @@ export const buildPonCascadeChain = (
     // 2. Walk downstream children
     let current = root;
     while (chain.length < napsOnPon.length) {
-      const nextChild = napsOnPon.find((n) => !visited.has(n.id) && n.upstreamNapId === current.id);
-      if (nextChild) {
-        chain.push(nextChild);
-        visited.add(nextChild.id);
-        current = nextChild;
+      // First, if current has a co-located twin sub-split box that hasn't been added yet, add it
+      const twinChild = napsOnPon.find(
+        (n) => !visited.has(n.id) && n.upstreamNapId === current.id && (n.feedLegType === 'tap_subsplit' || n.id === current.pairedBranchNapId)
+      );
+      if (twinChild) {
+        chain.push(twinChild);
+        visited.add(twinChild.id);
+      }
+
+      // Next, find downstream trunk child from current (or from any visited trunk box)
+      const nextTrunkChild = napsOnPon.find(
+        (n) => !visited.has(n.id) && n.upstreamNapId === current.id && n.feedLegType !== 'tap_subsplit'
+      );
+      if (nextTrunkChild) {
+        chain.push(nextTrunkChild);
+        visited.add(nextTrunkChild.id);
+        current = nextTrunkChild;
       } else {
         // Look for any unvisited box whose parent was already visited in the chain
         const childOfVisited = napsOnPon.find(
@@ -209,21 +231,38 @@ export const calculateCascadeTelemetry = (
   let cumulativeFiberLoss = 0;
 
   const result: CascadeHopTelemetry[] = [];
-  const totalHops = chain.length;
+  const trunkBoxes = chain.filter((n) => n.feedLegType !== 'tap_subsplit');
+  const totalHops = Math.max(1, trunkBoxes.length);
+  let trunkHopCounter = 0;
 
   for (let i = 0; i < chain.length; i++) {
     const nap = chain[i];
-    const hopIndex = i + 1;
 
     // Check if the NAP box has an explicit upstream NAP link
     const explicitUpstream = nap.upstreamNapId
       ? chain.find((b) => b.id === nap.upstreamNapId)
       : null;
 
+    // Check if upstream parent has already been computed in this cascade
+    const parentTelemetry = explicitUpstream ? result.find((t) => t.nap.id === explicitUpstream.id) : null;
+    const isFeedFromSubSplit: boolean = Boolean(
+      nap.feedLegType === 'tap_subsplit' ||
+      (parentTelemetry?.tapSubSplitEnabled && parentTelemetry.nap.pairedBranchNapId === nap.id)
+    );
+
     // Box 1 (i === 0) is the root feeder from the Central OLT.
-    // All subsequent boxes in the cascade (i > 0) are daisy-chained hops fed from the preceding box (or explicit upstream).
-    const isFeeder = i === 0 && !explicitUpstream;
-    const isTerminal = hopIndex === totalHops || nap.fbtRatio === 'terminal';
+    // All subsequent trunk boxes are daisy-chained hops fed from the preceding box (or explicit upstream).
+    const isFeeder: boolean = i === 0 && !explicitUpstream && !isFeedFromSubSplit;
+
+    const hopIndex: number = isFeedFromSubSplit && parentTelemetry
+      ? parentTelemetry.hopIndex
+      : ++trunkHopCounter;
+
+    const isTerminal: boolean = Boolean(
+      (!isFeedFromSubSplit && hopIndex === totalHops) ||
+      nap.fbtRatio === 'terminal' ||
+      isFeedFromSubSplit
+    );
 
     const upstreamType: 'olt' | 'nap' = isFeeder ? 'olt' : 'nap';
     const upstreamId = isFeeder
@@ -246,23 +285,47 @@ export const calculateCascadeTelemetry = (
       ? { lat: chain[i - 1].latitude, lng: chain[i - 1].longitude }
       : { lat: olt.latitude, lng: olt.longitude };
 
-    // Hop Distance from immediate upstream node
-    const hopSpan = calculateSpanMetrics(
-      upstreamCoords.lat,
-      upstreamCoords.lng,
-      nap.latitude,
-      nap.longitude
-    );
+    // Hop Distance from immediate upstream node (uses exact pole waypoints if routed by engineer)
+    const hopSpan = nap.customPathCoordinates && nap.customPathCoordinates.length > 0
+      ? calculatePathMetrics([
+          upstreamCoords,
+          ...nap.customPathCoordinates,
+          { lat: nap.latitude, lng: nap.longitude },
+        ])
+      : calculateSpanMetrics(
+          upstreamCoords.lat,
+          upstreamCoords.lng,
+          nap.latitude,
+          nap.longitude
+        );
 
-    cumulativeDirect += hopSpan.directMeters;
-    cumulativeCable += hopSpan.routeCableMeters;
+    const hopCumulativeDirect = (parentTelemetry ? parentTelemetry.cumulativeDirectMeters : cumulativeDirect) + hopSpan.directMeters;
+    const hopCumulativeCable = (parentTelemetry ? parentTelemetry.cumulativeCableMeters : cumulativeCable) + hopSpan.routeCableMeters;
+
+    // Source power entering the hop span fiber:
+    const sourcePower = isFeeder
+      ? oltTxPower
+      : isFeedFromSubSplit && parentTelemetry
+      ? parentTelemetry.branchInputPowerDbm
+      : parentTelemetry
+      ? (typeof parentTelemetry.throughOutputPowerDbm === 'number' ? parentTelemetry.throughOutputPowerDbm : parentTelemetry.arrivingInputPowerDbm)
+      : currentTrunkPowerDbm;
 
     // Fiber loss along this hop (G.652D @ 0.35 dB/km) + splice loss (0.1 dB)
-    const hopFiberLoss = Number(((hopSpan.routeCableMeters / 1000) * FIBER_LOSS_PER_KM).toFixed(2));
-    cumulativeFiberLoss += hopFiberLoss + SPLICE_LOSS_DB;
+    // If it's a twin box co-located on the same pole (span < 10m), do not double-count fiber run
+    const isCoLocated = isFeedFromSubSplit && hopSpan.directMeters < 10;
+    const hopFiberLoss = isCoLocated ? 0 : Number(((hopSpan.routeCableMeters / 1000) * FIBER_LOSS_PER_KM).toFixed(2));
+    const hopSpliceLoss = isCoLocated ? 0 : SPLICE_LOSS_DB;
+    const hopCumulativeFiberLoss = Number(((parentTelemetry ? parentTelemetry.cumulativeFiberLossDb : cumulativeFiberLoss) + hopFiberLoss + hopSpliceLoss).toFixed(2));
+
+    if (!isFeedFromSubSplit) {
+      cumulativeDirect = hopCumulativeDirect;
+      cumulativeCable = hopCumulativeCable;
+      cumulativeFiberLoss = hopCumulativeFiberLoss;
+    }
 
     // Arriving input power at this box
-    const arrivingInputPowerDbm = Number((currentTrunkPowerDbm - hopFiberLoss - SPLICE_LOSS_DB).toFixed(2));
+    const arrivingInputPowerDbm = Number((sourcePower - hopFiberLoss - hopSpliceLoss).toFixed(2));
 
     // Resolve FBT Coupler
     const fbtRatio = nap.fbtRatio || getDefaultFbtForHop(hopIndex, totalHops);
@@ -272,16 +335,48 @@ export const calculateCascadeTelemetry = (
     const plcType = resolvePlcType(nap);
     const plcSpec = PLC_LOSS_SPECS[plcType] || PLC_LOSS_SPECS['1:16'];
 
-    // Drop Port Rx Power:
-    // Arriving power minus FBT tap loss minus PLC splitter insertion loss
-    const dropPortRxPowerDbm = isTerminal
-      ? Number((arrivingInputPowerDbm - plcSpec.loss).toFixed(2))
-      : Number((arrivingInputPowerDbm - fbtSpec.tapLoss - plcSpec.loss).toFixed(2));
-
-    // Power continuing down the through leg (if not terminal)
-    const throughOutputPowerDbm = isTerminal
+    // 1. Through Leg Power (continues along trunk to next hop)
+    // If this is a lateral subsplit box, it does not output a through trunk leg
+    const throughOutputPowerDbm = isFeedFromSubSplit || isTerminal
       ? null
-      : Number((arrivingInputPowerDbm - fbtSpec.throughLoss).toFixed(2));
+      : Number((arrivingInputPowerDbm - fbtSpec.throughLoss - SPLICE_LOSS_DB).toFixed(2));
+
+    // 2. Tap Leg Power (e.g. 40% leg)
+    const tapOutputPowerDbm = isFeedFromSubSplit
+      ? arrivingInputPowerDbm
+      : isTerminal
+      ? arrivingInputPowerDbm
+      : Number((arrivingInputPowerDbm - fbtSpec.tapLoss - SPLICE_LOSS_DB).toFixed(2));
+
+    // 3. 50/50 Sub-Split Configuration:
+    // When enabled, the tap power is split 50/50 (~3.4 dB loss) to feed dual 16-port NAPs (Left & Right)
+    const tapSubSplitEnabled = isFeedFromSubSplit
+      ? true
+      : Boolean(
+          nap.tapSubSplitEnabled ||
+          (fbtRatio === '60/40' && (nap.branchDirection === 'left' || nap.branchDirection === 'right'))
+        );
+
+    const subSplitLossDb = isFeedFromSubSplit
+      ? 0
+      : tapSubSplitEnabled && !isTerminal
+      ? SUB_SPLIT_50_50_LOSS_DB
+      : 0;
+
+    const branchInputPowerDbm = isFeedFromSubSplit
+      ? arrivingInputPowerDbm
+      : tapSubSplitEnabled && !isTerminal
+      ? Number((tapOutputPowerDbm - SUB_SPLIT_50_50_LOSS_DB - SPLICE_LOSS_DB).toFixed(2))
+      : tapOutputPowerDbm;
+
+    // 4. Drop Port Rx Power: inside the box after the PLC splitter
+    const dropPortRxPowerDbm = Number((branchInputPowerDbm - plcSpec.loss).toFixed(2));
+    const leftBranchRxDbm = tapSubSplitEnabled && !isTerminal ? dropPortRxPowerDbm : undefined;
+    const rightBranchRxDbm = tapSubSplitEnabled && !isTerminal ? dropPortRxPowerDbm : undefined;
+    const totalBranchCapacityPorts = tapSubSplitEnabled && !isTerminal ? plcSpec.ports * 2 : plcSpec.ports;
+
+    const branchDirection: BranchDirection =
+      nap.branchDirection || (tapSubSplitEnabled ? 'left' : isTerminal ? 'direct' : 'through');
 
     const health = evaluateOpticalPowerHealth(dropPortRxPowerDbm);
 
@@ -296,15 +391,24 @@ export const calculateCascadeTelemetry = (
       upstreamName,
       upstreamCoords,
       hopSpan,
-      cumulativeDirectMeters: cumulativeDirect,
-      cumulativeCableMeters: cumulativeCable,
+      cumulativeDirectMeters: hopCumulativeDirect,
+      cumulativeCableMeters: hopCumulativeCable,
       hopFiberLossDb: hopFiberLoss,
-      cumulativeFiberLossDb: Number(cumulativeFiberLoss.toFixed(2)),
+      cumulativeFiberLossDb: hopCumulativeFiberLoss,
       arrivingInputPowerDbm,
       fbtRatio,
       fbtThroughLossDb: fbtSpec.throughLoss,
       fbtTapLossDb: fbtSpec.tapLoss,
       throughOutputPowerDbm,
+      tapOutputPowerDbm,
+      tapSubSplitEnabled,
+      subSplitLossDb,
+      branchDirection,
+      branchInputPowerDbm,
+      leftBranchRxDbm,
+      rightBranchRxDbm,
+      pairedBranchNapId: nap.pairedBranchNapId,
+      totalBranchCapacityPorts,
       plcType,
       plcLossDb: plcSpec.loss,
       dropPortRxPowerDbm,
@@ -312,12 +416,87 @@ export const calculateCascadeTelemetry = (
       healthLabel: health.label,
     });
 
-    // Update current trunk power for next hop
-    if (throughOutputPowerDbm !== null) {
+    // Update current trunk power for next daisy-chain hop along the main trunk line
+    if (throughOutputPowerDbm !== null && !isFeedFromSubSplit) {
       currentTrunkPowerDbm = throughOutputPowerDbm;
     }
   }
 
   return result;
+};
+
+export interface SingleHopBudgetPreviewInput {
+  baseTxPowerDbm: number;
+  upstreamThroughPowerDbm?: number | null;
+  upstreamTapSubSplitPowerDbm?: number | null;
+  isFeedFromSubSplit?: boolean;
+  routeCableMeters: number;
+  fbtRatio: FbtSplitterRatio;
+  plcSplitterType: PlcSplitterType;
+  tapSubSplitEnabled: boolean;
+  branchDirection?: BranchDirection;
+}
+
+export interface SingleHopBudgetPreviewResult {
+  hopFiberLossDb: number;
+  arrivingInputPowerDbm: number;
+  throughOutputPowerDbm: number | null;
+  tapOutputPowerDbm: number;
+  subSplitLossDb: number;
+  branchInputPowerDbm: number;
+  dropPortRxPowerDbm: number;
+  leftBranchRxDbm?: number;
+  rightBranchRxDbm?: number;
+  totalBranchCapacityPorts: number;
+  health: { status: 'optimal' | 'acceptable' | 'warning' | 'critical'; label: string };
+}
+
+export const calculateSingleHopBudgetPreview = (
+  input: SingleHopBudgetPreviewInput
+): SingleHopBudgetPreviewResult => {
+  const hopFiberLoss = Number(((input.routeCableMeters / 1000) * FIBER_LOSS_PER_KM).toFixed(2));
+  const sourcePower = input.isFeedFromSubSplit && typeof input.upstreamTapSubSplitPowerDbm === 'number'
+    ? input.upstreamTapSubSplitPowerDbm
+    : typeof input.upstreamThroughPowerDbm === 'number'
+    ? input.upstreamThroughPowerDbm
+    : input.baseTxPowerDbm;
+
+  const arrivingInputPowerDbm = Number((sourcePower - hopFiberLoss - SPLICE_LOSS_DB).toFixed(2));
+  const isTerminal = input.fbtRatio === 'terminal';
+  const fbtSpec = FBT_LOSS_SPECS[input.fbtRatio] || FBT_LOSS_SPECS['85/15'];
+  const plcSpec = PLC_LOSS_SPECS[input.plcSplitterType] || PLC_LOSS_SPECS['1:16'];
+
+  const throughOutputPowerDbm = isTerminal
+    ? null
+    : Number((arrivingInputPowerDbm - fbtSpec.throughLoss - SPLICE_LOSS_DB).toFixed(2));
+
+  const tapOutputPowerDbm = isTerminal
+    ? arrivingInputPowerDbm
+    : Number((arrivingInputPowerDbm - fbtSpec.tapLoss - SPLICE_LOSS_DB).toFixed(2));
+
+  const subSplitLossDb = input.tapSubSplitEnabled && !isTerminal ? SUB_SPLIT_50_50_LOSS_DB : 0;
+  const branchInputPowerDbm = input.tapSubSplitEnabled && !isTerminal
+    ? Number((tapOutputPowerDbm - SUB_SPLIT_50_50_LOSS_DB - SPLICE_LOSS_DB).toFixed(2))
+    : tapOutputPowerDbm;
+
+  const dropPortRxPowerDbm = Number((branchInputPowerDbm - plcSpec.loss).toFixed(2));
+  const leftBranchRxDbm = input.tapSubSplitEnabled && !isTerminal ? dropPortRxPowerDbm : undefined;
+  const rightBranchRxDbm = input.tapSubSplitEnabled && !isTerminal ? dropPortRxPowerDbm : undefined;
+  const totalBranchCapacityPorts = input.tapSubSplitEnabled && !isTerminal ? plcSpec.ports * 2 : plcSpec.ports;
+  const health = evaluateOpticalPowerHealth(dropPortRxPowerDbm);
+
+  return {
+    hopFiberLossDb: hopFiberLoss,
+    arrivingInputPowerDbm,
+    throughOutputPowerDbm,
+    tapOutputPowerDbm,
+    subSplitLossDb,
+    branchInputPowerDbm,
+    dropPortRxPowerDbm,
+    leftBranchRxDbm,
+    rightBranchRxDbm,
+    totalBranchCapacityPorts,
+    health,
+  };
 };
 
