@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import {
   MapPin,
   Layers,
@@ -52,6 +52,8 @@ import {
   calculateCascadeTelemetry,
   CascadeHopTelemetry,
 } from '../../utils/opticalBudget';
+
+export type MapDisplaySize = 'tall' | 'cinema' | 'fullscreen';
 
 interface FiberGisMapProps {
   onSelectCustomer?: (customerId: string) => void;
@@ -141,6 +143,30 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
   const [mapStyle, setMapStyle] = useState<RealMapTileStyle | 'schematic'>(
     isGoogleAvailable ? 'google_hybrid' : 'satellite'
   );
+
+  // Map container display size & fullscreen state
+  const [mapDisplaySize, setMapDisplaySize] = useState<MapDisplaySize>(() => {
+    const saved = localStorage.getItem('swiftstream_gis_map_size');
+    return saved === 'cinema' || saved === 'fullscreen' ? saved : 'tall';
+  });
+
+  // Handle Escape key and body scroll lock for fullscreen GIS mode
+  useEffect(() => {
+    if (mapDisplaySize !== 'fullscreen') return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setMapDisplaySize('tall');
+        localStorage.setItem('swiftstream_gis_map_size', 'tall');
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = originalOverflow;
+    };
+  }, [mapDisplaySize]);
 
   // Layer visibility toggles
   const [showOlt, setShowOlt] = useState<boolean>(true);
@@ -377,7 +403,7 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
   const activeDropsCount = customers.filter((c) => c.network.napBoxId).length;
 
   return (
-    <div className="w-full px-3 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-4 sm:space-y-6 animate-in fade-in">
+    <div className="w-full space-y-4 sm:space-y-6 animate-in fade-in">
       {/* Top Header & GIS Telemetry */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>
@@ -634,8 +660,68 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
           </div>
         </div>
 
-        {/* Right: OSP Diagnostic Tools */}
-        <div className="flex items-center gap-2">
+        {/* Right: OSP Diagnostic Tools & Map Size Switcher */}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Map Size & Fullscreen Switcher */}
+          <div className="flex items-center bg-slate-900/90 border border-slate-700/80 rounded-xl p-0.5 shadow-inner">
+            <button
+              type="button"
+              onClick={() => {
+                setMapDisplaySize('tall');
+                localStorage.setItem('swiftstream_gis_map_size', 'tall');
+              }}
+              className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+                mapDisplaySize === 'tall'
+                  ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title="Standard Big View (860px)"
+            >
+              Big (860px)
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setMapDisplaySize('cinema');
+                localStorage.setItem('swiftstream_gis_map_size', 'cinema');
+              }}
+              className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+                mapDisplaySize === 'cinema'
+                  ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title="Cinema Ultra-Tall View (1050px)"
+            >
+              Cinema (1050px)
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const next = mapDisplaySize === 'fullscreen' ? 'tall' : 'fullscreen';
+                setMapDisplaySize(next);
+                localStorage.setItem('swiftstream_gis_map_size', next);
+              }}
+              className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all flex items-center gap-1 ${
+                mapDisplaySize === 'fullscreen'
+                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title="Fullscreen Mode (Press Esc to exit)"
+            >
+              {mapDisplaySize === 'fullscreen' ? (
+                <>
+                  <Minimize2 className="w-3.5 h-3.5" />
+                  <span>Exit</span>
+                </>
+              ) : (
+                <>
+                  <Maximize2 className="w-3.5 h-3.5" />
+                  <span>Fullscreen</span>
+                </>
+              )}
+            </button>
+          </div>
+
           <button
             onClick={() => {
               setOltModalCoords(null);
@@ -677,7 +763,30 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
       </div>
 
       {/* Interactive Map & Side Inspector Layout */}
-      <div className="relative rounded-3xl overflow-hidden border border-slate-800 bg-slate-950 shadow-2xl h-[620px] flex">
+      <div
+        className={`overflow-hidden bg-slate-950 shadow-2xl flex transition-all duration-300 ${
+          mapDisplaySize === 'fullscreen'
+            ? 'fixed inset-0 z-50 w-screen h-screen rounded-none border-none'
+            : mapDisplaySize === 'cinema'
+            ? 'relative rounded-3xl border border-slate-800 h-[1050px] min-h-[920px] w-full'
+            : 'relative rounded-3xl border border-slate-800 h-[860px] xl:h-[920px] min-h-[760px] w-full'
+        }`}
+      >
+        {mapDisplaySize === 'fullscreen' && (
+          <div className="absolute top-4 right-4 z-[999] flex items-center gap-2 bg-slate-900/90 backdrop-blur-md border border-slate-700/80 px-3 py-1.5 rounded-2xl shadow-2xl">
+            <span className="text-xs text-slate-300 font-medium hidden sm:inline">GIS Fullscreen View</span>
+            <button
+              onClick={() => {
+                setMapDisplaySize('tall');
+                localStorage.setItem('swiftstream_gis_map_size', 'tall');
+              }}
+              className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold border border-slate-600 transition-all"
+            >
+              <Minimize2 className="w-3.5 h-3.5 text-amber-400" />
+              <span>Exit Fullscreen (Esc)</span>
+            </button>
+          </div>
+        )}
         {mapStyle !== 'schematic' ? (
           <div className="flex-1 h-full relative">
             <RealLeafletMap

@@ -327,7 +327,7 @@ export const RealLeafletMap: React.FC<RealLeafletMapProps> = ({
     };
   }, [isLeafletReady]);
 
-  // Invalidate map size when drawer toggles
+  // Invalidate map size when drawer toggles or container dimensions change
   useEffect(() => {
     if (mapInstanceRef.current) {
       const timer = setTimeout(() => {
@@ -336,6 +336,18 @@ export const RealLeafletMap: React.FC<RealLeafletMapProps> = ({
       return () => clearTimeout(timer);
     }
   }, [selectedAsset]);
+
+  // Auto-invalidate map size when container is resized (e.g. height toggle, fullscreen, drawer)
+  useEffect(() => {
+    if (!mapContainerRef.current) return;
+    const observer = new ResizeObserver(() => {
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.invalidateSize();
+      }
+    });
+    observer.observe(mapContainerRef.current);
+    return () => observer.disconnect();
+  }, [isLeafletReady]);
 
   // Update Base Map Tiles when mapTileStyle changes
   useEffect(() => {
