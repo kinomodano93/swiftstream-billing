@@ -100,7 +100,7 @@ export const DEFAULT_OSP_CABLES: FiberCable[] = [
     coreCount: 48,
     status: 'active',
     fromNode: 'Central OLT Headend (Binauahan)',
-    toNode: 'FJC-02 Poblacion Closure',
+    toNode: 'Poblacion Plaza Junction',
     lengthMeters: 1450,
     fiberStandard: 'ITU-T G.652.D (Corning SMF-28e+)',
     attenuationDbPerKm: 0.35,
@@ -122,7 +122,7 @@ export const DEFAULT_OSP_CABLES: FiberCable[] = [
     type: 'distribution',
     coreCount: 24,
     status: 'active',
-    fromNode: 'FJC-02 Poblacion Closure',
+    fromNode: 'Poblacion Plaza Junction',
     toNode: 'NAP-03 San Isidro Norte',
     lengthMeters: 850,
     fiberStandard: 'ITU-T G.652.D Single-Mode',
@@ -144,7 +144,7 @@ export const DEFAULT_OSP_CABLES: FiberCable[] = [
     type: 'distribution',
     coreCount: 12,
     status: 'active',
-    fromNode: 'FJC-01 Binauahan Junction',
+    fromNode: 'Binauahan Junction',
     toNode: 'NAP-04 San Roque Center',
     lengthMeters: 920,
     fiberStandard: 'ITU-T G.652.D Single-Mode',
@@ -203,38 +203,10 @@ export const DEFAULT_OSP_CABLES: FiberCable[] = [
 ];
 
 /**
- * Realistic default Fiber Splice Closures (FJC / FOSC).
+ * Fiber Splice Closures (FJC / FOSC).
+ * Default is empty so users can add their own physical closures.
  */
-export const DEFAULT_OSP_CLOSURES: FiberClosure[] = [
-  {
-    id: 'fjc-01-binauahan',
-    code: 'FJC-01',
-    name: 'Binauahan Highway Splice Dome',
-    type: 'dome',
-    trayCount: 4,
-    totalSplices: 24,
-    latitude: 13.6858,
-    longitude: 123.5198,
-    status: 'active',
-    poleNumber: 'P-BIN-012',
-    cablesConnected: ['FDR-01-HWY', 'DST-02-ROQUE'],
-    notes: '4-Tray Fiber Joint Closure mounted at CASURECO Pole #12 with slack loop basket.',
-  },
-  {
-    id: 'fjc-02-poblacion',
-    code: 'FJC-02',
-    name: 'Poblacion Plaza Primary Closure',
-    type: 'dome',
-    trayCount: 6,
-    totalSplices: 36,
-    latitude: 13.6878,
-    longitude: 123.5215,
-    status: 'active',
-    poleNumber: 'P-POB-001',
-    cablesConnected: ['FDR-01-HWY', 'DST-01-ISIDRO'],
-    notes: 'High-density splice dome in front of town plaza fountain with 1:8 primary feeder splitter.',
-  },
-];
+export const DEFAULT_OSP_CLOSURES: FiberClosure[] = [];
 
 /**
  * Realistic default NAP Boxes across Lagonoy and Presentacion barangays.

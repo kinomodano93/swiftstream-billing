@@ -368,7 +368,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [plans, setPlans] = useState<Plan[]>(initial.plans);
   const [napBoxes, setNapBoxes] = useState<NapBox[]>(initial.napBoxes);
   const [fiberCables, setFiberCables] = useState<FiberCable[]>(initial.fiberCables);
-  const [fiberClosures, setFiberClosures] = useState<FiberClosure[]>(initial.fiberClosures);
+  const [fiberClosures, setFiberClosures] = useState<FiberClosure[]>(() => {
+    const list = initial.fiberClosures || [];
+    return list.filter((c) => c.id !== 'fjc-01-binauahan' && c.id !== 'fjc-02-poblacion');
+  });
   const [oltNodes, setOltNodes] = useState<OltPopNode[]>(initial.oltNodes || (initial.oltNode ? [initial.oltNode] : []));
   const oltNode = oltNodes[0] || initial.oltNode;
   const [repairOrders, setRepairOrders] = useState<RepairOrder[]>(initial.repairOrders);
@@ -1055,12 +1058,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
     const unsubFiberClosures = subscribeToCollection<FiberClosure>(COLLECTIONS.FIBER_CLOSURES, (data) => {
       if (data && data.length > 0) {
-        setFiberClosures(data);
+        // Filter out legacy mock Splice Closures (FJC) and delete them from Firestore if found
+        const clean = data.filter((c) => {
+          if (c.id === 'fjc-01-binauahan' || c.id === 'fjc-02-poblacion') {
+            deleteFirestoreDoc(COLLECTIONS.FIBER_CLOSURES, c.id).catch(() => {});
+            return false;
+          }
+          return true;
+        });
+        setFiberClosures(clean);
       } else if (data && data.length === 0) {
         setFiberClosures((prev) => {
-          if (prev.length > 0) {
-            prev.forEach((closure) => saveFirestoreDoc(COLLECTIONS.FIBER_CLOSURES, closure));
-            return prev;
+          const cleanPrev = prev.filter((c) => c.id !== 'fjc-01-binauahan' && c.id !== 'fjc-02-poblacion');
+          if (cleanPrev.length > 0) {
+            cleanPrev.forEach((closure) => saveFirestoreDoc(COLLECTIONS.FIBER_CLOSURES, closure));
+            return cleanPrev;
           }
           return [];
         });

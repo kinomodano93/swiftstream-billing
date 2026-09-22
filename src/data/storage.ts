@@ -324,7 +324,16 @@ export const loadStoredData = () => {
     const rawFiberClosures = JSON.parse(
       localStorage.getItem(STORAGE_KEYS.FIBER_CLOSURES) || JSON.stringify(initialFiberClosures)
     ) as FiberClosure[];
-    const fiberClosures = rawFiberClosures && rawFiberClosures.length > 0 ? rawFiberClosures : DEFAULT_OSP_CLOSURES;
+    // Filter out legacy mock Splice Closure (FJC) entries so users start with clean/real data
+    const cleanedFiberClosures = (rawFiberClosures || []).filter(
+      (c) => c.id !== 'fjc-01-binauahan' && c.id !== 'fjc-02-poblacion'
+    );
+    if (rawFiberClosures && rawFiberClosures.length !== cleanedFiberClosures.length) {
+      try {
+        localStorage.setItem(STORAGE_KEYS.FIBER_CLOSURES, JSON.stringify(cleanedFiberClosures));
+      } catch {}
+    }
+    const fiberClosures = cleanedFiberClosures;
 
     const rawOltNodes = JSON.parse(
       localStorage.getItem(STORAGE_KEYS.OLT_NODES) || '[]'
