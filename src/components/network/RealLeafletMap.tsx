@@ -16,7 +16,7 @@ import {
   Split,
   Move,
 } from 'lucide-react';
-import { Customer, FiberCable, FiberClosure, GeoPoint, NapBox, OltPopNode } from '../../types';
+import { Customer, FiberCable, FiberClosure, GeoPoint, NapBox, OltPopNode, PointToPointLink, PtpPoleWaypoint } from '../../types';
 import {
   getGoogleMapsApiKey,
   getGoogleTileUrl,
@@ -50,12 +50,13 @@ interface RealLeafletMapProps {
   napBoxes: NapBox[];
   fiberCables: FiberCable[];
   fiberClosures: FiberClosure[];
+  ptpLinks?: PointToPointLink[];
   customers: Customer[];
   selectedAsset: {
-    type: 'olt' | 'nap' | 'cable' | 'closure' | 'customer';
+    type: 'olt' | 'nap' | 'cable' | 'closure' | 'customer' | 'ptp_link';
     data: any;
   } | null;
-  onSelectAsset: (asset: { type: 'olt' | 'nap' | 'cable' | 'closure' | 'customer'; data: any } | null) => void;
+  onSelectAsset: (asset: { type: 'olt' | 'nap' | 'cable' | 'closure' | 'customer' | 'ptp_link'; data: any } | null) => void;
   onSelectCustomer?: (customerId: string) => void;
   onDeployNapAtLocation?: (coords: { lat: number; lng: number }) => void;
   onRegisterOltAtLocation?: (coords: { lat: number; lng: number }) => void;
@@ -63,6 +64,7 @@ interface RealLeafletMapProps {
   onUpdateFiberCable?: (id: string, updates: Partial<FiberCable>) => void;
   onUpdateFiberClosure?: (id: string, updates: Partial<FiberClosure>) => void;
   onUpdateOltNode?: (id: string, updates: Partial<OltPopNode>) => void;
+  onUpdatePtpLink?: (id: string, updates: Partial<PointToPointLink>) => void;
   externalRouteEditNapId?: string | null;
   onClearExternalRouteEdit?: () => void;
   activeOtdrBreak: {
@@ -79,13 +81,14 @@ interface RealLeafletMapProps {
   showDistribution: boolean;
   showNaps: boolean;
   showClosures: boolean;
+  showPtpLinks?: boolean;
   showDropLines: boolean;
   showCoverageRings: boolean;
   showSpanDistances?: 'all' | 'olt' | 'inter_nap' | 'none';
 }
 
 export interface ActiveRouteEdit {
-  targetType: 'nap_span' | 'fiber_cable';
+  targetType: 'nap_span' | 'fiber_cable' | 'ptp_link';
   targetId: string;
   title: string;
   upstreamName: string;
@@ -135,6 +138,7 @@ export const RealLeafletMap: React.FC<RealLeafletMapProps> = ({
   napBoxes,
   fiberCables,
   fiberClosures,
+  ptpLinks = [],
   customers,
   selectedAsset,
   onSelectAsset,
@@ -145,6 +149,7 @@ export const RealLeafletMap: React.FC<RealLeafletMapProps> = ({
   onUpdateFiberCable,
   onUpdateFiberClosure,
   onUpdateOltNode,
+  onUpdatePtpLink,
   externalRouteEditNapId,
   onClearExternalRouteEdit,
   activeOtdrBreak,
@@ -155,6 +160,7 @@ export const RealLeafletMap: React.FC<RealLeafletMapProps> = ({
   showDistribution,
   showNaps,
   showClosures,
+  showPtpLinks = true,
   showDropLines,
   showCoverageRings,
   showSpanDistances = 'all',
@@ -1288,12 +1294,280 @@ export const RealLeafletMap: React.FC<RealLeafletMapProps> = ({
         layersGroupRef.current.addLayer(oltMarker);
       });
     }
+
+    // 7. Point-to-Point (P2P) 10G SFP+ Optical Backbone Links
+    if (showPtpLinks && ptpLinks && ptpLinks.length > 0) {
+      ptpLinks.forEach((link) => {
+        const routerPt = { lat: link.routerLatitude, lng: link.routerLongitude };
+        const remotePt = { lat: link.remoteLatitude, lng: link.remoteLongitude };
+        const waypoints = (link.customPathCoordinates && link.customPathCoordinates.length > 2)
+          ? link.customPathCoordinates.slice(1, -1)
+          : (link.intermediatePoles && link.intermediatePoles.length > 0)
+          ? link.intermediatePoles.map((p) => ({ lat: p.latitude, lng: p.longitude, poleNumber: p.poleNumber }))
+          : [];
+
+        const fullPath = [routerPt, ...waypoints, remotePt];
+        const latLngs = fullPath.map((p) => [p.lat, p.lng]);
+
+        const isSelected = selectedAsset?.type === 'ptp_link' && selectedAsset.data.id === link.id;
+
+        // Outer glow line
+        const glowLine = L.polyline(latLngs, {
+          color: isSelected ? '#38bdf8' : '#6366f1',
+          weight: isSelected ? 9 : 7,
+          opacity: 0.45,
+          className: 'ptp-link-glow',
+        });
+
+        // Core 10G dashed line
+        const coreLine = L.polyline(latLngs, {
+          color: link.opticalReadingStatus === 'critical'
+            ? '#f43f5e'
+            : link.opticalReadingStatus === 'marginal'
+            ? '#f59e0b'
+            : '#818cf8',
+          weight: 4,
+          opacity: 0.95,
+          dashArray: '8, 6',
+          className: 'ptp-link-core',
+        });
+
+        const spanDist = calculatePathMetrics(fullPath);
+        const distStr = spanDist.formattedRoute;
+
+        const handleLinkClick = (e: any) => {
+          L.DomEvent.stopPropagation(e);
+          if (isRouteModeActiveRef.current) {
+            startEditingRouteForPtp(link);
+            return;
+          }
+          onSelectAsset({ type: 'ptp_link', data: link });
+        };
+
+        glowLine.on('click', handleLinkClick);
+        coreLine.on('click', handleLinkClick);
+
+        coreLine.bindTooltip(
+          `<strong>⚡ ${link.code}: ${link.name}</strong><br/>` +
+          `10G SFP+ Trunk: ${link.routerName} ➔ ${link.remoteNodeName}<br/>` +
+          `Distance: <strong>${distStr}</strong> • Rx: <strong style="color:${link.opticalReadingStatus === 'critical' ? '#f43f5e' : link.opticalReadingStatus === 'marginal' ? '#f59e0b' : '#34d399'};">${link.measuredRxPowerDbm.toFixed(1)} dBm</strong><br/>` +
+          `<span style="color:#a5b4fc;">Click to inspect 10G optical DDM telemetry</span>`,
+          { sticky: true, className: 'gis-custom-tooltip' }
+        );
+
+        layersGroupRef.current.addLayer(glowLine);
+        layersGroupRef.current.addLayer(coreLine);
+
+        // Midpoint Telemetry Badge
+        if (showSpanDistances !== 'none' && fullPath.length >= 2) {
+          const midIdx = Math.floor(fullPath.length / 2);
+          const p1 = fullPath[midIdx - 1];
+          const p2 = fullPath[midIdx];
+          const midLat = (p1.lat + p2.lat) / 2;
+          const midLng = (p1.lng + p2.lng) / 2;
+
+          const badgeIcon = L.divIcon({
+            className: 'ptp-telemetry-badge',
+            html: `
+              <div style="
+                background: rgba(15, 23, 42, 0.95);
+                border: 1.5px solid ${isSelected ? '#38bdf8' : '#6366f1'};
+                color: #e0e7ff;
+                border-radius: 9999px;
+                padding: 2px 8px;
+                font-family: monospace;
+                font-size: 10px;
+                font-weight: bold;
+                white-space: nowrap;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.8), 0 0 10px rgba(99, 102, 241, 0.4);
+                cursor: pointer;
+                transform: translate(-50%, -50%);
+                display: flex;
+                align-items: center;
+                gap: 5px;
+              ">
+                <span style="color: #818cf8;">⚡ 10G SFP+</span>
+                <span style="color: #94a3b8;">${distStr}</span>
+                <span style="
+                  background: ${link.opticalReadingStatus === 'critical' ? 'rgba(244,63,94,0.3)' : link.opticalReadingStatus === 'marginal' ? 'rgba(245,158,11,0.3)' : 'rgba(52,211,153,0.2)'};
+                  color: ${link.opticalReadingStatus === 'critical' ? '#fda4af' : link.opticalReadingStatus === 'marginal' ? '#fde68a' : '#6ee7b7'};
+                  padding: 0 4px;
+                  border-radius: 4px;
+                  font-size: 9px;
+                ">
+                  Rx: ${link.measuredRxPowerDbm.toFixed(1)} dBm
+                </span>
+              </div>
+            `,
+            iconSize: [0, 0],
+            iconAnchor: [0, 0],
+          });
+
+          const badgeMarker = L.marker([midLat, midLng], { icon: badgeIcon });
+          badgeMarker.on('click', handleLinkClick);
+          layersGroupRef.current.addLayer(badgeMarker);
+        }
+
+        // Endpoint A: Main DIA Router Node Marker
+        const isRouterDraggable = isRepositionMode;
+        const routerIcon = L.divIcon({
+          className: 'ptp-router-marker',
+          html: `
+            <div style="
+              display: flex;
+              align-items: center;
+              gap: 4px;
+              background: #0f172a;
+              border: 2px solid ${isSelected ? '#38bdf8' : '#6366f1'};
+              border-radius: 12px;
+              padding: 3px 8px;
+              box-shadow: 0 4px 14px rgba(0,0,0,0.8), 0 0 14px rgba(99, 102, 241, 0.6);
+              color: #e0e7ff;
+              font-family: monospace;
+              font-size: 10px;
+              font-weight: bold;
+              white-space: nowrap;
+              cursor: pointer;
+            ">
+              <span style="font-size: 13px;">🏢</span>
+              <span>${link.routerName}</span>
+              <span style="background: rgba(99, 102, 241, 0.3); color: #c7d2fe; padding: 1px 4px; border-radius: 4px; font-size: 9px;">
+                10G DIA
+              </span>
+            </div>
+          `,
+          iconSize: [140, 26],
+          iconAnchor: [70, 13],
+        });
+
+        const routerMarker = L.marker([link.routerLatitude, link.routerLongitude], {
+          icon: routerIcon,
+          draggable: isRouterDraggable,
+        });
+
+        routerMarker.on('dragend', (e: any) => {
+          const newLat = Number(e.target.getLatLng().lat.toFixed(6));
+          const newLng = Number(e.target.getLatLng().lng.toFixed(6));
+          if (onUpdatePtpLink) {
+            onUpdatePtpLink(link.id, { routerLatitude: newLat, routerLongitude: newLng });
+          }
+          setRepositionToast(`🏢 Main DIA Router moved to (${newLat.toFixed(5)}°, ${newLng.toFixed(5)}°)`);
+        });
+
+        routerMarker.on('click', handleLinkClick);
+        routerMarker.bindTooltip(
+          `<strong>🏢 ${link.routerName} (Main DIA Router)</strong><br/>` +
+          `Port: <code>${link.routerPort}</code> • Pole: ${link.routerPoleNumber || 'CASURECO P-NOC'}<br/>` +
+          `Nominal Tx: <strong>${link.nominalTxPowerDbm} dBm</strong>`,
+          { direction: 'top', className: 'gis-custom-tooltip' }
+        );
+        layersGroupRef.current.addLayer(routerMarker);
+
+        // Endpoint B: Remote Location Node Marker
+        const isRemoteDraggable = isRepositionMode;
+        const remoteIcon = L.divIcon({
+          className: 'ptp-remote-marker',
+          html: `
+            <div style="
+              display: flex;
+              align-items: center;
+              gap: 4px;
+              background: #0f172a;
+              border: 2px solid ${isSelected ? '#38bdf8' : '#06b6d4'};
+              border-radius: 12px;
+              padding: 3px 8px;
+              box-shadow: 0 4px 14px rgba(0,0,0,0.8), 0 0 14px rgba(6, 182, 212, 0.6);
+              color: #e0e7ff;
+              font-family: monospace;
+              font-size: 10px;
+              font-weight: bold;
+              white-space: nowrap;
+              cursor: pointer;
+            ">
+              <span style="font-size: 13px;">📡</span>
+              <span>${link.remoteNodeName}</span>
+              <span style="background: rgba(6, 182, 212, 0.3); color: #a5f3fc; padding: 1px 4px; border-radius: 4px; font-size: 9px;">
+                10G Remote
+              </span>
+            </div>
+          `,
+          iconSize: [140, 26],
+          iconAnchor: [70, 13],
+        });
+
+        const remoteMarker = L.marker([link.remoteLatitude, link.remoteLongitude], {
+          icon: remoteIcon,
+          draggable: isRemoteDraggable,
+        });
+
+        remoteMarker.on('dragend', (e: any) => {
+          const newLat = Number(e.target.getLatLng().lat.toFixed(6));
+          const newLng = Number(e.target.getLatLng().lng.toFixed(6));
+          if (onUpdatePtpLink) {
+            onUpdatePtpLink(link.id, { remoteLatitude: newLat, remoteLongitude: newLng });
+          }
+          setRepositionToast(`📡 Remote node ${link.remoteNodeName} moved to (${newLat.toFixed(5)}°, ${newLng.toFixed(5)}°)`);
+        });
+
+        remoteMarker.on('click', handleLinkClick);
+        remoteMarker.bindTooltip(
+          `<strong>📡 ${link.remoteNodeName}</strong><br/>` +
+          `Device: ${link.remoteDeviceType || 'Remote Node'} • Port: <code>${link.remotePort || 'sfp-sfpplus1'}</code><br/>` +
+          `Pole: ${link.remotePoleNumber || 'Remote Tower'}<br/>` +
+          `Rx Reading: <strong>${link.measuredRxPowerDbm} dBm</strong>`,
+          { direction: 'top', className: 'gis-custom-tooltip' }
+        );
+        layersGroupRef.current.addLayer(remoteMarker);
+
+        // Intermediate Utility Poles
+        if (link.intermediatePoles && link.intermediatePoles.length > 0) {
+          link.intermediatePoles.forEach((pole, pIdx) => {
+            const poleIcon = L.divIcon({
+              className: 'ptp-pole-marker',
+              html: `
+                <div style="
+                  display: flex;
+                  align-items: center;
+                  gap: 3px;
+                  background: #1e293b;
+                  border: 1px solid #6366f1;
+                  color: #e0e7ff;
+                  border-radius: 6px;
+                  padding: 1px 5px;
+                  font-family: monospace;
+                  font-size: 9px;
+                  box-shadow: 0 2px 6px rgba(0,0,0,0.6);
+                  cursor: pointer;
+                  white-space: nowrap;
+                ">
+                  <span>🪵</span>
+                  <span>${pole.poleNumber || `P-${pIdx + 1}`}</span>
+                </div>
+              `,
+              iconSize: [60, 20],
+              iconAnchor: [30, 10],
+            });
+            const poleMarker = L.marker([pole.latitude, pole.longitude], {
+              icon: poleIcon,
+              draggable: isRepositionMode,
+            });
+            poleMarker.on('click', handleLinkClick);
+            poleMarker.bindTooltip(
+              `<strong>🪵 Utility Pole ${pole.poleNumber}</strong><br/>${link.name}<br/>Lat: ${pole.latitude.toFixed(5)} • Lng: ${pole.longitude.toFixed(5)}`,
+              { direction: 'top', className: 'gis-custom-tooltip' }
+            );
+            layersGroupRef.current.addLayer(poleMarker);
+          });
+        }
+      });
+    }
   }, [
     oltNode,
     oltNodes,
     napBoxes,
     fiberCables,
     fiberClosures,
+    ptpLinks,
     customers,
     selectedAsset,
     showOlt,
@@ -1301,6 +1575,7 @@ export const RealLeafletMap: React.FC<RealLeafletMapProps> = ({
     showDistribution,
     showNaps,
     showClosures,
+    showPtpLinks,
     showDropLines,
     showCoverageRings,
     showSpanDistances,
@@ -1581,6 +1856,41 @@ export const RealLeafletMap: React.FC<RealLeafletMapProps> = ({
     }
   };
 
+  // Start route editing for a 10G Point-to-Point link
+  const startEditingRouteForPtp = (link: PointToPointLink) => {
+    const fromCoords = { lat: link.routerLatitude, lng: link.routerLongitude };
+    const toCoords = { lat: link.remoteLatitude, lng: link.remoteLongitude };
+    const waypoints = (link.customPathCoordinates && link.customPathCoordinates.length > 0)
+      ? [...link.customPathCoordinates]
+      : (link.intermediatePoles && link.intermediatePoles.length > 0)
+      ? link.intermediatePoles.map((p) => ({ lat: p.latitude, lng: p.longitude }))
+      : [];
+
+    setActiveRouteEdit({
+      targetType: 'ptp_link',
+      targetId: link.id,
+      title: `10G P2P Trunk: ${link.code} (${link.name})`,
+      upstreamName: `${link.routerName} (${link.routerPoleNumber || 'P-NOC'})`,
+      downstreamName: `${link.remoteNodeName} (${link.remotePoleNumber || 'P-REM'})`,
+      fromCoords,
+      toCoords,
+      waypoints,
+    });
+    setIsRouteModeActive(true);
+
+    if (mapInstanceRef.current) {
+      const L = (window as any).L;
+      if (L) {
+        const bounds = L.latLngBounds([
+          [fromCoords.lat, fromCoords.lng],
+          ...waypoints.map((w) => [w.lat, w.lng] as [number, number]),
+          [toCoords.lat, toCoords.lng],
+        ]);
+        mapInstanceRef.current.fitBounds(bounds, { padding: [70, 70], maxZoom: 18 });
+      }
+    }
+  };
+
   const handleSaveRouteEdit = () => {
     if (!activeRouteEdit) return;
 
@@ -1600,6 +1910,32 @@ export const RealLeafletMap: React.FC<RealLeafletMapProps> = ({
       onUpdateFiberCable(activeRouteEdit.targetId, {
         pathCoordinates: fullPath,
         lengthMeters: Math.round(metrics.directMeters),
+      });
+    } else if (activeRouteEdit.targetType === 'ptp_link' && onUpdatePtpLink) {
+      const fullPath = [
+        activeRouteEdit.fromCoords,
+        ...activeRouteEdit.waypoints,
+        activeRouteEdit.toCoords,
+      ];
+      const metrics = calculatePathMetrics(fullPath);
+      // Map waypoints into intermediate poles
+      const updatedPoles: PtpPoleWaypoint[] = activeRouteEdit.waypoints.map((wp, idx) => ({
+        id: `pole-wp-${activeRouteEdit.targetId}-${idx + 1}`,
+        poleNumber: `CAS-P${String(idx + 1).padStart(3, '0')}`,
+        latitude: wp.lat,
+        longitude: wp.lng,
+        distanceFromRouterMeters: Math.round(
+          calculatePathMetrics([
+            activeRouteEdit.fromCoords,
+            ...activeRouteEdit.waypoints.slice(0, idx + 1),
+          ]).directMeters
+        ),
+      }));
+
+      onUpdatePtpLink(activeRouteEdit.targetId, {
+        customPathCoordinates: activeRouteEdit.waypoints,
+        intermediatePoles: updatedPoles,
+        cableLengthMeters: Math.round(metrics.directMeters),
       });
     }
 
@@ -1652,12 +1988,17 @@ export const RealLeafletMap: React.FC<RealLeafletMapProps> = ({
       const targetCable = fiberCables.find((c) => c.id === externalRouteEditNapId);
       if (targetCable) {
         startEditingRouteForCable(targetCable);
+      } else {
+        const targetPtp = ptpLinks.find((p) => p.id === externalRouteEditNapId);
+        if (targetPtp) {
+          startEditingRouteForPtp(targetPtp);
+        }
       }
     }
     if (onClearExternalRouteEdit) {
       onClearExternalRouteEdit();
     }
-  }, [externalRouteEditNapId, napBoxes, fiberCables]);
+  }, [externalRouteEditNapId, napBoxes, fiberCables, ptpLinks]);
 
   // Active Route Edit Layer Effect: glowing polyline, draggable pole markers & destination snap
   useEffect(() => {
@@ -2059,6 +2400,8 @@ export const RealLeafletMap: React.FC<RealLeafletMapProps> = ({
                 startEditingRouteForNap(selectedAsset.data);
               } else if (next && selectedAsset?.type === 'cable') {
                 startEditingRouteForCable(selectedAsset.data);
+              } else if (next && selectedAsset?.type === 'ptp_link') {
+                startEditingRouteForPtp(selectedAsset.data);
               }
             }}
             className={`p-2 rounded-xl transition-all ${

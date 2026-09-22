@@ -680,6 +680,66 @@ export interface OltPopNode {
   notes?: string;
 }
 
+export interface PtpPoleWaypoint {
+  id: string;
+  poleNumber: string;
+  latitude: number;
+  longitude: number;
+  distanceFromRouterMeters?: number;
+  notes?: string;
+}
+
+export type PtpReadingStatus = 'optimal' | 'good' | 'marginal' | 'critical' | 'link_down';
+
+export interface PointToPointLink {
+  id: string;
+  code: string; // e.g. PTP-10G-01
+  name: string; // e.g. "DIA 10G Trunk: Main Core Router -> Poblacion Plaza Tower"
+  type: '10g_sfp_plus' | '1g_sfp' | '25g_sfp28';
+  status: 'active' | 'warning' | 'critical' | 'link_down';
+
+  // Endpoint A: Main DIA Router
+  routerId?: string;
+  routerName: string;
+  routerPort: string;
+  routerLocation: string;
+  routerLatitude: number;
+  routerLongitude: number;
+  routerPoleNumber?: string;
+
+  // Endpoint B: Remote Location
+  remoteNodeName: string;
+  remoteLocation: string;
+  remoteDeviceType?: string;
+  remotePort?: string;
+  remoteLatitude: number;
+  remoteLongitude: number;
+  remotePoleNumber?: string;
+
+  // Route & Poles
+  intermediatePoles?: PtpPoleWaypoint[];
+  customPathCoordinates?: GeoPoint[];
+  cableLengthMeters?: number;
+
+  // Optical DDM (Digital Diagnostic Monitoring) Specs & Readings
+  transceiverModel?: string;
+  fiberType?: string;
+  wavelengthNm?: number;
+  nominalTxPowerDbm: number;
+  measuredRxPowerDbm: number;
+  maxLossBudgetDb: number;
+  opticalReadingStatus: PtpReadingStatus;
+
+  // Telemetry metrics
+  temperatureC?: number;
+  voltageV?: number;
+  txBiasCurrentMa?: number;
+  linkSpeedGbps?: number;
+
+  notes?: string;
+  installedDate?: string;
+}
+
 export interface RepairPart {
   name: string;
   cost: number;

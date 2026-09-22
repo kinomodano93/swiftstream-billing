@@ -1,4 +1,4 @@
-import { GeoPoint, NapBox, FiberCable, FiberClosure } from '../types';
+import { GeoPoint, NapBox, FiberCable, FiberClosure, PointToPointLink } from '../types';
 
 /**
  * Known geographic coordinates for Barangays in Lagonoy and Presentacion, Camarines Sur.
@@ -398,4 +398,67 @@ export const DEFAULT_OSP_NAPS: NapBox[] = [
     })),
   },
 ];
+
+/**
+ * Realistic default Point-to-Point (P2P) 10G SFP+ Optical Links.
+ * Connects the Main DIA Router to remote towers / municipal POPs.
+ */
+export const DEFAULT_OSP_PTP_LINKS: PointToPointLink[] = [
+  {
+    id: 'ptp-10g-01-plaza-tower',
+    code: 'PTP-10G-01',
+    name: 'Main DIA 10G Trunk: Central NOC ➔ Poblacion Plaza Tower',
+    type: '10g_sfp_plus',
+    status: 'active',
+    routerName: 'MikroTik CCR2116-12G-4S+ (Main DIA)',
+    routerPort: 'sfp-sfpplus1',
+    routerLocation: 'Central NOC / Headend Server Room',
+    routerLatitude: 13.6838,
+    routerLongitude: 123.5175,
+    routerPoleNumber: 'CASURECO P-NOC-01',
+    remoteNodeName: 'Poblacion Plaza Telecom Tower',
+    remoteLocation: 'Town Plaza Municipal Sector',
+    remoteDeviceType: 'MikroTik CCR2004-16G-2S+ Remote Gateway',
+    remotePort: 'sfp-sfpplus1',
+    remoteLatitude: 13.6878,
+    remoteLongitude: 123.5215,
+    remotePoleNumber: 'CASURECO P-TWR-01',
+    cableLengthMeters: 780,
+    intermediatePoles: [
+      {
+        id: 'pole-ptp-01',
+        poleNumber: 'P-BIN-008',
+        latitude: 13.6855,
+        longitude: 123.5192,
+        notes: 'Mid-span tension anchor pole with fiber slack snowshoe',
+      },
+      {
+        id: 'pole-ptp-02',
+        poleNumber: 'P-POB-004',
+        latitude: 13.6868,
+        longitude: 123.5205,
+        notes: 'Plaza perimeter CASURECO concrete utility pole',
+      },
+    ],
+    customPathCoordinates: [
+      { lat: 13.6838, lng: 123.5175 },
+      { lat: 13.6855, lng: 123.5192 },
+      { lat: 13.6868, lng: 123.5205 },
+      { lat: 13.6878, lng: 123.5215 },
+    ],
+    transceiverModel: '10GBASE-LR 1310nm Single-Mode SFP+ (10km)',
+    wavelengthNm: 1310,
+    nominalTxPowerDbm: -3.0,
+    measuredRxPowerDbm: -3.4,
+    maxLossBudgetDb: 14.0,
+    opticalReadingStatus: 'optimal',
+    temperatureC: 38.2,
+    voltageV: 3.31,
+    txBiasCurrentMa: 22.4,
+    linkSpeedGbps: 10,
+    notes: 'High-speed dedicated point-to-point trunk connecting Main DIA core to downtown distribution tower.',
+    installedDate: '2024-02-01',
+  },
+];
+
 

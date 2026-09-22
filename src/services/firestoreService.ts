@@ -33,6 +33,7 @@ import {
   StaffUser,
   OnlineApplication,
   OutageBroadcastRecord,
+  PointToPointLink,
 } from '../types';
 
 export const COLLECTIONS = {
@@ -45,6 +46,7 @@ export const COLLECTIONS = {
   NAP_BOXES: 'nap_boxes',
   FIBER_CABLES: 'fiber_cables',
   FIBER_CLOSURES: 'fiber_closures',
+  PTP_LINKS: 'ptp_links',
   OLT_NODES: 'olt_nodes',
   MIKROTIK_DEVICES: 'mikrotik_devices',
   EXPENSES: 'expenses',

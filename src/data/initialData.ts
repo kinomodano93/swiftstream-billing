@@ -19,6 +19,7 @@ import {
   CoverageArea,
   StaffUser,
   OperationalBill,
+  PointToPointLink,
 } from '../types';
 
 export const initialBusinessProfile: BusinessProfile = {
@@ -258,6 +259,8 @@ export const initialFiberClosures: FiberClosure[] = [];
 export const initialFiberCables: FiberCable[] = [];
 
 export const initialNapBoxes: NapBox[] = [];
+
+export const initialPtpLinks: PointToPointLink[] = [];
 
 export const initialCustomers: Customer[] = [];
 

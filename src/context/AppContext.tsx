@@ -37,6 +37,7 @@ import {
   OperationalBill,
   OperationalBillCategory,
   ExpenseCategory,
+  PointToPointLink,
 } from '../types';
 import {
   exportAllDataAsJson,
@@ -127,6 +128,7 @@ interface AppContextType {
   napBoxes: NapBox[];
   fiberCables: FiberCable[];
   fiberClosures: FiberClosure[];
+  ptpLinks: PointToPointLink[];
   oltNodes: OltPopNode[];
   oltNode: OltPopNode;
   repairOrders: RepairOrder[];
@@ -266,6 +268,11 @@ interface AppContextType {
   updateOltNode: (idOrUpdates: string | Partial<OltPopNode>, updates?: Partial<OltPopNode>) => void;
   deleteOltNode: (id: string) => void;
 
+  // Point-to-Point (P2P) 10G SFP+ Link Actions
+  addPtpLink: (link: Omit<PointToPointLink, 'id'>) => PointToPointLink;
+  updatePtpLink: (id: string, updates: Partial<PointToPointLink>) => void;
+  deletePtpLink: (id: string) => void;
+
   // MikroTik Device Actions
   addMikrotikDevice: (device: Omit<MikrotikDevice, 'id'>) => MikrotikDevice;
   updateMikrotikDevice: (id: string, updates: Partial<MikrotikDevice>, notify?: boolean) => void;
@@ -372,6 +379,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const list = initial.fiberClosures || [];
     return list.filter((c) => c.id !== 'fjc-01-binauahan' && c.id !== 'fjc-02-poblacion');
   });
+  const [ptpLinks, setPtpLinks] = useState<PointToPointLink[]>(initial.ptpLinks || []);
   const [oltNodes, setOltNodes] = useState<OltPopNode[]>(initial.oltNodes || (initial.oltNode ? [initial.oltNode] : []));
   const oltNode = oltNodes[0] || initial.oltNode;
   const [repairOrders, setRepairOrders] = useState<RepairOrder[]>(initial.repairOrders);
@@ -788,6 +796,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [fiberClosures]);
 
   useEffect(() => {
+    saveToStorage(STORAGE_KEYS.PTP_LINKS, ptpLinks);
+  }, [ptpLinks]);
+
+  useEffect(() => {
     saveToStorage(STORAGE_KEYS.OLT_NODES, oltNodes);
     if (oltNodes[0]) {
       saveToStorage(STORAGE_KEYS.OLT_NODE, oltNodes[0]);
@@ -1078,6 +1090,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         });
       }
     });
+    const unsubPtpLinks = subscribeToCollection<PointToPointLink>(COLLECTIONS.PTP_LINKS, (data) => {
+      if (data && data.length > 0) {
+        setPtpLinks(data);
+      } else if (data && data.length === 0) {
+        setPtpLinks((prev) => {
+          if (prev.length > 0) {
+            prev.forEach((link) => saveFirestoreDoc(COLLECTIONS.PTP_LINKS, link));
+            return prev;
+          }
+          return [];
+        });
+      }
+    });
     const unsubMikrotik = subscribeToCollection<MikrotikDevice>(COLLECTIONS.MIKROTIK_DEVICES, (data) => {
       setMikrotikDevices(data || []);
     });
@@ -1194,6 +1219,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       unsubNapBoxes();
       unsubFiberCables();
       unsubFiberClosures();
+      unsubPtpLinks();
       unsubMikrotik();
       unsubExpenses();
       unsubOperationalBills();
@@ -3182,6 +3208,63 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     showToast('warning', 'OLT Removed', `OLT "${target?.code || target?.name || id}" removed from network.`);
   };
 
+  // --- Point-to-Point (P2P) 10G SFP+ Link Actions ---
+  const addPtpLink = (linkData: Omit<PointToPointLink, 'id'>): PointToPointLink => {
+    const newLink: PointToPointLink = {
+      ...linkData,
+      id: generateId('PTP'),
+    };
+    setPtpLinks((prev) => [...prev, newLink]);
+    saveFirestoreDoc(COLLECTIONS.PTP_LINKS, newLink).catch((err) => {
+      console.warn('Could not sync new PTP link to Firestore:', err);
+    });
+    logAuditEvent({
+      userName: 'Admin / Network Engineer',
+      action: 'PTP_LINK_CREATED',
+      category: 'network',
+      severity: 'info',
+      details: `Deployed 10G SFP+ Point-to-Point link ${newLink.code} (${newLink.name}) from ${newLink.routerName} to ${newLink.remoteNodeName}`,
+      status: 'success',
+    });
+    showToast('success', '10G P2P Link Deployed', `Point-to-Point circuit "${newLink.code}" configured.`);
+    return newLink;
+  };
+
+  const updatePtpLink = (id: string, updates: Partial<PointToPointLink>) => {
+    setPtpLinks((prev) =>
+      prev.map((link) => {
+        if (link.id === id) {
+          const updated = { ...link, ...updates };
+          saveFirestoreDoc(COLLECTIONS.PTP_LINKS, updated).catch((err) => {
+            console.warn('Could not sync updated PTP link to Firestore:', err);
+          });
+          return updated;
+        }
+        return link;
+      })
+    );
+    showToast('info', 'P2P Link Updated', '10G SFP+ circuit specifications saved.');
+  };
+
+  const deletePtpLink = (id: string) => {
+    const link = ptpLinks.find((l) => l.id === id);
+    deleteFirestoreDoc(COLLECTIONS.PTP_LINKS, id).catch((err) => {
+      console.warn('Could not delete PTP link from Firestore:', err);
+    });
+    setPtpLinks((prev) => prev.filter((l) => l.id !== id));
+    if (link) {
+      logAuditEvent({
+        userName: 'Admin / Network Engineer',
+        action: 'PTP_LINK_DELETED',
+        category: 'network',
+        severity: 'warning',
+        details: `Deleted 10G SFP+ Point-to-Point link ${link.code} (${link.name})`,
+        status: 'success',
+      });
+      showToast('warning', 'P2P Link Removed', `Point-to-point link "${link.code}" deleted.`);
+    }
+  };
+
   // --- Repair Operations ---
   const addRepairOrder = (orderData: Omit<RepairOrder, 'id' | 'createdAt'>): RepairOrder => {
     const newOrder: RepairOrder = {
@@ -4230,6 +4313,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (jsonData.napBoxes) setNapBoxes(jsonData.napBoxes);
       if (jsonData.fiberCables) setFiberCables(jsonData.fiberCables);
       if (jsonData.fiberClosures) setFiberClosures(jsonData.fiberClosures);
+      if (jsonData.ptpLinks) setPtpLinks(jsonData.ptpLinks);
       if (jsonData.oltNodes && Array.isArray(jsonData.oltNodes)) {
         setOltNodes(jsonData.oltNodes);
       } else if (jsonData.oltNode) {
@@ -4268,6 +4352,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setNapBoxes([]);
     setFiberCables([]);
     setFiberClosures([]);
+    setPtpLinks([]);
     setRepairOrders([]);
     setReminders([]);
     setMikrotikDevices([]);
@@ -4318,6 +4403,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         napBoxes,
         fiberCables,
         fiberClosures,
+        ptpLinks,
         oltNodes,
         oltNode,
         repairOrders,
@@ -4384,6 +4470,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addOltNode,
         updateOltNode,
         deleteOltNode,
+        addPtpLink,
+        updatePtpLink,
+        deletePtpLink,
         addMikrotikDevice,
         updateMikrotikDevice,
         deleteMikrotikDevice,

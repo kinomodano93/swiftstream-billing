@@ -19,6 +19,7 @@ import {
   CoverageArea,
   StaffUser,
   OperationalBill,
+  PointToPointLink,
 } from '../types';
 import {
   initialAuditLogs,
@@ -41,8 +42,9 @@ import {
   initialPaymentSubmissions,
   initialCoverageAreas,
   initialStaffUsers,
+  initialPtpLinks,
 } from './initialData';
-import { DEFAULT_OSP_NAPS, DEFAULT_OSP_CABLES, DEFAULT_OSP_CLOSURES } from './networkGeo';
+import { DEFAULT_OSP_NAPS, DEFAULT_OSP_CABLES, DEFAULT_OSP_CLOSURES, DEFAULT_OSP_PTP_LINKS } from './networkGeo';
 import { resolveInvoicePlanDetails, isRouterProfileName } from '../utils/formatters';
 
 const STORAGE_KEYS = {
@@ -59,6 +61,7 @@ const STORAGE_KEYS = {
   AUDIT_LOGS: 'swiftstream_audit_logs_v4',
   FIBER_CABLES: 'swiftstream_fiber_cables_v4',
   FIBER_CLOSURES: 'swiftstream_fiber_closures_v4',
+  PTP_LINKS: 'swiftstream_ptp_links_v4',
   OLT_NODE: 'swiftstream_olt_node_v4',
   OLT_NODES: 'swiftstream_olt_nodes_v4',
   DAILY_REMITTANCES: 'swiftstream_daily_remittances_v4',
@@ -335,6 +338,11 @@ export const loadStoredData = () => {
     }
     const fiberClosures = cleanedFiberClosures;
 
+    const rawPtpLinks = JSON.parse(
+      localStorage.getItem(STORAGE_KEYS.PTP_LINKS) || JSON.stringify(initialPtpLinks)
+    ) as PointToPointLink[];
+    const ptpLinks = rawPtpLinks && rawPtpLinks.length > 0 ? rawPtpLinks : DEFAULT_OSP_PTP_LINKS;
+
     const rawOltNodes = JSON.parse(
       localStorage.getItem(STORAGE_KEYS.OLT_NODES) || '[]'
     ) as OltPopNode[];
@@ -418,6 +426,7 @@ export const loadStoredData = () => {
       auditLogs,
       fiberCables,
       fiberClosures,
+      ptpLinks,
       oltNodes,
       oltNode,
       dailyRemittances,
@@ -443,6 +452,7 @@ export const loadStoredData = () => {
       auditLogs: initialAuditLogs,
       fiberCables: initialFiberCables,
       fiberClosures: initialFiberClosures,
+      ptpLinks: initialPtpLinks,
       oltNodes: initialOltNodes,
       oltNode: initialOltNode,
       dailyRemittances: initialDailyRemittances,

@@ -37,10 +37,12 @@ import {
   Move,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { FiberCable, FiberClosure, GeoPoint, NapBox, NapPort, OltPopNode, Customer } from '../../types';
+import { FiberCable, FiberClosure, GeoPoint, NapBox, NapPort, OltPopNode, Customer, PointToPointLink } from '../../types';
 import { formatCurrency, formatPhoneNumber } from '../../utils/formatters';
 import { RealLeafletMap, RealMapTileStyle } from './RealLeafletMap';
 import { OltRegistrationModal } from './OltRegistrationModal';
+import { PtpLinkModal } from './PtpLinkModal';
+import { calculatePtpOpticalStatus, formatPtpSpeed } from '../../utils/ptpOptical';
 import { isGoogleMapsConfigured } from '../../services/googleMapsService';
 import {
   getOltToNapDistance,
@@ -108,6 +110,7 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
     fiberClosures = [],
     oltNodes = [],
     oltNode,
+    ptpLinks = [],
     businessProfile,
     addNapBox,
     addFiberCable,
@@ -117,6 +120,9 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
     updateOltNode,
     updateNapBox,
     deleteNapBox,
+    addPtpLink,
+    updatePtpLink,
+    deletePtpLink,
   } = useApp();
 
   const isGoogleAvailable = isGoogleMapsConfigured(businessProfile);
@@ -174,17 +180,22 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
   const [showDistribution, setShowDistribution] = useState<boolean>(true);
   const [showNaps, setShowNaps] = useState<boolean>(true);
   const [showClosures, setShowClosures] = useState<boolean>(true);
+  const [showPtpLinks, setShowPtpLinks] = useState<boolean>(true);
   const [showDropLines, setShowDropLines] = useState<boolean>(true);
   const [showCoverageRings, setShowCoverageRings] = useState<boolean>(true);
   const [showSpanDistances, setShowSpanDistances] = useState<'all' | 'olt' | 'inter_nap' | 'none'>('all');
 
   // Selected asset for drawer inspection
   const [selectedAsset, setSelectedAsset] = useState<{
-    type: 'olt' | 'nap' | 'cable' | 'closure' | 'customer';
+    type: 'olt' | 'nap' | 'cable' | 'closure' | 'customer' | 'ptp_link';
     data: any;
   } | null>(null);
   const [drawerInterNapTargetId, setDrawerInterNapTargetId] = useState<string>('');
   const [externalRouteEditNapId, setExternalRouteEditNapId] = useState<string | null>(null);
+
+  // Point-to-Point 10G SFP+ Link Modal state
+  const [showPtpModal, setShowPtpModal] = useState<boolean>(false);
+  const [editingPtpLink, setEditingPtpLink] = useState<PointToPointLink | null>(null);
 
   // OLT Registration Modal state
   const [showOltModal, setShowOltModal] = useState<boolean>(false);
@@ -596,6 +607,15 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
             🔩 Splice Domes
           </button>
           <button
+            onClick={() => setShowPtpLinks(!showPtpLinks)}
+            className={`px-2.5 py-1 rounded-lg border text-[11px] font-medium transition-all ${
+              showPtpLinks ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-300' : 'bg-slate-950 border-slate-800 text-slate-500'
+            }`}
+            title="Toggle Point-to-Point 10G SFP+ Trunk Links"
+          >
+            ⚡ 10G P2P ({ptpLinks.length})
+          </button>
+          <button
             onClick={() => setShowDropLines(!showDropLines)}
             className={`px-2.5 py-1 rounded-lg border text-[11px] font-medium transition-all ${
               showDropLines ? 'bg-sky-500/20 border-sky-500/50 text-sky-300' : 'bg-slate-950 border-slate-800 text-slate-500'
@@ -724,6 +744,18 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
 
           <button
             onClick={() => {
+              setEditingPtpLink(null);
+              setShowPtpModal(true);
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-semibold shadow-md shadow-indigo-600/25 transition-all"
+            title="Deploy Point-to-Point 10G SFP+ Link attached to Main DIA Router"
+          >
+            <Zap className="w-3.5 h-3.5 text-amber-300" />
+            <span>+ Deploy 10G P2P</span>
+          </button>
+
+          <button
+            onClick={() => {
               setOltModalCoords(null);
               setEditingOltId(selectedOltFilter !== 'all' ? selectedOltFilter : null);
               setShowOltModal(true);
@@ -818,6 +850,9 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
               showFeeder={showFeeder}
               showDistribution={showDistribution}
               showNaps={showNaps}
+              ptpLinks={ptpLinks}
+              onUpdatePtpLink={updatePtpLink}
+              showPtpLinks={showPtpLinks}
               showClosures={showClosures}
               showDropLines={showDropLines}
               showCoverageRings={showCoverageRings}
@@ -1121,6 +1156,78 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
                 );
               })}
 
+              {/* Point-to-Point 10G SFP+ Links (DIA Optical Trunks) */}
+              {showPtpLinks &&
+                ptpLinks.map((link) => {
+                  const pFrom = projectGeoToSvg(link.routerLatitude, link.routerLongitude);
+                  const pTo = projectGeoToSvg(link.remoteLatitude, link.remoteLongitude);
+                  const waypointsSvg = (link.customPathCoordinates && link.customPathCoordinates.length > 0)
+                    ? link.customPathCoordinates.map((pt) => projectGeoToSvg(pt.lat, pt.lng))
+                    : (link.intermediatePoles && link.intermediatePoles.length > 0)
+                    ? link.intermediatePoles.map((pt) => projectGeoToSvg(pt.latitude, pt.longitude))
+                    : [];
+                  const allPts = [pFrom, ...waypointsSvg, pTo];
+                  const d = allPts.reduce((acc, p, idx) => (idx === 0 ? `M ${p.x} ${p.y}` : `${acc} L ${p.x} ${p.y}`), '');
+                  const isSelected = selectedAsset?.type === 'ptp_link' && selectedAsset.data.id === link.id;
+
+                  const midX = (pFrom.x + pTo.x) / 2;
+                  const midY = (pFrom.y + pTo.y) / 2;
+
+                  return (
+                    <g
+                      key={`ptp-${link.id}`}
+                      className="cursor-pointer group"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedAsset({ type: 'ptp_link', data: link });
+                      }}
+                    >
+                      {/* Glow line */}
+                      <path
+                        d={d}
+                        fill="none"
+                        stroke="#6366f1"
+                        strokeWidth="8"
+                        strokeOpacity={isSelected ? 0.8 : 0.35}
+                        strokeLinecap="round"
+                        filter="url(#fiber-glow)"
+                      />
+                      {/* Core dashed line */}
+                      <path
+                        d={d}
+                        fill="none"
+                        stroke="#818cf8"
+                        strokeWidth="3"
+                        strokeDasharray="6 4"
+                        strokeLinecap="round"
+                      />
+                      {/* Midpoint Telemetry Pill */}
+                      <g transform={`translate(${midX}, ${midY})`}>
+                        <rect
+                          x="-45"
+                          y="-10"
+                          width="90"
+                          height="20"
+                          rx="10"
+                          fill="#0f172a"
+                          stroke={isSelected ? '#38bdf8' : '#6366f1'}
+                          strokeWidth="1.5"
+                        />
+                        <text
+                          textAnchor="middle"
+                          dy="3.5"
+                          fill="#a5b4fc"
+                          fontSize="9"
+                          fontFamily="monospace"
+                          fontWeight="bold"
+                        >
+                          ⚡ 10G P2P
+                        </text>
+                      </g>
+                    </g>
+                  );
+                })}
+
               {/* Splice Closures (FJC Dome Markers) */}
               {showClosures &&
                 fiberClosures.map((closure) => {
@@ -1290,6 +1397,7 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
                   {selectedAsset.type === 'closure' && <Scissors className="w-4 h-4 text-amber-400" />}
                   {selectedAsset.type === 'olt' && <Server className="w-4 h-4 text-purple-400" />}
                   {selectedAsset.type === 'customer' && <MapPin className="w-4 h-4 text-emerald-400" />}
+                  {selectedAsset.type === 'ptp_link' && <Zap className="w-4 h-4 text-indigo-400" />}
                   <span className="font-bold text-slate-100 uppercase tracking-wider text-[11px]">
                     {selectedAsset.type === 'nap'
                       ? 'NAP Splitter Hub'
@@ -1299,6 +1407,8 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
                       ? 'Splice Closure (FJC)'
                       : selectedAsset.type === 'olt'
                       ? 'Central OLT Headend'
+                      : selectedAsset.type === 'ptp_link'
+                      ? 'Point-to-Point 10G SFP+'
                       : 'Subscriber ONU Drop'}
                   </span>
                 </div>
@@ -2030,6 +2140,261 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
                   </div>
                 );
               })()}
+
+              {/* Inspector Content: Point-to-Point 10G SFP+ Link */}
+              {selectedAsset.type === 'ptp_link' && (() => {
+                const link = selectedAsset.data as PointToPointLink;
+                const optical = calculatePtpOpticalStatus(
+                  link.measuredRxPowerDbm,
+                  link.nominalTxPowerDbm,
+                  link.maxLossBudgetDb
+                );
+                const spanMetrics = calculateSpanMetrics(
+                  link.routerLatitude,
+                  link.routerLongitude,
+                  link.remoteLatitude,
+                  link.remoteLongitude
+                );
+                const effectiveCableDistMeters =
+                  link.cableLengthMeters || Math.round(spanMetrics.directMeters * 1.15);
+                const fiberDelayMicroseconds = ((effectiveCableDistMeters / 200000) * 1000).toFixed(2);
+                const totalLossDb = (link.nominalTxPowerDbm - link.measuredRxPowerDbm).toFixed(2);
+                const remainingMarginDb = (
+                  link.maxLossBudgetDb - (link.nominalTxPowerDbm - link.measuredRxPowerDbm)
+                ).toFixed(2);
+
+                return (
+                  <div className="space-y-4">
+                    {/* Header Card */}
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="px-2 py-0.5 rounded-md bg-indigo-950 text-indigo-300 border border-indigo-800 text-[10px] font-bold uppercase tracking-wider font-mono">
+                          {link.code}
+                        </span>
+                        <span
+                          className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider ${
+                            link.opticalReadingStatus === 'optimal'
+                              ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                              : link.opticalReadingStatus === 'good'
+                              ? 'bg-sky-950 text-sky-300 border border-sky-800'
+                              : link.opticalReadingStatus === 'marginal'
+                              ? 'bg-amber-950 text-amber-300 border border-amber-800'
+                              : 'bg-rose-950 text-rose-300 border border-rose-800 animate-pulse'
+                          }`}
+                        >
+                          {optical.statusLabel}
+                        </span>
+                      </div>
+                      <h3 className="text-sm font-bold text-slate-100 mt-2">{link.name}</h3>
+                      <p className="text-slate-400 text-[11px] mt-0.5">
+                        {formatPtpSpeed(link.type)} • {link.fiberType || 'Single Mode 10G-LR / BiDi'}
+                      </p>
+                    </div>
+
+                    {/* SFP+ Optical Reading Status DDM Gauge Card */}
+                    <div className="p-3 rounded-2xl bg-slate-950 border border-indigo-900/60 shadow-lg space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-400 flex items-center gap-1.5">
+                          <Gauge className="w-3.5 h-3.5" />
+                          <span>10G SFP+ DDM Optical Telemetry</span>
+                        </span>
+                        <span className="text-[10px] font-mono text-slate-400">
+                          Budget: <strong>{link.maxLossBudgetDb} dB Max</strong>
+                        </span>
+                      </div>
+
+                      {/* Power comparison metrics */}
+                      <div className="grid grid-cols-2 gap-2 text-[11px]">
+                        <div className="p-2 rounded-xl bg-slate-900/90 border border-slate-800">
+                          <span className="text-slate-500 block text-[10px]">Nominal Tx Output</span>
+                          <span className="font-bold text-emerald-400 font-mono text-xs">
+                            {link.nominalTxPowerDbm.toFixed(1)} dBm
+                          </span>
+                          <span className="text-[9px] text-slate-500 block">Main DIA SFP+</span>
+                        </div>
+                        <div className="p-2 rounded-xl bg-slate-900/90 border border-slate-800">
+                          <span className="text-slate-500 block text-[10px]">Measured Rx Reading</span>
+                          <span
+                            className={`font-bold font-mono text-xs ${
+                              link.opticalReadingStatus === 'critical'
+                                ? 'text-rose-400'
+                                : link.opticalReadingStatus === 'marginal'
+                                ? 'text-amber-400'
+                                : 'text-emerald-400'
+                            }`}
+                          >
+                            {link.measuredRxPowerDbm.toFixed(1)} dBm
+                          </span>
+                          <span className="text-[9px] text-slate-500 block">Remote Receiver</span>
+                        </div>
+                      </div>
+
+                      {/* Optical Progress Bar Scale (-3 to -14 dBm) */}
+                      <div>
+                        <div className="flex justify-between text-[9px] font-mono text-slate-400 mb-1">
+                          <span>-3.0 dBm (Nominal)</span>
+                          <span className="text-amber-400">-12.0 dBm</span>
+                          <span className="text-rose-400">-14.0 dBm (Max Loss)</span>
+                        </div>
+                        <div className="w-full h-2.5 rounded-full bg-slate-800 relative overflow-hidden flex">
+                          <div className="w-[55%] h-full bg-emerald-500/70" title="Optimal (-3 to -9 dBm)" />
+                          <div className="w-[27%] h-full bg-amber-500/70" title="Marginal (-9 to -12 dBm)" />
+                          <div className="w-[18%] h-full bg-rose-500/80" title="Critical (> -14 dBm)" />
+                        </div>
+                      </div>
+
+                      {/* Loss & Margin calculation */}
+                      <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1 border-t border-slate-800">
+                        <span>Total Loss: <strong className="text-indigo-300 font-mono">{totalLossDb} dB</strong></span>
+                        <span>Power Margin: <strong className="text-emerald-400 font-mono">+{remainingMarginDb} dB</strong></span>
+                      </div>
+                    </div>
+
+                    {/* Endpoint Connection Details */}
+                    <div className="space-y-2">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                        Span Connection Endpoints
+                      </span>
+
+                      {/* Origin DIA Router */}
+                      <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5 font-bold text-slate-200">
+                            <span>🏢</span>
+                            <span>{link.routerName}</span>
+                          </div>
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-indigo-950 text-indigo-300 font-mono">
+                            Main DIA Router
+                          </span>
+                        </div>
+                        <div className="mt-1 text-[11px] text-slate-400 space-y-0.5">
+                          <p>Port: <code className="text-indigo-300 font-mono">{link.routerPort}</code> (10G SFP+)</p>
+                          <p>Pole: <strong className="text-amber-300 font-mono">{link.routerPoleNumber || 'CASURECO P-NOC'}</strong></p>
+                          <p className="font-mono text-[10px] text-cyan-400">
+                            {link.routerLatitude.toFixed(5)}° N, {link.routerLongitude.toFixed(5)}° E
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Destination Remote Location */}
+                      <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5 font-bold text-slate-200">
+                            <span>📡</span>
+                            <span>{link.remoteNodeName}</span>
+                          </div>
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-cyan-950 text-cyan-300 font-mono">
+                            Remote Node
+                          </span>
+                        </div>
+                        <div className="mt-1 text-[11px] text-slate-400 space-y-0.5">
+                          <p>Device: <span className="text-slate-300">{link.remoteDeviceType || 'Cell Tower Base / Remote POP'}</span></p>
+                          <p>Port: <code className="text-cyan-300 font-mono">{link.remotePort || 'sfp-sfpplus1'}</code></p>
+                          <p>Pole / Tower: <strong className="text-amber-300 font-mono">{link.remotePoleNumber || 'CASURECO P-REM'}</strong></p>
+                          <p className="font-mono text-[10px] text-cyan-400">
+                            {link.remoteLatitude.toFixed(5)}° N, {link.remoteLongitude.toFixed(5)}° E
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Distance & Delay Breakdown */}
+                    <div className="p-3 rounded-2xl bg-slate-950 border border-slate-800 space-y-2">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                        Optical Distance & Latency
+                      </span>
+                      <div className="grid grid-cols-2 gap-2 text-[11px]">
+                        <div>
+                          <span className="text-slate-500 block text-[10px]">Direct Distance</span>
+                          <span className="font-bold text-cyan-300 font-mono">{spanMetrics.formattedDirect}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 block text-[10px]">Cable Route Length</span>
+                          <span className="font-bold text-amber-300 font-mono">
+                            {effectiveCableDistMeters >= 1000
+                              ? `${(effectiveCableDistMeters / 1000).toFixed(2)} km`
+                              : `${effectiveCableDistMeters} m`}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 block text-[10px]">Propagation Delay</span>
+                          <span className="font-bold text-slate-200 font-mono">~{fiberDelayMicroseconds} µs</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 block text-[10px]">Intermediate Poles</span>
+                          <span className="font-bold text-indigo-300 font-mono">
+                            {link.intermediatePoles?.length || 0} Utility Poles
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Intermediate Utility Poles List */}
+                    {link.intermediatePoles && link.intermediatePoles.length > 0 && (
+                      <div>
+                        <span className="font-bold text-slate-300 block mb-1 text-[11px]">
+                          Utility Poles En-Route ({link.intermediatePoles.length})
+                        </span>
+                        <div className="space-y-1 max-h-36 overflow-y-auto pr-1">
+                          {link.intermediatePoles.map((pole, pIdx) => (
+                            <div
+                              key={pole.id || pIdx}
+                              className="p-1.5 rounded-lg bg-slate-950 border border-slate-800 flex items-center justify-between text-[10px]"
+                            >
+                              <div className="flex items-center gap-1.5">
+                                <span>🪵</span>
+                                <span className="font-mono font-bold text-amber-300">{pole.poleNumber}</span>
+                              </div>
+                              <span className="font-mono text-slate-400">
+                                {pole.distanceFromRouterMeters ? `${pole.distanceFromRouterMeters}m from NOC` : `${pole.latitude.toFixed(4)}°, ${pole.longitude.toFixed(4)}°`}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Action Buttons */}
+                    <div className="space-y-2 pt-2 border-t border-slate-800">
+                      <button
+                        type="button"
+                        onClick={() => setExternalRouteEditNapId(link.id)}
+                        className="w-full py-2 bg-amber-600/30 hover:bg-amber-600/40 text-amber-200 border border-amber-500/50 rounded-xl font-semibold transition-all flex items-center justify-center gap-2"
+                        title="Drag intermediate utility poles and stretch route along streets on the interactive satellite map"
+                      >
+                        <Waypoints className="w-4 h-4 text-amber-400" />
+                        <span>Align Route Poles (Interactive Map)</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingPtpLink(link);
+                          setShowPtpModal(true);
+                        }}
+                        className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-semibold transition-all shadow-md flex items-center justify-center gap-2"
+                      >
+                        <Zap className="w-4 h-4" />
+                        <span>Edit 10G SFP+ Link Settings</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (window.confirm(`Are you sure you want to delete 10G Point-to-Point link "${link.name}" (${link.code})?`)) {
+                            deletePtpLink(link.id);
+                            setSelectedAsset(null);
+                          }
+                        }}
+                        className="w-full py-1.5 bg-rose-950/40 hover:bg-rose-950/60 text-rose-400 border border-rose-900/60 rounded-xl font-semibold transition-all flex items-center justify-center gap-1.5 text-[11px]"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Delete 10G P2P Link</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           </div>
         )}
@@ -2209,6 +2574,16 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
         }}
         initialCoords={oltModalCoords}
         editingOltId={editingOltId}
+      />
+
+      {/* 10G SFP+ Point-to-Point Deployment / Edit Modal */}
+      <PtpLinkModal
+        isOpen={showPtpModal}
+        onClose={() => {
+          setShowPtpModal(false);
+          setEditingPtpLink(null);
+        }}
+        editingLink={editingPtpLink}
       />
     </div>
   );
