@@ -44,6 +44,7 @@ import { OltRegistrationModal } from './OltRegistrationModal';
 import { PtpLinkModal } from './PtpLinkModal';
 import { calculatePtpOpticalStatus, formatPtpSpeed } from '../../utils/ptpOptical';
 import { isGoogleMapsConfigured } from '../../services/googleMapsService';
+import { fetchSfpOpticalDiagnostics } from '../../services/mikrotikApiService';
 import {
   getOltToNapDistance,
   getNapToNapDistance,
@@ -111,6 +112,7 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
     oltNodes = [],
     oltNode,
     ptpLinks = [],
+    mikrotikDevices = [],
     businessProfile,
     addNapBox,
     addFiberCable,
@@ -204,13 +206,81 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
   // OTDR Fault Simulation state
   const [showOtdrModal, setShowOtdrModal] = useState<boolean>(false);
   const [otdrDistanceMeters, setOtdrDistanceMeters] = useState<number>(650);
+  const [otdrTargetType, setOtdrTargetType] = useState<'feeder' | 'ptp_link'>('feeder');
+  const [otdrTargetPtpId, setOtdrTargetPtpId] = useState<string>('');
   const [activeOtdrBreak, setActiveOtdrBreak] = useState<{
     point: { x: number; y: number; lat: number; lng: number };
-    cable: FiberCable;
+    cable?: FiberCable;
+    ptpLink?: PointToPointLink;
     distance: number;
     affectedNaps: NapBox[];
     affectedCustomers: Customer[];
+    nearestPole?: string;
   } | null>(null);
+
+  // Live SFP+ Polling state for P2P link inspector
+  const [isPollingPtpSfp, setIsPollingPtpSfp] = useState<boolean>(false);
+  const [ptpPollMessage, setPtpPollMessage] = useState<string | null>(null);
+
+  // Poll live DDM optical telemetry for a Point-to-Point 10G link
+  const handlePtpLiveQuery = async (link: PointToPointLink) => {
+    const dev = mikrotikDevices.find((d) => d.id === link.routerId) || mikrotikDevices[0];
+    if (!dev) {
+      setPtpPollMessage('No linked MikroTik router found for live telemetry.');
+      setTimeout(() => setPtpPollMessage(null), 4000);
+      return;
+    }
+
+    setIsPollingPtpSfp(true);
+    setPtpPollMessage(null);
+    try {
+      const port = link.routerPort || 'sfp-sfpplus1';
+      const ddm = await fetchSfpOpticalDiagnostics(
+        {
+          id: dev.id,
+          name: dev.name,
+          ipAddress: dev.ipAddress || dev.remoteAddress || '',
+          port: dev.port || dev.webfigPort || 10988,
+          username: dev.username || 'admin',
+          password: dev.password || '',
+        },
+        port
+      );
+
+      if (ddm) {
+        const parseNum = (val: any, fallback: number): number => {
+          if (typeof val === 'number') return val;
+          if (!val) return fallback;
+          const m = String(val).match(/-?[\d.]+/);
+          return m ? parseFloat(m[0]) : fallback;
+        };
+
+        const rx = parseNum(ddm['sfp-rx-power'] || ddm.rxPower || ddm['rx-power'], link.measuredRxPowerDbm);
+        const tx = parseNum(ddm['sfp-tx-power'] || ddm.txPower || ddm['tx-power'], link.nominalTxPowerDbm);
+        const temp = parseNum(ddm['sfp-temperature'] || ddm.temperature, 38.0);
+        const volt = parseNum(ddm['sfp-supply-voltage'] || ddm.voltage, 3.3);
+
+        const analysis = calculatePtpOpticalStatus(rx, tx, link.maxLossBudgetDb, link.cableLengthMeters);
+        const updated: PointToPointLink = {
+          ...link,
+          measuredRxPowerDbm: rx,
+          nominalTxPowerDbm: tx,
+          opticalReadingStatus: analysis.status,
+        };
+
+        updatePtpLink(link.id, updated);
+        setSelectedAsset({ type: 'ptp_link', data: updated });
+        setPtpPollMessage(`Queried ${dev.name} [${port}]: Rx ${rx.toFixed(1)} dBm • Tx ${tx.toFixed(1)} dBm • ${temp}°C • ${volt}V`);
+      } else {
+        setPtpPollMessage(`No DDM response from ${dev.name} on ${port}.`);
+      }
+    } catch (err: any) {
+      setPtpPollMessage(`Error polling SFP: ${err.message || 'Connection failed'}`);
+    } finally {
+      setIsPollingPtpSfp(false);
+      setTimeout(() => setPtpPollMessage(null), 5000);
+    }
+  };
 
   // Link Budget Calculator modal state
   const [showLinkBudgetModal, setShowLinkBudgetModal] = useState<boolean>(false);
@@ -259,11 +329,61 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
     setActiveOtdrBreak(null);
   };
 
-  // Run OTDR Fault Locator
+  // Run OTDR Fault Locator (Supports both GPON Feeder & Point-to-Point 10G Trunks)
   const handleCalculateOtdrBreak = () => {
-    if (fiberCables.length === 0) return;
+    // 1. P2P Trunk Break Detection
+    if (otdrTargetType === 'ptp_link') {
+      const targetPtp = ptpLinks.find((l) => l.id === otdrTargetPtpId) || ptpLinks[0];
+      if (!targetPtp) return;
 
-    // Pick main feeder trunk
+      const pathCoords: GeoPoint[] =
+        targetPtp.customPathCoordinates && targetPtp.customPathCoordinates.length > 1
+          ? targetPtp.customPathCoordinates
+          : [
+              { lat: targetPtp.routerLatitude, lng: targetPtp.routerLongitude },
+              ...(targetPtp.intermediatePoles || []).map((p) => ({ lat: p.latitude, lng: p.longitude })),
+              { lat: targetPtp.remoteLatitude, lng: targetPtp.remoteLongitude },
+            ];
+
+      const totalLen = targetPtp.cableLengthMeters || 1000;
+      const ratio = Math.min(Math.max(otdrDistanceMeters / totalLen, 0.05), 0.98);
+
+      const segmentIndex = Math.min(Math.floor(ratio * (pathCoords.length - 1)), pathCoords.length - 2);
+      const p1 = pathCoords[segmentIndex];
+      const p2 = pathCoords[segmentIndex + 1];
+
+      const interpLat = p1.lat + (p2.lat - p1.lat) * (ratio % 1);
+      const interpLng = p1.lng + (p2.lng - p1.lng) * (ratio % 1);
+      const svgPt = projectGeoToSvg(interpLat, interpLng);
+
+      // Find closest utility pole en-route
+      let nearestPoleName: string | undefined = undefined;
+      if (targetPtp.intermediatePoles && targetPtp.intermediatePoles.length > 0) {
+        let minDist = Infinity;
+        for (const pole of targetPtp.intermediatePoles) {
+          const d = Math.hypot(pole.latitude - interpLat, pole.longitude - interpLng);
+          if (d < minDist) {
+            minDist = d;
+            nearestPoleName = pole.poleNumber;
+          }
+        }
+      }
+
+      setActiveOtdrBreak({
+        point: { ...svgPt, lat: interpLat, lng: interpLng },
+        ptpLink: targetPtp,
+        distance: otdrDistanceMeters,
+        affectedNaps: [],
+        affectedCustomers: [],
+        nearestPole: nearestPoleName,
+      });
+
+      setShowOtdrModal(false);
+      return;
+    }
+
+    // 2. GPON Feeder Cable Break Detection
+    if (fiberCables.length === 0) return;
     const targetCable = fiberCables.find((c) => c.type === 'feeder') || fiberCables[0];
     const totalLen = targetCable.lengthMeters;
     const ratio = Math.min(Math.max(otdrDistanceMeters / totalLen, 0.05), 0.98);
@@ -2198,10 +2318,30 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
                           <Gauge className="w-3.5 h-3.5" />
                           <span>10G SFP+ DDM Optical Telemetry</span>
                         </span>
-                        <span className="text-[10px] font-mono text-slate-400">
-                          Budget: <strong>{link.maxLossBudgetDb} dB Max</strong>
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handlePtpLiveQuery(link)}
+                            disabled={isPollingPtpSfp}
+                            className="text-[10px] text-cyan-400 hover:text-cyan-300 font-mono font-bold flex items-center gap-1 cursor-pointer bg-cyan-950/60 hover:bg-cyan-900/80 border border-cyan-800/60 px-2 py-0.5 rounded-lg transition-all disabled:opacity-50"
+                            title="Poll live Rx/Tx optical power and DDM health from linked MikroTik router"
+                          >
+                            <Zap className={`w-3 h-3 ${isPollingPtpSfp ? 'animate-spin' : 'text-amber-400'}`} />
+                            <span>{isPollingPtpSfp ? 'Polling...' : 'Live Poll'}</span>
+                          </button>
+                          <span className="text-[10px] font-mono text-slate-400">
+                            Budget: <strong>{link.maxLossBudgetDb} dB Max</strong>
+                          </span>
+                        </div>
                       </div>
+
+                      {/* Transient Live Poll Feedback Toast */}
+                      {ptpPollMessage && (
+                        <div className="p-2 rounded-xl bg-cyan-950/60 border border-cyan-800/60 text-cyan-300 text-[10px] font-mono flex items-center gap-1.5 animate-in fade-in">
+                          <Zap className="w-3 h-3 text-amber-400 shrink-0" />
+                          <span>{ptpPollMessage}</span>
+                        </div>
+                      )}
 
                       {/* Power comparison metrics */}
                       <div className="grid grid-cols-2 gap-2 text-[11px]">
@@ -2419,8 +2559,69 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
             </p>
 
             <div className="space-y-4">
+              {/* Target Line Selector: GPON Feeder vs Point-to-Point 10G Trunk */}
               <div>
-                <label className="block text-slate-400 mb-1 font-medium">OTDR Fault Distance (Meters from OLT) *</label>
+                <label className="block text-slate-400 mb-1 font-medium">Diagnostic Target Fiber Line *</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setOtdrTargetType('feeder')}
+                    className={`py-2 px-3 rounded-xl border font-semibold text-xs flex items-center justify-center gap-1.5 transition-all ${
+                      otdrTargetType === 'feeder'
+                        ? 'bg-blue-600/30 border-blue-500 text-blue-200'
+                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <span>🧶</span>
+                    <span>GPON Feeder Trunk (48C)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOtdrTargetType('ptp_link');
+                      if (!otdrTargetPtpId && ptpLinks.length > 0) {
+                        setOtdrTargetPtpId(ptpLinks[0].id);
+                      }
+                    }}
+                    className={`py-2 px-3 rounded-xl border font-semibold text-xs flex items-center justify-center gap-1.5 transition-all ${
+                      otdrTargetType === 'ptp_link'
+                        ? 'bg-indigo-600/30 border-indigo-500 text-indigo-200'
+                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <Zap className="w-3.5 h-3.5 text-amber-400" />
+                    <span>10G P2P Trunk</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* P2P Trunk Selector if chosen */}
+              {otdrTargetType === 'ptp_link' && (
+                <div>
+                  <label className="block text-slate-400 mb-1 font-medium">Select Point-to-Point Circuit *</label>
+                  {ptpLinks.length === 0 ? (
+                    <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-400 text-center text-[11px]">
+                      No Point-to-Point links deployed. Click "+ Deploy 10G P2P" first.
+                    </div>
+                  ) : (
+                    <select
+                      value={otdrTargetPtpId || ptpLinks[0]?.id || ''}
+                      onChange={(e) => setOtdrTargetPtpId(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-200 text-xs font-mono focus:outline-none focus:border-indigo-500"
+                    >
+                      {ptpLinks.map((link) => (
+                        <option key={link.id} value={link.id}>
+                          {link.code} — {link.name} ({link.cableLengthMeters || 1000}m)
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+              )}
+
+              <div>
+                <label className="block text-slate-400 mb-1 font-medium">OTDR Fault Distance (Meters from Transmitter / Origin) *</label>
                 <div className="relative">
                   <input
                     type="number"

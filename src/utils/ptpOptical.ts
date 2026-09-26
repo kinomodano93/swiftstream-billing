@@ -127,3 +127,17 @@ export const formatPtpSpeed = (speedOrType?: number | string): string => {
   if (speed >= 10) return '10G SFP+';
   return '1G SFP';
 };
+
+/**
+ * Calculates theoretical expected Rx power over distance in meters
+ */
+export const calculatePtpTheoreticalRx = (
+  distanceMeters: number,
+  nominalTxDbm: number = -3.0,
+  attenuationDbPerKm: number = 0.35,
+  connectorLossDb: number = 0.4
+): number => {
+  const fiberAttenuationDb = (distanceMeters / 1000) * attenuationDbPerKm;
+  const totalLoss = fiberAttenuationDb + connectorLossDb;
+  return Number((nominalTxDbm - totalLoss).toFixed(2));
+};

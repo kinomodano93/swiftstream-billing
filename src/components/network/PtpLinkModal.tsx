@@ -20,6 +20,7 @@ import { PointToPointLink, PtpReadingStatus } from '../../types';
 import { calculateSpanMetrics } from '../../utils/geoDistance';
 import { calculatePtpOpticalStatus, formatPtpSpeed } from '../../utils/ptpOptical';
 import { BARANGAY_COORDINATES } from '../../data/networkGeo';
+import { fetchSfpOpticalDiagnostics } from '../../services/mikrotikApiService';
 
 interface PtpLinkModalProps {
   isOpen: boolean;
@@ -80,6 +81,8 @@ export const PtpLinkModal: React.FC<PtpLinkModalProps> = ({
   const [maxLossBudgetDb, setMaxLossBudgetDb] = useState<number>(14.0);
   const [notes, setNotes] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [isQueryingSfp, setIsQueryingSfp] = useState<boolean>(false);
+  const [sfpQueryToast, setSfpQueryToast] = useState<{ type: 'success' | 'warning' | 'error'; message: string } | null>(null);
 
   // Load existing or initialize
   useEffect(() => {
@@ -176,6 +179,70 @@ export const PtpLinkModal: React.FC<PtpLinkModalProps> = ({
     const dev = mikrotikDevices.find((d) => d.id === devId);
     if (dev) {
       setRouterName(`${dev.name} (${dev.model || 'Core Router'})`);
+    }
+  };
+
+  // Live SFP+ DDM Telemetry Fetcher from linked MikroTik Router
+  const handleFetchLiveSfpDdm = async () => {
+    const dev = mikrotikDevices.find((d) => d.id === routerId);
+    if (!dev) {
+      setSfpQueryToast({
+        type: 'warning',
+        message: 'Please link a configured MikroTik router above to query live SFP+ telemetry.',
+      });
+      return;
+    }
+
+    setIsQueryingSfp(true);
+    setSfpQueryToast(null);
+
+    try {
+      const targetPort = routerPort || 'sfp-sfpplus1';
+      const ddm = await fetchSfpOpticalDiagnostics(
+        {
+          id: dev.id,
+          name: dev.name,
+          ipAddress: dev.ipAddress || dev.remoteAddress || '',
+          port: dev.port || dev.webfigPort || 10988,
+          username: dev.username || 'admin',
+          password: dev.password || '',
+        },
+        targetPort
+      );
+
+      if (ddm) {
+        const parseNum = (val: any, fallback: number): number => {
+          if (typeof val === 'number') return val;
+          if (!val) return fallback;
+          const match = String(val).match(/-?[\d.]+/);
+          return match ? parseFloat(match[0]) : fallback;
+        };
+
+        const rx = parseNum(ddm['sfp-rx-power'] || ddm.rxPower || ddm['rx-power'], measuredRxPowerDbm);
+        const tx = parseNum(ddm['sfp-tx-power'] || ddm.txPower || ddm['tx-power'], nominalTxPowerDbm);
+        const temp = parseNum(ddm['sfp-temperature'] || ddm.temperature, 38.0);
+        const volt = parseNum(ddm['sfp-supply-voltage'] || ddm.voltage, 3.3);
+
+        setMeasuredRxPowerDbm(rx);
+        setNominalTxPowerDbm(tx);
+
+        setSfpQueryToast({
+          type: 'success',
+          message: `Queried ${dev.name} [${targetPort}]: Rx ${rx.toFixed(1)} dBm • Tx ${tx.toFixed(1)} dBm • Temp ${temp}°C • Supply ${volt}V`,
+        });
+      } else {
+        setSfpQueryToast({
+          type: 'warning',
+          message: `No DDM telemetry received from ${dev.name} on ${targetPort}. Ensure SFP+ optics support DDM.`,
+        });
+      }
+    } catch (err: any) {
+      setSfpQueryToast({
+        type: 'error',
+        message: `Failed to query SFP+ DDM: ${err.message || 'Connection error'}`,
+      });
+    } finally {
+      setIsQueryingSfp(false);
     }
   };
 
@@ -370,6 +437,31 @@ export const PtpLinkModal: React.FC<PtpLinkModalProps> = ({
               <span className="text-[10px] text-slate-500 font-mono">Origin Optical Transmitter</span>
             </div>
 
+            {/* Live SFP+ Query Status Banner */}
+            {sfpQueryToast && (
+              <div
+                className={`p-2.5 rounded-xl text-xs flex items-center justify-between gap-2 border ${
+                  sfpQueryToast.type === 'success'
+                    ? 'bg-emerald-950/70 border-emerald-800/80 text-emerald-300'
+                    : sfpQueryToast.type === 'warning'
+                    ? 'bg-amber-950/70 border-amber-800/80 text-amber-300'
+                    : 'bg-rose-950/70 border-rose-800/80 text-rose-300'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <Zap className="w-3.5 h-3.5 shrink-0 text-amber-400" />
+                  <span className="font-mono text-[11px]">{sfpQueryToast.message}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSfpQueryToast(null)}
+                  className="text-slate-400 hover:text-white px-1 font-bold text-xs"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {mikrotikDevices.length > 0 ? (
                 <div>
@@ -402,7 +494,21 @@ export const PtpLinkModal: React.FC<PtpLinkModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-slate-400 mb-1 font-medium">Router Port *</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-slate-400 font-medium">Router Port *</label>
+                  {routerId && (
+                    <button
+                      type="button"
+                      onClick={handleFetchLiveSfpDdm}
+                      disabled={isQueryingSfp}
+                      className="text-[10px] text-cyan-400 hover:text-cyan-300 font-mono font-bold flex items-center gap-1 cursor-pointer bg-cyan-950/60 hover:bg-cyan-900/80 border border-cyan-800/60 px-2 py-0.5 rounded-lg transition-all disabled:opacity-50"
+                      title="Fetch live Rx/Tx dBm, temperature & voltage via MikroTik DDM monitor"
+                    >
+                      <Zap className={`w-3 h-3 ${isQueryingSfp ? 'animate-spin' : 'text-amber-400'}`} />
+                      <span>{isQueryingSfp ? 'Querying...' : 'Query Live SFP+'}</span>
+                    </button>
+                  )}
+                </div>
                 <input
                   type="text"
                   value={routerPort}

@@ -21,13 +21,19 @@ import {
   GitFork,
   Split,
   ArrowLeftRight,
+  Search,
+  Gauge,
+  Edit,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { NapBox, NapPort, FbtSplitterRatio, PlcSplitterType, BranchDirection, FeedLegType } from '../../types';
+import { NapBox, NapPort, FbtSplitterRatio, PlcSplitterType, BranchDirection, FeedLegType, PointToPointLink } from '../../types';
 import { FiberGisMap } from './FiberGisMap';
 import { CoverageAreaManager, LAGONOY_BARANGAYS, PRESENTACION_BARANGAYS } from './CoverageAreaManager';
 import { getBarangayCoordinates } from '../../data/networkGeo';
 import { OltRegistrationModal } from './OltRegistrationModal';
+import { PtpLinkModal } from './PtpLinkModal';
+import { calculatePtpOpticalStatus, formatPtpSpeed } from '../../utils/ptpOptical';
+import { fetchSfpOpticalDiagnostics } from '../../services/mikrotikApiService';
 import {
   getOltToNapDistance,
   getNapToNapDistance,
@@ -60,9 +66,13 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
     coverageAreas,
     oltNodes = [],
     oltNode,
+    ptpLinks = [],
+    updatePtpLink,
+    deletePtpLink,
+    mikrotikDevices = [],
   } = useApp();
 
-  const [viewMode, setViewMode] = useState<'gis_map' | 'hardware_matrix' | 'coverage_areas'>('gis_map');
+  const [viewMode, setViewMode] = useState<'gis_map' | 'hardware_matrix' | 'coverage_areas' | 'ptp_trunks'>('gis_map');
   const [selectedBoxId, setSelectedBoxId] = useState<string>(napBoxes[0]?.id || '');
   const [showAddBoxModal, setShowAddBoxModal] = useState<boolean>(false);
   const [showOltModal, setShowOltModal] = useState<boolean>(false);
@@ -87,6 +97,86 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
   };
   const [oltModalCoords, setOltModalCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [interNapTargetId, setInterNapTargetId] = useState<string>('');
+
+  // Point-to-Point 10G Trunk state
+  const [showPtpModal, setShowPtpModal] = useState<boolean>(false);
+  const [editingPtpLink, setEditingPtpLink] = useState<PointToPointLink | null>(null);
+  const [isPollingPtp, setIsPollingPtp] = useState<string | null>(null);
+  const [ptpActionToast, setPtpActionToast] = useState<{ id: string; text: string; type: 'success' | 'error' } | null>(null);
+  const [ptpSearchTerm, setPtpSearchTerm] = useState<string>('');
+
+  const handlePollPtpLink = async (link: PointToPointLink) => {
+    const dev = mikrotikDevices.find((d) => d.id === link.routerId) || mikrotikDevices[0];
+    if (!dev) {
+      setPtpActionToast({
+        id: link.id,
+        text: 'No linked MikroTik router found for live telemetry.',
+        type: 'error',
+      });
+      setTimeout(() => setPtpActionToast(null), 4000);
+      return;
+    }
+
+    setIsPollingPtp(link.id);
+    try {
+      const port = link.routerPort || 'sfp-sfpplus1';
+      const ddm = await fetchSfpOpticalDiagnostics(
+        {
+          id: dev.id,
+          name: dev.name,
+          ipAddress: dev.ipAddress || dev.remoteAddress || '',
+          port: dev.port || dev.webfigPort || 10988,
+          username: dev.username || 'admin',
+          password: dev.password || '',
+        },
+        port
+      );
+
+      if (ddm) {
+        const parseNum = (val: any, fallback: number): number => {
+          if (typeof val === 'number') return val;
+          if (!val) return fallback;
+          const m = String(val).match(/-?[\d.]+/);
+          return m ? parseFloat(m[0]) : fallback;
+        };
+
+        const rx = parseNum(ddm['sfp-rx-power'] || ddm.rxPower || ddm['rx-power'], link.measuredRxPowerDbm);
+        const tx = parseNum(ddm['sfp-tx-power'] || ddm.txPower || ddm['tx-power'], link.nominalTxPowerDbm);
+        const temp = parseNum(ddm['sfp-temperature'] || ddm.temperature, 38.0);
+        const volt = parseNum(ddm['sfp-supply-voltage'] || ddm.voltage, 3.3);
+
+        const analysis = calculatePtpOpticalStatus(rx, tx, link.maxLossBudgetDb, link.cableLengthMeters);
+        const updated: PointToPointLink = {
+          ...link,
+          measuredRxPowerDbm: rx,
+          nominalTxPowerDbm: tx,
+          opticalReadingStatus: analysis.status,
+        };
+
+        updatePtpLink(link.id, updated);
+        setPtpActionToast({
+          id: link.id,
+          text: `Polled ${dev.name} [${port}]: Rx ${rx.toFixed(1)} dBm • Tx ${tx.toFixed(1)} dBm • ${temp}°C`,
+          type: 'success',
+        });
+      } else {
+        setPtpActionToast({
+          id: link.id,
+          text: `No DDM response from ${dev.name} on ${port}.`,
+          type: 'error',
+        });
+      }
+    } catch (err: any) {
+      setPtpActionToast({
+        id: link.id,
+        text: `Poll failed: ${err.message || 'Connection error'}`,
+        type: 'error',
+      });
+    } finally {
+      setIsPollingPtp(null);
+      setTimeout(() => setPtpActionToast(null), 5000);
+    }
+  };
 
   // New NAP Box form state
   const [code, setCode] = useState('');
@@ -489,11 +579,340 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
           <MapPin className="w-4 h-4 text-rose-400" />
           <span>📍 Barangay Coverage & Fiber Readiness ({coverageAreas.length} Areas)</span>
         </button>
+
+        <button
+          onClick={() => setViewMode('ptp_trunks')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-bold transition-all ${
+            viewMode === 'ptp_trunks'
+              ? 'bg-indigo-500/25 text-indigo-300 border border-indigo-500/60 shadow-[0_0_15px_rgba(99,102,241,0.35)]'
+              : 'bg-slate-900/60 text-slate-400 border border-slate-800 hover:text-slate-200 hover:bg-slate-800/60'
+          }`}
+        >
+          <Zap className="w-4 h-4 text-amber-400" />
+          <span>⚡ 10G Point-to-Point Trunks ({ptpLinks.length} Circuits)</span>
+        </button>
       </div>
 
       {/* View: Coverage Area & Fiber Readiness Manager */}
       {viewMode === 'coverage_areas' && (
         <CoverageAreaManager />
+      )}
+
+      {/* View: 10G Point-to-Point Trunk Inventory & Telemetry Matrix */}
+      {viewMode === 'ptp_trunks' && (
+        <div className="space-y-5 animate-in fade-in">
+          {/* Executive KPI Cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+            <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800 shadow-sm">
+              <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">Total Circuits</span>
+              <span className="text-xl font-bold font-mono text-indigo-400 mt-1 block">{ptpLinks.length} Trunks</span>
+              <span className="text-[10px] text-slate-500 font-mono">Dedicated DIA Lines</span>
+            </div>
+
+            <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-emerald-900/40 shadow-sm">
+              <span className="text-[10px] uppercase font-bold text-emerald-400 block tracking-wider">Healthy Signal</span>
+              <span className="text-xl font-bold font-mono text-emerald-300 mt-1 block">
+                {ptpLinks.filter((l) => l.opticalReadingStatus === 'optimal' || l.opticalReadingStatus === 'good').length} Links
+              </span>
+              <span className="text-[10px] text-slate-500 font-mono">-3.0 to -12.0 dBm</span>
+            </div>
+
+            <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-amber-900/40 shadow-sm">
+              <span className="text-[10px] uppercase font-bold text-amber-400 block tracking-wider">Marginal Warning</span>
+              <span className="text-xl font-bold font-mono text-amber-300 mt-1 block">
+                {ptpLinks.filter((l) => l.opticalReadingStatus === 'marginal').length} Links
+              </span>
+              <span className="text-[10px] text-slate-500 font-mono">-12.1 to -14.0 dBm</span>
+            </div>
+
+            <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-rose-900/40 shadow-sm">
+              <span className="text-[10px] uppercase font-bold text-rose-400 block tracking-wider">Critical / High Loss</span>
+              <span className="text-xl font-bold font-mono text-rose-400 mt-1 block">
+                {ptpLinks.filter((l) => l.opticalReadingStatus === 'critical').length} Links
+              </span>
+              <span className="text-[10px] text-slate-500 font-mono">&gt; 14.0 dB Loss</span>
+            </div>
+
+            <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800 shadow-sm">
+              <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">Total OSP Span</span>
+              <span className="text-xl font-bold font-mono text-cyan-300 mt-1 block">
+                {(ptpLinks.reduce((acc, l) => acc + (l.cableLengthMeters || 0), 0) / 1000).toFixed(2)} km
+              </span>
+              <span className="text-[10px] text-slate-500 font-mono">Dedicated Route Fiber</span>
+            </div>
+          </div>
+
+          {/* Action & Filter Toolbar */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-slate-900/60 p-3 rounded-2xl border border-slate-800">
+            <div className="relative flex-1 max-w-md">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Search circuits by code, router name, remote POP, or CASURECO pole #..."
+                value={ptpSearchTerm}
+                onChange={(e) => setPtpSearchTerm(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 text-xs focus:outline-none focus:border-indigo-500 font-mono"
+              />
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setViewMode('gis_map')}
+                className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-1.5 transition-all"
+              >
+                <Compass className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Locate on GIS Map</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingPtpLink(null);
+                  setShowPtpModal(true);
+                }}
+                className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-all shadow-md shadow-indigo-600/20"
+              >
+                <Plus className="w-3.5 h-3.5 text-amber-300" />
+                <span>+ Deploy 10G Point-to-Point Trunk</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Global Action Toast if any */}
+          {ptpActionToast && (
+            <div
+              className={`p-3 rounded-xl text-xs flex items-center justify-between border animate-in fade-in ${
+                ptpActionToast.type === 'success'
+                  ? 'bg-emerald-950/70 border-emerald-800/80 text-emerald-300'
+                  : 'bg-rose-950/70 border-rose-800/80 text-rose-300'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <Zap className="w-4 h-4 text-amber-400 shrink-0" />
+                <span className="font-mono">{ptpActionToast.text}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPtpActionToast(null)}
+                className="text-slate-400 hover:text-white px-1 text-xs"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
+          {/* Point-to-Point Circuits Table / List */}
+          {(() => {
+            const filteredLinks = ptpLinks.filter((l) => {
+              if (!ptpSearchTerm.trim()) return true;
+              const term = ptpSearchTerm.toLowerCase();
+              return (
+                l.code.toLowerCase().includes(term) ||
+                l.name.toLowerCase().includes(term) ||
+                l.routerName.toLowerCase().includes(term) ||
+                l.remoteNodeName.toLowerCase().includes(term) ||
+                l.remoteLocation.toLowerCase().includes(term) ||
+                (l.routerPoleNumber && l.routerPoleNumber.toLowerCase().includes(term)) ||
+                (l.remotePoleNumber && l.remotePoleNumber.toLowerCase().includes(term))
+              );
+            });
+
+            if (filteredLinks.length === 0) {
+              return (
+                <div className="p-8 rounded-3xl bg-slate-900/40 border border-slate-800 text-center space-y-3">
+                  <div className="w-12 h-12 rounded-2xl bg-indigo-950/60 border border-indigo-800/50 text-indigo-400 flex items-center justify-center mx-auto">
+                    <Zap className="w-6 h-6 text-amber-400" />
+                  </div>
+                  <h3 className="text-sm font-bold text-slate-200">No 10G Point-to-Point Trunks Found</h3>
+                  <p className="text-xs text-slate-400 max-w-md mx-auto">
+                    {ptpSearchTerm
+                      ? `No circuits match "${ptpSearchTerm}". Try another search term.`
+                      : 'Deploy dedicated high-bandwidth Point-to-Point links attached to your Main DIA Router going to remote towers or aggregation POPs.'}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingPtpLink(null);
+                      setShowPtpModal(true);
+                    }}
+                    className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-all inline-flex items-center gap-1.5"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Deploy First 10G P2P Trunk</span>
+                  </button>
+                </div>
+              );
+            }
+
+            return (
+              <div className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-900/60">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-950/80 text-slate-400 border-b border-slate-800 font-mono text-[11px] uppercase tracking-wider">
+                    <tr>
+                      <th className="p-3.5">Circuit / Link Code</th>
+                      <th className="p-3.5">Endpoint A (Main DIA)</th>
+                      <th className="p-3.5">Endpoint B (Remote)</th>
+                      <th className="p-3.5">Span & Utility Poles</th>
+                      <th className="p-3.5">Live SFP+ Telemetry</th>
+                      <th className="p-3.5 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60">
+                    {filteredLinks.map((link) => {
+                      const optical = calculatePtpOpticalStatus(
+                        link.measuredRxPowerDbm,
+                        link.nominalTxPowerDbm,
+                        link.maxLossBudgetDb,
+                        link.cableLengthMeters
+                      );
+                      const totalLoss = (link.nominalTxPowerDbm - link.measuredRxPowerDbm).toFixed(2);
+                      const headroom = (link.maxLossBudgetDb - (link.nominalTxPowerDbm - link.measuredRxPowerDbm)).toFixed(2);
+
+                      return (
+                        <tr key={link.id} className="hover:bg-slate-800/40 transition-colors">
+                          <td className="p-3.5 align-top">
+                            <div className="flex items-center gap-2">
+                              <span className="px-2 py-0.5 rounded bg-indigo-950 text-indigo-300 font-mono font-bold text-[11px] border border-indigo-800/60">
+                                {link.code}
+                              </span>
+                              <span
+                                className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase font-mono ${
+                                  link.opticalReadingStatus === 'optimal'
+                                    ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                                    : link.opticalReadingStatus === 'good'
+                                    ? 'bg-sky-950 text-sky-300 border border-sky-800'
+                                    : link.opticalReadingStatus === 'marginal'
+                                    ? 'bg-amber-950 text-amber-300 border border-amber-800'
+                                    : 'bg-rose-950 text-rose-300 border border-rose-800 animate-pulse'
+                                }`}
+                              >
+                                {optical.statusLabel}
+                              </span>
+                            </div>
+                            <div className="font-bold text-slate-200 mt-1.5">{link.name}</div>
+                            <div className="text-[11px] text-slate-400 font-mono mt-0.5">
+                              {formatPtpSpeed(link.type)} • {link.fiberType || 'Single Mode 10G-LR'}
+                            </div>
+                          </td>
+
+                          <td className="p-3.5 align-top space-y-1">
+                            <div className="font-bold text-slate-200 flex items-center gap-1.5">
+                              <span>🏢</span>
+                              <span>{link.routerName}</span>
+                            </div>
+                            <div className="text-[11px] text-slate-400 font-mono">
+                              Port: <strong className="text-cyan-300">{link.routerPort}</strong>
+                            </div>
+                            <div className="text-[11px] text-amber-300/90 font-mono">
+                              Pole: <strong>{link.routerPoleNumber || 'NOC Pole'}</strong>
+                            </div>
+                            <div className="text-[10px] text-slate-500 font-mono">
+                              {link.routerLatitude.toFixed(4)}°, {link.routerLongitude.toFixed(4)}°
+                            </div>
+                          </td>
+
+                          <td className="p-3.5 align-top space-y-1">
+                            <div className="font-bold text-slate-200 flex items-center gap-1.5">
+                              <span>📡</span>
+                              <span>{link.remoteNodeName}</span>
+                            </div>
+                            <div className="text-[11px] text-slate-400">
+                              {link.remoteLocation}
+                            </div>
+                            <div className="text-[11px] text-cyan-300 font-mono">
+                              Device: {link.remoteDeviceType || 'Remote SFP+ Gateway'}
+                            </div>
+                            <div className="text-[11px] text-amber-300/90 font-mono">
+                              Pole / Tower: <strong>{link.remotePoleNumber || 'Remote Pole'}</strong>
+                            </div>
+                          </td>
+
+                          <td className="p-3.5 align-top space-y-1 font-mono">
+                            <div className="text-slate-200">
+                              Route: <strong className="text-amber-300">{link.cableLengthMeters ? `${link.cableLengthMeters}m` : '1000m'}</strong>
+                            </div>
+                            <div className="text-[11px] text-slate-400 flex items-center gap-1">
+                              <span>🪵 Poles:</span>
+                              <span className="px-1.5 py-0.2 rounded bg-amber-950/60 text-amber-300 font-bold border border-amber-800/40">
+                                {link.intermediatePoles?.length || 0} Utility Poles
+                              </span>
+                            </div>
+                            <div className="text-[10px] text-slate-500">
+                              Delay: ~{(((link.cableLengthMeters || 1000) / 200000) * 1000).toFixed(2)} µs
+                            </div>
+                          </td>
+
+                          <td className="p-3.5 align-top space-y-1 font-mono">
+                            <div className="flex items-center gap-2">
+                              <span className="text-slate-400">Rx:</span>
+                              <span
+                                className={`font-bold text-xs ${
+                                  link.opticalReadingStatus === 'critical'
+                                    ? 'text-rose-400'
+                                    : link.opticalReadingStatus === 'marginal'
+                                    ? 'text-amber-400'
+                                    : 'text-emerald-400'
+                                }`}
+                              >
+                                {link.measuredRxPowerDbm.toFixed(1)} dBm
+                              </span>
+                              <span className="text-slate-500 text-[10px]">
+                                (Tx {link.nominalTxPowerDbm.toFixed(1)})
+                              </span>
+                            </div>
+
+                            <div className="text-[10px] text-slate-400">
+                              Loss: <strong className="text-indigo-300">{totalLoss} dB</strong> • Headroom: <strong className="text-emerald-400">+{headroom} dB</strong>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => handlePollPtpLink(link)}
+                              disabled={isPollingPtp === link.id}
+                              className="mt-1 text-[10px] text-cyan-400 hover:text-cyan-300 font-mono font-bold flex items-center gap-1 cursor-pointer bg-cyan-950/60 hover:bg-cyan-900/80 border border-cyan-800/60 px-2 py-0.5 rounded-lg transition-all disabled:opacity-50"
+                              title="Poll live DDM from MikroTik Router"
+                            >
+                              <Zap className={`w-3 h-3 ${isPollingPtp === link.id ? 'animate-spin' : 'text-amber-400'}`} />
+                              <span>{isPollingPtp === link.id ? 'Polling...' : 'Live Poll'}</span>
+                            </button>
+                          </td>
+
+                          <td className="p-3.5 align-top text-right space-x-1 whitespace-nowrap">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingPtpLink(link);
+                                setShowPtpModal(true);
+                              }}
+                              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors"
+                              title="Edit 10G Point-to-Point Link"
+                            >
+                              <Edit className="w-3.5 h-3.5" />
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (window.confirm(`Are you sure you want to delete 10G Point-to-Point trunk "${link.name}" (${link.code})?`)) {
+                                  deletePtpLink(link.id);
+                                }
+                              }}
+                              className="p-1.5 rounded-lg bg-rose-950/40 hover:bg-rose-950/80 text-rose-400 hover:text-rose-300 border border-rose-900/40 transition-colors"
+                              title="Delete 10G P2P Link"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            );
+          })()}
+        </div>
       )}
 
       {/* Primary View: Fiber GIS Map */}
@@ -1983,6 +2402,17 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
         }}
         initialCoords={oltModalCoords}
         editingOltId={editingOltId}
+      />
+
+      {/* 10G Point-to-Point Link Configuration Modal */}
+      <PtpLinkModal
+        isOpen={showPtpModal}
+        onClose={() => {
+          setShowPtpModal(false);
+          setEditingPtpLink(null);
+        }}
+        editingLinkId={editingPtpLink?.id}
+        editingLink={editingPtpLink}
       />
     </div>
   );

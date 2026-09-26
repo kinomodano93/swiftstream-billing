@@ -69,10 +69,12 @@ interface RealLeafletMapProps {
   onClearExternalRouteEdit?: () => void;
   activeOtdrBreak: {
     point: { lat: number; lng: number };
-    cable: FiberCable;
+    cable?: FiberCable;
+    ptpLink?: PointToPointLink;
     distance: number;
     affectedNaps: NapBox[];
     affectedCustomers: Customer[];
+    nearestPole?: string;
   } | null;
   mapTileStyle: RealMapTileStyle;
   googleMapsApiKey?: string;
@@ -1638,10 +1640,15 @@ export const RealLeafletMap: React.FC<RealLeafletMapProps> = ({
         `
         <div style="font-size: 12px; color: #0f172a; line-height: 1.4;">
           <h4 style="margin: 0 0 4px; color: #e11d48; font-weight: bold;">🚨 Optical Fiber Break Detected</h4>
-          <p style="margin: 0 0 4px;"><strong>Cable:</strong> ${activeOtdrBreak.cable.name}</p>
-          <p style="margin: 0 0 4px;"><strong>Distance from OLT:</strong> ${activeOtdrBreak.distance} Meters</p>
+          <p style="margin: 0 0 4px;"><strong>Target Trunk:</strong> ${activeOtdrBreak.cable?.name || activeOtdrBreak.ptpLink?.name || 'Fiber Line'}</p>
+          <p style="margin: 0 0 4px;"><strong>Distance from Transmitter:</strong> ${activeOtdrBreak.distance} Meters</p>
+          ${activeOtdrBreak.nearestPole ? `<p style="margin: 0 0 4px; color: #b45309;"><strong>Nearest Pole:</strong> 🪵 ${activeOtdrBreak.nearestPole}</p>` : ''}
           <p style="margin: 0 0 4px;"><strong>Coordinates:</strong> ${lat.toFixed(5)}° N, ${lng.toFixed(5)}° E</p>
-          <p style="margin: 0; color: #e11d48;"><strong>Downstream Impact:</strong> ${activeOtdrBreak.affectedNaps.length} NAP Hubs, ${activeOtdrBreak.affectedCustomers.length} Subscribers</p>
+          <p style="margin: 0; color: #e11d48;"><strong>Downstream Impact:</strong> ${
+            activeOtdrBreak.ptpLink
+              ? `Dedicated 10G Circuit [${activeOtdrBreak.ptpLink.code}] Severed`
+              : `${activeOtdrBreak.affectedNaps.length} NAP Hubs, ${activeOtdrBreak.affectedCustomers.length} Subscribers`
+          }</p>
         </div>
         `
       );
