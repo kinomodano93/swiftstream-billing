@@ -83,7 +83,8 @@ service cloud.firestore {
         isCustomerOwner(customerId) &&
         !request.resource.data.diff(resource.data).affectedKeys().hasAny([
           'balance', 'walletBalance', 'advanceDeposit', 'planId',
-          'planSpeedMbps', 'monthlyFee', 'status', 'billingDay', 'network'
+          'planSpeedMbps', 'monthlyFee', 'status', 'billingDay',
+          'gracePeriodDays', 'installationDate', 'network'
         ])
       );
       allow delete: if isAdmin();

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   X,
   User,
@@ -26,6 +26,7 @@ import {
 import { useApp } from '../../context/AppContext';
 import { Customer, CustomerStatus } from '../../types';
 import { formatCommercialPlanName, isRouterProfileName } from '../../utils/formatters';
+import { calculateAlignedBillingDates } from '../../utils/billingRules';
 import { LAGONOY_BARANGAYS, PRESENTACION_BARANGAYS } from '../network/CoverageAreaManager';
 import {
   fetchPppoeSecrets,
@@ -81,8 +82,42 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
   // Plan & Billing
   const defaultPlan = plans[0];
   const [selectedPlanId, setSelectedPlanId] = useState(customerToEdit?.planId || defaultPlan?.id || '');
-  const [billingDay, setBillingDay] = useState<number>(customerToEdit?.billingDay || 1);
+  const [installationDate, setInstallationDate] = useState<string>(
+    customerToEdit?.installationDate || new Date().toISOString().slice(0, 10)
+  );
+  const [billingDay, setBillingDay] = useState<number>(() => {
+    if (customerToEdit?.billingDay) return customerToEdit.billingDay;
+    if (customerToEdit?.installationDate) {
+      const day = parseInt(customerToEdit.installationDate.split('-')[2], 10);
+      if (!isNaN(day) && day >= 1 && day <= 31) return day;
+    }
+    return new Date().getDate();
+  });
+  const [gracePeriodDays, setGracePeriodDays] = useState<number>(
+    customerToEdit?.gracePeriodDays !== undefined
+      ? customerToEdit.gracePeriodDays
+      : (businessProfile.invoiceGracePeriodDays || 5)
+  );
   const [status, setStatus] = useState<CustomerStatus>(customerToEdit?.status || 'active');
+
+  const handleInstallationDateChange = (dateVal: string) => {
+    setInstallationDate(dateVal);
+    if (dateVal) {
+      const day = parseInt(dateVal.split('-')[2], 10);
+      if (!isNaN(day) && day >= 1 && day <= 31) {
+        setBillingDay(day);
+      }
+    }
+  };
+
+  const billingSchedulePreview = useMemo(() => {
+    return calculateAlignedBillingDates(
+      installationDate,
+      billingDay,
+      gracePeriodDays,
+      new Date(installationDate ? `${installationDate}T00:00:00` : new Date())
+    );
+  }, [installationDate, billingDay, gracePeriodDays]);
 
   // MikroTik Linking & PPPoE Assignment
   const defaultRouter = mikrotikDevices.find((d) => d.role === 'core_pppoe') || mikrotikDevices[0];
@@ -166,7 +201,16 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
       setProvince(customerToEdit.address?.province || businessProfile.address?.province || 'Camarines Sur');
       setLandmark(customerToEdit.address?.landmark || '');
       setSelectedPlanId(customerToEdit.planId || defaultPlan?.id || '');
-      setBillingDay(customerToEdit.billingDay || 1);
+      setInstallationDate(customerToEdit.installationDate || new Date().toISOString().slice(0, 10));
+      setBillingDay(
+        customerToEdit.billingDay ||
+        (customerToEdit.installationDate ? parseInt(customerToEdit.installationDate.split('-')[2], 10) || 1 : 1)
+      );
+      setGracePeriodDays(
+        customerToEdit.gracePeriodDays !== undefined
+          ? customerToEdit.gracePeriodDays
+          : (businessProfile.invoiceGracePeriodDays || 5)
+      );
       setStatus(customerToEdit.status || 'active');
       setSelectedMikrotikId(customerToEdit.network?.mikrotikDeviceId || defaultRouter?.id || '');
       setPppoeUsername(customerToEdit.network?.pppoeUsername || '');
@@ -515,7 +559,9 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
           planName: selectedPlan.name,
           planSpeedMbps: selectedPlan.speedMbps,   // authoritative commercial speed from Internet Plans
           monthlyFee: selectedPlan.monthlyFee,
-          billingDay,
+          billingDay: Number(billingDay) || 1,
+          gracePeriodDays: Number(gracePeriodDays) >= 0 ? Number(gracePeriodDays) : 5,
+          installationDate,
           status,
           network: {
             ...customerToEdit.network,
@@ -578,9 +624,10 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
           planName: selectedPlan.name,
           planSpeedMbps: selectedPlan.speedMbps,   // authoritative commercial speed from Internet Plans
           monthlyFee: selectedPlan.monthlyFee,
-          billingDay,
+          billingDay: Number(billingDay) || 1,
+          gracePeriodDays: Number(gracePeriodDays) >= 0 ? Number(gracePeriodDays) : 5,
           status: 'active',
-          installationDate: new Date().toISOString().slice(0, 10),
+          installationDate: installationDate || new Date().toISOString().slice(0, 10),
           balance: 0,
           advanceDeposit: 0,
           network: networkData,
@@ -865,23 +912,60 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-slate-400 mb-1 font-medium">Monthly Billing Cut-Off Day</label>
-                <select
+                <label className="block text-slate-400 mb-1 font-medium">Client Installation Date *</label>
+                <input
+                  type="date"
+                  required
+                  value={installationDate}
+                  onChange={(e) => handleInstallationDateChange(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-mono focus:outline-none focus:border-cyan-500"
+                />
+                <span className="text-[10px] text-slate-400 mt-1 block">
+                  Billing cycle and due date automatically align to this installation date.
+                </span>
+              </div>
+
+              <div>
+                <label className="block text-slate-400 mb-1 font-medium">Monthly Billing Cut-Off Day (1–31) *</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={31}
+                  required
                   value={billingDay}
-                  onChange={(e) => setBillingDay(Number(e.target.value))}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:border-cyan-500"
-                >
-                  <option value={1}>1st of Month (Due 10th)</option>
-                  <option value={5}>5th of Month (Due 15th)</option>
-                  <option value={10}>10th of Month (Due 20th)</option>
-                  <option value={15}>15th of Month (Due 25th)</option>
-                  <option value={20}>20th of Month (Due 30th)</option>
-                  <option value={25}>25th of Month (Due 5th next mo)</option>
-                </select>
+                  onChange={(e) => {
+                    const val = parseInt(e.target.value, 10);
+                    setBillingDay(isNaN(val) ? 1 : Math.max(1, Math.min(31, val)));
+                  }}
+                  placeholder="e.g. 10"
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-mono focus:outline-none focus:border-cyan-500"
+                />
+                <span className="text-[10px] text-slate-400 mt-1 block">
+                  Day of month cycle cut-off (auto-synced to install date: Day {installationDate ? parseInt(installationDate.split('-')[2], 10) || 10 : 10}).
+                </span>
+              </div>
+
+              <div>
+                <label className="block text-slate-400 mb-1 font-medium">Custom Grace Period (Days)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={60}
+                  value={gracePeriodDays}
+                  onChange={(e) => {
+                    const val = parseInt(e.target.value, 10);
+                    setGracePeriodDays(isNaN(val) ? 0 : Math.max(0, Math.min(60, val)));
+                  }}
+                  placeholder={`e.g. ${businessProfile.invoiceGracePeriodDays || 5}`}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 font-mono focus:outline-none focus:border-cyan-500"
+                />
+                <span className="text-[10px] text-slate-400 mt-1 block">
+                  Allowed grace days after due date before line isolation. Default: {businessProfile.invoiceGracePeriodDays || 5} days.
+                </span>
               </div>
 
               {isEditing && (
-                <div>
+                <div className="sm:col-span-2">
                   <label className="block text-slate-400 mb-1 font-medium">Account Status</label>
                   <select
                     value={status}
@@ -896,6 +980,45 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
                   </select>
                 </div>
               )}
+            </div>
+
+            {/* Live Aligned Billing Cycle & Due Date Preview */}
+            <div className="p-3.5 rounded-2xl bg-cyan-950/30 border border-cyan-800/40 text-xs space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-cyan-300 flex items-center gap-1.5 uppercase tracking-wider text-[11px]">
+                  <Calendar className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>Auto-Aligned Billing Schedule Preview</span>
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 font-mono font-semibold text-[10px] border border-cyan-500/30">
+                  Day {billingSchedulePreview.billingDay} Cycle
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1 text-[11px]">
+                <div className="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800/80">
+                  <span className="text-slate-400 block text-[10px]">1st Billing Period</span>
+                  <span className="font-mono font-bold text-slate-200 block mt-0.5">
+                    {billingSchedulePreview.periodStart} to {billingSchedulePreview.periodEnd}
+                  </span>
+                  <span className="text-[9px] text-slate-500 block mt-0.5">Starts on client install date</span>
+                </div>
+
+                <div className="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800/80">
+                  <span className="text-slate-400 block text-[10px]">Next Due Date</span>
+                  <span className="font-mono font-bold text-emerald-400 block mt-0.5">
+                    {billingSchedulePreview.dueDate}
+                  </span>
+                  <span className="text-[9px] text-slate-500 block mt-0.5">Aligned to Day {billingSchedulePreview.billingDay}</span>
+                </div>
+
+                <div className="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800/80">
+                  <span className="text-slate-400 block text-[10px]">Grace Period Expiry</span>
+                  <span className="font-mono font-bold text-amber-400 block mt-0.5">
+                    {billingSchedulePreview.graceExpiryDate}
+                  </span>
+                  <span className="text-[9px] text-slate-500 block mt-0.5">+{billingSchedulePreview.graceDays} days grace before cutoff</span>
+                </div>
+              </div>
             </div>
           </div>
 

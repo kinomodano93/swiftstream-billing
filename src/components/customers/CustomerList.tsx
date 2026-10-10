@@ -577,8 +577,16 @@ export const CustomerList: React.FC<CustomerListProps> = ({
                         <div className="font-semibold text-slate-200 truncate max-w-[150px]">
                           {formatCommercialPlanName(customer.planName)}
                         </div>
-                        <div className={`${density === 'compact' ? 'text-[10px]' : 'text-[11px]'} font-mono text-cyan-400 mt-0.5`}>
-                          {formatCurrency(customer.monthlyFee)}/mo
+                        <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                          <span className={`${density === 'compact' ? 'text-[10px]' : 'text-[11px]'} font-mono text-cyan-400 font-semibold`}>
+                            {formatCurrency(customer.monthlyFee)}/mo
+                          </span>
+                          <span
+                            className="text-[10px] text-slate-400 font-mono px-1 py-0.2 rounded bg-slate-950/70 border border-slate-800"
+                            title={`Cut-off Day: Every ${customer.billingDay || 10}th of the month • Grace Period: ${customer.gracePeriodDays ?? 5} days`}
+                          >
+                            Cut-off: {customer.billingDay || 10}th
+                          </span>
                         </div>
                       </td>
 

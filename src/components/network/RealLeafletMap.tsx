@@ -491,14 +491,6 @@ export const RealLeafletMap: React.FC<RealLeafletMapProps> = ({
           }
         );
 
-        dropLine.on('click', () => {
-          onSelectAsset({
-            type: 'customer',
-            data: { ...cust, signalDbm: signal, napCode: nap.code },
-          });
-          if (onSelectCustomer) onSelectCustomer(cust.id);
-        });
-
         const dropMeters = calculateHaversineDistance(
           nap.latitude,
           nap.longitude,
@@ -506,6 +498,14 @@ export const RealLeafletMap: React.FC<RealLeafletMapProps> = ({
           custCoords.lng
         );
         const isLongDrop = dropMeters > 150;
+
+        dropLine.on('click', () => {
+          onSelectAsset({
+            type: 'customer',
+            data: { ...cust, signalDbm: signal, napCode: nap.code, dropMeters },
+          });
+          if (onSelectCustomer) onSelectCustomer(cust.id);
+        });
 
         dropLine.bindTooltip(
           `<strong>${cust.fullName}</strong> (${cust.accountNo})<br/>` +
@@ -591,7 +591,7 @@ export const RealLeafletMap: React.FC<RealLeafletMapProps> = ({
           }
           onSelectAsset({
             type: 'customer',
-            data: { ...cust, signalDbm: signal, napCode: nap.code },
+            data: { ...cust, signalDbm: signal, napCode: nap.code, dropMeters },
           });
           if (onSelectCustomer) onSelectCustomer(cust.id);
         });
@@ -601,9 +601,33 @@ export const RealLeafletMap: React.FC<RealLeafletMapProps> = ({
     }
 
     // 3. Real-Time Cascaded Daisy-Chain (Feeder + Inter-NAP Hops) with FBT/PLC Telemetry
-    if (showSpanDistances !== 'none') {
-      const ponColors = ['#06b6d4', '#10b981', '#a855f7', '#f59e0b', '#ec4899', '#3b82f6'];
+    const telemetryByNapId = new Map<string, CascadeHopTelemetry>();
+    const ponColors = ['#06b6d4', '#10b981', '#a855f7', '#f59e0b', '#ec4899', '#3b82f6'];
 
+    effectiveOltNodes.forEach((olt) => {
+      if (typeof olt.latitude !== 'number' || typeof olt.longitude !== 'number') return;
+
+      const linkedNaps = napBoxes.filter(
+        (b) => b.oltId === olt.id || (!b.oltId && olt.id === effectiveOltNodes[0]?.id)
+      );
+
+      const ponGroups = new Map<number, NapBox[]>();
+      linkedNaps.forEach((nap) => {
+        const port = nap.ponPortNumber || 1;
+        if (!ponGroups.has(port)) ponGroups.set(port, []);
+        ponGroups.get(port)!.push(nap);
+      });
+
+      ponGroups.forEach((napsOnPon) => {
+        const chain = buildPonCascadeChain(napsOnPon, olt);
+        const telemetryList = calculateCascadeTelemetry(chain, olt);
+        telemetryList.forEach((hop) => {
+          telemetryByNapId.set(hop.nap.id, hop);
+        });
+      });
+    });
+
+    if (showSpanDistances !== 'none') {
       effectiveOltNodes.forEach((olt) => {
         if (typeof olt.latitude !== 'number' || typeof olt.longitude !== 'number') return;
 
@@ -1145,12 +1169,21 @@ export const RealLeafletMap: React.FC<RealLeafletMapProps> = ({
         const parentOlt = effectiveOltNodes.find(
           (o) => o.id === nap.oltId || (!nap.oltId && o.id === effectiveOltNodes[0]?.id)
         );
+        const hopTelem = telemetryByNapId.get(nap.id);
+        const opticalHealthColor =
+          !hopTelem || hopTelem.healthStatus === 'optimal'
+            ? '#34d399'
+            : hopTelem.healthStatus === 'warning'
+            ? '#fbbf24'
+            : '#fb7185';
 
         marker.bindTooltip(
           `<strong>${nap.code} - ${nap.name}</strong><br/>` +
           `Serving OLT: <span style="color:#c084fc;font-weight:bold;">${parentOlt?.code || 'OLT-01'} (PON Port #${nap.ponPortNumber || 1})</span><br/>` +
           `${nap.location}, Brgy. ${nap.barangay}<br/>` +
           `FBT Splitter: <span style="color:#fbbf24;font-weight:bold;">${nap.fbtRatio || 'Direct'}</span> • PLC: ${nap.splitterType || '1:16'}<br/>` +
+          `${hopTelem ? `Optical Rx Power: <span style="color:${opticalHealthColor};font-weight:bold;">${hopTelem.dropPortRxPowerDbm} dBm</span> <span style="font-size:9.5px;padding:0 4px;border-radius:4px;background:rgba(255,255,255,0.1);font-weight:bold;color:${opticalHealthColor};">${hopTelem.healthLabel}</span><br/>` : ''}` +
+          `${hopTelem && hopTelem.healthStatus === 'critical' ? `<span style="color:#fb7185;font-weight:bold;">⚠️ Critical Low Light (< -25.0 dBm)</span><br/>` : ''}` +
           `${nap.tapSubSplitEnabled ? `50/50 Sub-Split: <span style="color:#c084fc;font-weight:bold;">${nap.branchDirection ? nap.branchDirection.toUpperCase() : 'BRANCH'}</span> (-3.4 dB sub-split)<br/>` : ''}` +
           `${nap.pairedBranchNapId ? `Twin Paired: <span style="color:#38bdf8;font-weight:bold;">${napBoxes.find((b) => b.id === nap.pairedBranchNapId)?.code || nap.pairedBranchNapId}</span> (Combined 32 Ports)<br/>` : ''}` +
           `Active Ports: <span style="color:${occupancyColor};font-weight:bold;">${occupiedCount}/${total}</span> occupied`,

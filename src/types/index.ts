@@ -454,6 +454,7 @@ export interface Customer {
   walletBalance?: number; // Pre-paid advance credits pool
   advanceDeposit: number;
   contractMonths?: number;
+  gracePeriodDays?: number; // Custom grace days applied after due date before line isolation
   network: CustomerNetwork;
   installationDetails?: {
     technician?: string;
@@ -495,6 +496,7 @@ export interface Invoice {
   billingPeriodEnd: string;
   issueDate: string;
   dueDate: string;
+  gracePeriodDays?: number; // Snapshot of grace days allowed for this invoice
   items: InvoiceItem[];
   subtotal: number;
   discount: number;

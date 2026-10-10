@@ -3,8 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" id="dynamic-favicon" />
-    <link rel="apple-touch-icon" href="/favicon.svg" id="dynamic-apple-icon" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" id="dynamic-apple-icon" />
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#0891b2" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="SwiftStream" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>SwiftStream Telecommunications | Fiber Internet & IT Services</title>
     <script>
       (function() {
@@ -34,15 +40,24 @@
     <!-- Leaflet GIS Map CSS & JS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
-    <script type="module" crossorigin src="/assets/index-7WP5w4Xc.js"></script>
-    <link rel="modulepreload" crossorigin href="/assets/vendor-react-8zukAsT7.js">
-    <link rel="modulepreload" crossorigin href="/assets/vendor-pdf-7ECY67nK.js">
+    <script type="module" crossorigin src="/assets/index-DGM6RYGH.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/vendor-react-BsYAH_fu.js">
+    <link rel="modulepreload" crossorigin href="/assets/vendor-pdf-Mtl8PnSq.js">
     <link rel="modulepreload" crossorigin href="/assets/vendor-firebase-BOt4QpU5.js">
-    <link rel="modulepreload" crossorigin href="/assets/vendor-charts-CsBauf-7.js">
-    <link rel="stylesheet" crossorigin href="/assets/index-CpD-57yu.css">
+    <link rel="modulepreload" crossorigin href="/assets/vendor-charts-C5ZBTYOx.js">
+    <link rel="stylesheet" crossorigin href="/assets/index-CeA2glCR.css">
   </head>
   <body class="h-full bg-slate-900 text-slate-100 font-sans antialiased selection:bg-cyan-500 selection:text-white">
     <div id="root" class="h-full"></div>
+    <script>
+      if ('serviceWorker' in navigator && (window.location.protocol === 'https:' || window.location.hostname === 'localhost')) {
+        window.addEventListener('load', function() {
+          navigator.serviceWorker.register('/sw.js').catch(function(err) {
+            console.warn('PWA ServiceWorker registration notice: ', err);
+          });
+        });
+      }
+    </script>
   </body>
 </html>
 

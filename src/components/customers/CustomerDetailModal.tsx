@@ -250,6 +250,8 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
                 <span>{activePlanName} ({formatCurrency(activeMonthlyFee)}/mo)</span>
                 <span>•</span>
                 <span>Day {customer.billingDay} Cycle</span>
+                <span>•</span>
+                <span className="text-emerald-400 font-medium">+{customer.gracePeriodDays !== undefined ? customer.gracePeriodDays : 5}d Grace</span>
               </div>
             </div>
           </div>
@@ -504,6 +506,12 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
                   <div className="flex justify-between py-1">
                     <span className="text-slate-500">Installed Date:</span>
                     <span className="text-slate-300 font-mono">{formatDate(customer.installationDate)}</span>
+                  </div>
+                  <div className="flex justify-between py-1">
+                    <span className="text-slate-500">Grace Period:</span>
+                    <span className="text-emerald-400 font-mono font-medium">
+                      {customer.gracePeriodDays !== undefined ? customer.gracePeriodDays : 5} Days Grace
+                    </span>
                   </div>
                 </div>
               </div>

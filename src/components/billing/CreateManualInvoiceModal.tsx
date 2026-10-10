@@ -215,8 +215,20 @@ export const CreateManualInvoiceModal: React.FC<CreateManualInvoiceModalProps> =
     setIsSubmitting(true);
 
     try {
-      const startDate = `${billingYear}-${billingMonth}-01`;
-      const endDate = `${billingYear}-${billingMonth}-${String(daysInSelectedMonth).padStart(2, '0')}`;
+      const cycleDay = selectedCustomer.billingDay || 10;
+      const targetDueMonth = parseInt(billingMonth, 10);
+      const targetDueYear = parseInt(billingYear, 10);
+
+      // Aligned billing period start: 1 month prior to cut-off day
+      const startMonthDate = new Date(targetDueYear, targetDueMonth - 2, 1);
+      const maxDaysInStartMonth = new Date(startMonthDate.getFullYear(), startMonthDate.getMonth() + 1, 0).getDate();
+      const clampedStartDay = Math.min(cycleDay, maxDaysInStartMonth);
+      const startDate = `${startMonthDate.getFullYear()}-${String(startMonthDate.getMonth() + 1).padStart(2, '0')}-${String(clampedStartDay).padStart(2, '0')}`;
+
+      // Aligned billing period end: 1 day prior to due date
+      const endMonthDate = new Date(targetDueYear, targetDueMonth - 1, Math.min(cycleDay, daysInSelectedMonth) - 1);
+      const endDate = `${endMonthDate.getFullYear()}-${String(endMonthDate.getMonth() + 1).padStart(2, '0')}-${String(endMonthDate.getDate()).padStart(2, '0')}`;
+
       const invoiceNumber = `INV-${billingYear.slice(2)}${billingMonth}-${String(Date.now()).slice(-4)}`;
 
       const items: InvoiceItem[] = [];
@@ -281,11 +293,12 @@ export const CreateManualInvoiceModal: React.FC<CreateManualInvoiceModalProps> =
         planName: authoritativePlan.name,
         planSpeedMbps: authoritativePlan.speedMbps,
         monthlyFee: authoritativePlan.monthlyFee,
-        billingDay: selectedCustomer.billingDay || 15,
+        billingDay: selectedCustomer.billingDay || 10,
         billingPeriodStart: startDate,
         billingPeriodEnd: endDate,
         issueDate: todayStr,
         dueDate: computedDueDate,
+        gracePeriodDays: selectedCustomer.gracePeriodDays ?? 5,
         items,
         subtotal,
         discount: 0,

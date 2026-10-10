@@ -14,6 +14,9 @@
   "firestore": {
     "rules": "firestore.rules"
   },
+  "storage": {
+    "rules": "storage.rules"
+  },
   "hosting": {
     "public": "dist",
     "ignore": [
@@ -37,6 +40,15 @@
           {
             "key": "Cache-Control",
             "value": "max-age=31536000, immutable"
+          }
+        ]
+      },
+      {
+        "source": "/sw.js",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache, no-store, must-revalidate"
           }
         ]
       }
@@ -92,6 +104,13 @@
         }
       },
       {
+        "source": "/api/mikrotikSecrets",
+        "function": {
+          "functionId": "getPppoeSecrets",
+          "region": "asia-southeast1"
+        }
+      },
+      {
         "source": "/api/getPppoeProfiles",
         "function": {
           "functionId": "getPppoeProfiles",
@@ -106,6 +125,111 @@
         }
       },
       {
+        "source": "/api/mikrotikActiveSessions",
+        "function": {
+          "functionId": "getPppoeActive",
+          "region": "asia-southeast1"
+        }
+      },
+      {
+        "source": "/api/getMikrotikInterfaces",
+        "function": {
+          "functionId": "getMikrotikInterfaces",
+          "region": "asia-southeast1"
+        }
+      },
+      {
+        "source": "/api/mikrotikInterfaces",
+        "function": {
+          "functionId": "getMikrotikInterfaces",
+          "region": "asia-southeast1"
+        }
+      },
+      {
+        "source": "/api/getInterfaces",
+        "function": {
+          "functionId": "getMikrotikInterfaces",
+          "region": "asia-southeast1"
+        }
+      },
+      {
+        "source": "/api/getInterfaceTraffic",
+        "function": {
+          "functionId": "getInterfaceTraffic",
+          "region": "asia-southeast1"
+        }
+      },
+      {
+        "source": "/api/mikrotikPing",
+        "function": {
+          "functionId": "mikrotikPing",
+          "region": "asia-southeast1"
+        }
+      },
+      {
+        "source": "/api/getSfpDiagnostics",
+        "function": {
+          "functionId": "getSfpDiagnostics",
+          "region": "asia-southeast1"
+        }
+      },
+      {
+        "source": "/api/getQueueList",
+        "function": {
+          "functionId": "getQueueList",
+          "region": "asia-southeast1"
+        }
+      },
+      {
+        "source": "/api/getIpPools",
+        "function": {
+          "functionId": "getIpPools",
+          "region": "asia-southeast1"
+        }
+      },
+      {
+        "source": "/api/mikrotikCli",
+        "function": {
+          "functionId": "mikrotikCli",
+          "region": "asia-southeast1"
+        }
+      },
+      {
+        "source": "/api/xendit/create-invoice",
+        "function": {
+          "functionId": "xenditCreateInvoice",
+          "region": "asia-southeast1"
+        }
+      },
+      {
+        "source": "/api/xendit/invoice-status",
+        "function": {
+          "functionId": "xenditInvoiceStatus",
+          "region": "asia-southeast1"
+        }
+      },
+      {
+        "source": "/api/xendit/test-connection",
+        "function": {
+          "functionId": "xenditTestConnection",
+          "region": "asia-southeast1"
+        }
+      },
+      {
+        "source": "/api/xendit/webhook",
+        "function": {
+          "functionId": "xenditWebhook",
+          "region": "asia-southeast1"
+        }
+      },
+      {
+        "source": "/api/webhooks/xendit",
+        "function": {
+          "functionId": "xenditWebhook",
+          "region": "asia-southeast1"
+        }
+      },
+      {
         "source": "/api/deleteUserAccount",
         "function": {
           "functionId": "deleteUserAccount",
@@ -116,6 +240,13 @@
         "source": "/api/triggerGraceAudit",
         "function": {
           "functionId": "triggerGraceAudit",
+          "region": "asia-southeast1"
+        }
+      },
+      {
+        "source": "/api/triggerMonthlyBilling",
+        "function": {
+          "functionId": "triggerMonthlyBilling",
           "region": "asia-southeast1"
         }
       },

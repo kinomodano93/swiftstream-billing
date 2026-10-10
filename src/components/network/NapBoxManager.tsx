@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Network,
   Plus,
@@ -22,6 +22,7 @@ import {
   Split,
   ArrowLeftRight,
   Search,
+  Filter,
   Gauge,
   Edit,
 } from 'lucide-react';
@@ -78,22 +79,62 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
   const [showOltModal, setShowOltModal] = useState<boolean>(false);
   const [editingOltId, setEditingOltId] = useState<string | null>(null);
 
+  // Hardware Matrix Search & Filters
+  const [matrixSearchQuery, setMatrixSearchQuery] = useState<string>('');
+  const [matrixBarangayFilter, setMatrixBarangayFilter] = useState<string>('all');
+  const [matrixPonFilter, setMatrixPonFilter] = useState<string>('all');
+  const [portStatusFilter, setPortStatusFilter] = useState<'all' | 'available' | 'occupied' | 'other'>('all');
+
   const handleDeleteBox = (box: NapBox) => {
     const connectedSubs = customers.filter(
       (c) => c.network?.napBoxId === box.id || box.ports.some((p) => p.customerId === c.id)
     );
 
-    const confirmMsg = connectedSubs.length > 0
+    const pairedTwin = box.pairedBranchNapId
+      ? napBoxes.find((b) => b.id === box.pairedBranchNapId)
+      : napBoxes.find((b) => b.id !== box.id && b.pairedBranchNapId === box.id);
+
+    let confirmMsg = connectedSubs.length > 0
       ? `WARNING: NAP Box "${box.code} - ${box.name}" currently has ${connectedSubs.length} subscriber(s) assigned to its ports.\n\nDeleting this NAP box will remove its port assignments and unbind it from outside plant maps.\n\nAre you sure you want to permanently delete this NAP box?`
       : `Are you sure you want to permanently delete NAP Box "${box.code} - ${box.name}" (${box.location}, Brgy. ${box.barangay})?`;
 
+    if (pairedTwin) {
+      confirmMsg += `\n\n⚠️ NOTE: This box is part of a 50/50 Sub-Split Twin pair with "${pairedTwin.code} - ${pairedTwin.name}". Deleting it will unlink "${pairedTwin.code}" and return it to a single branch tap.`;
+    }
+
     if (window.confirm(confirmMsg)) {
+      if (pairedTwin) {
+        updateNapBox(pairedTwin.id, {
+          pairedBranchNapId: undefined,
+          tapSubSplitEnabled: false,
+        });
+      }
       deleteNapBox(box.id);
       if (selectedBoxId === box.id) {
         const remaining = napBoxes.filter((b) => b.id !== box.id);
         setSelectedBoxId(remaining[0]?.id || '');
       }
     }
+  };
+
+  const handleUpdatePortStatus = (boxId: string, portNumber: number, newStatus: 'available' | 'reserved' | 'damaged') => {
+    const targetBox = napBoxes.find((b) => b.id === boxId);
+    if (!targetBox) return;
+
+    const updatedPorts = targetBox.ports.map((p) => {
+      if (p.portNumber === portNumber) {
+        return {
+          ...p,
+          status: newStatus,
+          customerId: newStatus === 'available' ? undefined : p.customerId,
+          customerName: newStatus === 'available' ? undefined : p.customerName,
+          accountNo: newStatus === 'available' ? undefined : p.accountNo,
+        };
+      }
+      return p;
+    });
+
+    updateNapBox(boxId, { ports: updatedPorts });
   };
   const [oltModalCoords, setOltModalCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [interNapTargetId, setInterNapTargetId] = useState<string>('');
@@ -203,6 +244,42 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
   const [notes, setNotes] = useState('');
 
   const activeBox = napBoxes.find((b) => b.id === selectedBoxId) || napBoxes[0];
+
+  const matrixBarangays = useMemo(() => {
+    return Array.from(new Set(napBoxes.map((b) => b.barangay).filter(Boolean))).sort();
+  }, [napBoxes]);
+
+  const matrixPonPorts = useMemo(() => {
+    return Array.from(new Set(napBoxes.map((b) => b.ponPortNumber || 1))).sort((a, b) => a - b);
+  }, [napBoxes]);
+
+  const filteredMatrixBoxes = useMemo(() => {
+    return napBoxes.filter((box) => {
+      if (matrixSearchQuery.trim()) {
+        const q = matrixSearchQuery.trim().toLowerCase();
+        const matchCode = (box.code || '').toLowerCase().includes(q);
+        const matchName = (box.name || '').toLowerCase().includes(q);
+        const matchLoc = (box.location || '').toLowerCase().includes(q);
+        const matchBrgy = (box.barangay || '').toLowerCase().includes(q);
+        if (!matchCode && !matchName && !matchLoc && !matchBrgy) return false;
+      }
+      if (matrixBarangayFilter !== 'all' && box.barangay !== matrixBarangayFilter) {
+        return false;
+      }
+      if (matrixPonFilter !== 'all' && String(box.ponPortNumber || 1) !== matrixPonFilter) {
+        return false;
+      }
+      return true;
+    });
+  }, [napBoxes, matrixSearchQuery, matrixBarangayFilter, matrixPonFilter]);
+
+  const filteredPorts = useMemo(() => {
+    if (!activeBox?.ports) return [];
+    if (portStatusFilter === 'all') return activeBox.ports;
+    if (portStatusFilter === 'available') return activeBox.ports.filter((p) => p.status === 'available');
+    if (portStatusFilter === 'occupied') return activeBox.ports.filter((p) => p.customerId || p.status === 'occupied');
+    return activeBox.ports.filter((p) => p.status === 'reserved' || p.status === 'damaged');
+  }, [activeBox?.ports, portStatusFilter]);
 
   const handleBarangayChange = (selected: string) => {
     if (selected === '__custom__') {
@@ -933,9 +1010,77 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
       {/* Secondary View: Hardware Matrix & Port Allocator */}
       {viewMode === 'hardware_matrix' && (
         <>
+          {/* Hardware Matrix Filter Bar */}
+          <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs shadow-card">
+            <div className="flex flex-wrap items-center gap-2.5 flex-1 min-w-[280px]">
+              <div className="relative flex-1 min-w-[180px]">
+                <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={matrixSearchQuery}
+                  onChange={(e) => setMatrixSearchQuery(e.target.value)}
+                  placeholder="Search NAP by code, name, pole location..."
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-8 pr-3 py-1.5 text-slate-200 placeholder-slate-500 text-xs focus:outline-none focus:border-cyan-500 transition-colors"
+                />
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <Filter className="w-3.5 h-3.5 text-slate-500" />
+                <select
+                  value={matrixBarangayFilter}
+                  onChange={(e) => setMatrixBarangayFilter(e.target.value)}
+                  className="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 text-slate-300 text-xs focus:outline-none focus:border-cyan-500"
+                >
+                  <option value="all">All Barangays</option>
+                  {matrixBarangays.map((b) => (
+                    <option key={`brgy-${b}`} value={b}>
+                      Brgy. {b}
+                    </option>
+                  ))}
+                </select>
+
+                <select
+                  value={matrixPonFilter}
+                  onChange={(e) => setMatrixPonFilter(e.target.value)}
+                  className="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 text-slate-300 text-xs focus:outline-none focus:border-cyan-500 font-mono"
+                >
+                  <option value="all">All PON Ports</option>
+                  {matrixPonPorts.map((p) => (
+                    <option key={`pon-${p}`} value={String(p)}>
+                      PON #{p}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 text-slate-400 font-medium text-[11px]">
+              <span>Showing <strong className="text-cyan-400 font-mono">{filteredMatrixBoxes.length}</strong> of {napBoxes.length} NAPs</span>
+              {(matrixSearchQuery || matrixBarangayFilter !== 'all' || matrixPonFilter !== 'all') && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMatrixSearchQuery('');
+                    setMatrixBarangayFilter('all');
+                    setMatrixPonFilter('all');
+                  }}
+                  className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
+                >
+                  Clear Filters
+                </button>
+              )}
+            </div>
+          </div>
+
+          {filteredMatrixBoxes.length === 0 && (
+            <div className="p-8 text-center bg-slate-900/40 rounded-2xl border border-slate-800/80 text-slate-400 text-xs">
+              No NAP boxes matched the search or filter criteria.
+            </div>
+          )}
+
           {/* NAP Box Selector Cards */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {napBoxes.map((box) => {
+            {filteredMatrixBoxes.map((box) => {
               const isSelected = box.id === activeBox?.id;
               const occupiedCount = box.ports.filter((p) => p.status === 'occupied').length;
               const pct = Math.round((occupiedCount / box.totalPorts) * 100);
@@ -1479,56 +1624,149 @@ export const NapBoxManager: React.FC<NapBoxManagerProps> = ({ onSelectCustomer }
 
           {/* Visual Interactive Port Grid */}
           <div>
-            <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider mb-3">
-              Fiber Port Matrix ({activeBox.totalPorts} Ports)
-            </h4>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-              {activeBox.ports.map((port) => {
-                const styles = getPortStatusStyles(port.status);
-                const assignedCustomer = port.customerId
-                  ? customers.find((c) => c.id === port.customerId)
-                  : undefined;
-
-                return (
-                  <div
-                    key={port.portNumber}
-                    className={`p-4 rounded-2xl border ${styles.bg} transition-all space-y-2 relative overflow-hidden`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="font-mono font-black text-sm">Port #{port.portNumber}</span>
-                      <span className="flex items-center gap-1 text-[10px] font-semibold">
-                        <span className={`w-2 h-2 rounded-full ${styles.dot}`} />
-                        <span className="capitalize">{port.status}</span>
-                      </span>
-                    </div>
-
-                    {port.customerId ? (
-                      <div className="text-xs space-y-1 pt-1 border-t border-slate-800/80">
-                        <button
-                          onClick={() => onSelectCustomer(port.customerId!)}
-                          className="font-bold text-slate-100 hover:text-cyan-400 transition-colors text-left block truncate w-full"
-                        >
-                          {port.customerName || assignedCustomer?.fullName}
-                        </button>
-                        <div className="flex items-center justify-between text-[11px] text-slate-400">
-                          <span className="font-mono text-[10px]">{port.accountNo || assignedCustomer?.accountNo}</span>
-                          {port.signalDbm && (
-                            <span className="font-mono font-semibold text-emerald-400 text-[10px]">
-                              {port.signalDbm} dBm
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="text-xs text-slate-500 py-2">
-                        {port.status === 'damaged' ? 'Fiber core fault / repair needed' : 'Ready for new drop cable connection'}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
+              <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                Fiber Port Matrix ({activeBox.totalPorts} Ports)
+              </h4>
+              <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 text-[11px] overflow-x-auto">
+                <button
+                  type="button"
+                  onClick={() => setPortStatusFilter('all')}
+                  className={`px-2.5 py-1 rounded-lg font-medium transition-all ${
+                    portStatusFilter === 'all' ? 'bg-cyan-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  All ({activeBox.ports.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPortStatusFilter('available')}
+                  className={`px-2.5 py-1 rounded-lg font-medium transition-all ${
+                    portStatusFilter === 'available' ? 'bg-cyan-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  Available ({activeBox.ports.filter((p) => p.status === 'available').length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPortStatusFilter('occupied')}
+                  className={`px-2.5 py-1 rounded-lg font-medium transition-all ${
+                    portStatusFilter === 'occupied' ? 'bg-cyan-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  Occupied ({activeBox.ports.filter((p) => p.status === 'occupied').length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPortStatusFilter('other')}
+                  className={`px-2.5 py-1 rounded-lg font-medium transition-all ${
+                    portStatusFilter === 'other' ? 'bg-cyan-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  Reserved / Faulty ({activeBox.ports.filter((p) => p.status === 'reserved' || p.status === 'damaged').length})
+                </button>
+              </div>
             </div>
+
+            {filteredPorts.length === 0 ? (
+              <div className="p-8 text-center bg-slate-950/40 rounded-2xl border border-slate-800/80 text-slate-500 text-xs">
+                No ports matched the selected filter.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                {filteredPorts.map((port) => {
+                  const styles = getPortStatusStyles(port.status);
+                  const assignedCustomer = port.customerId
+                    ? customers.find((c) => c.id === port.customerId)
+                    : undefined;
+
+                  return (
+                    <div
+                      key={port.portNumber}
+                      className={`p-4 rounded-2xl border ${styles.bg} transition-all space-y-2 relative overflow-hidden`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-mono font-black text-sm">Port #{port.portNumber}</span>
+                        <span className="flex items-center gap-1 text-[10px] font-semibold">
+                          <span className={`w-2 h-2 rounded-full ${styles.dot}`} />
+                          <span className="capitalize">{port.status}</span>
+                        </span>
+                      </div>
+
+                      {port.customerId ? (
+                        <div className="text-xs space-y-1 pt-1 border-t border-slate-800/80">
+                          <button
+                            onClick={() => onSelectCustomer(port.customerId!)}
+                            className="font-bold text-slate-100 hover:text-cyan-400 transition-colors text-left block truncate w-full"
+                          >
+                            {port.customerName || assignedCustomer?.fullName}
+                          </button>
+                          <div className="flex items-center justify-between text-[11px] text-slate-400">
+                            <span className="font-mono text-[10px]">{port.accountNo || assignedCustomer?.accountNo}</span>
+                            {port.signalDbm && (
+                              <span className="font-mono font-semibold text-emerald-400 text-[10px]">
+                                {port.signalDbm} dBm
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <div className="text-xs text-slate-500 py-1">
+                            {port.status === 'damaged'
+                              ? 'Fiber core fault / repair needed'
+                              : port.status === 'reserved'
+                              ? 'Reserved for upcoming install'
+                              : 'Ready for new drop cable connection'}
+                          </div>
+
+                          {/* Quick Port Status Actions */}
+                          <div className="pt-2 border-t border-slate-800/60 flex items-center gap-1 text-[10px]">
+                            <span className="text-slate-500 mr-1">Mark:</span>
+                            <button
+                              type="button"
+                              onClick={() => handleUpdatePortStatus(activeBox.id, port.portNumber, 'available')}
+                              className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-all ${
+                                port.status === 'available'
+                                  ? 'bg-slate-700 text-slate-200 font-bold border border-slate-600'
+                                  : 'bg-slate-950/80 hover:bg-slate-800 text-slate-400 hover:text-slate-300'
+                              }`}
+                              title="Mark Port as Available"
+                            >
+                              Open
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleUpdatePortStatus(activeBox.id, port.portNumber, 'reserved')}
+                              className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-all ${
+                                port.status === 'reserved'
+                                  ? 'bg-amber-950 text-amber-300 font-bold border border-amber-700'
+                                  : 'bg-slate-950/80 hover:bg-slate-800 text-slate-400 hover:text-amber-300'
+                              }`}
+                              title="Mark Port as Reserved"
+                            >
+                              Reserved
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleUpdatePortStatus(activeBox.id, port.portNumber, 'damaged')}
+                              className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-all ${
+                                port.status === 'damaged'
+                                  ? 'bg-rose-950 text-rose-300 font-bold border border-rose-700'
+                                  : 'bg-slate-950/80 hover:bg-slate-800 text-slate-400 hover:text-rose-300'
+                              }`}
+                              title="Mark Port as Damaged / Broken Core"
+                            >
+                              Damaged
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {activeBox.notes && (

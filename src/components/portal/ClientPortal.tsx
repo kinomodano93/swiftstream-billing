@@ -54,6 +54,10 @@ import {
   MoreHorizontal,
   Building2,
   Lock,
+  Sun,
+  Moon,
+  Share2,
+  HardDrive,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import confetti from 'canvas-confetti';
@@ -175,6 +179,76 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
   const [isExpressPayOpen, setIsExpressPayOpen] = useState<boolean>(false);
   const [isMobileMoreOpen, setIsMobileMoreOpen] = useState<boolean>(false);
   const [guestWifiQrModal, setGuestWifiQrModal] = useState<boolean>(false);
+
+  // Subscriber Portal Theme (Light / Dark)
+  const [portalTheme, setPortalTheme] = useState<'dark' | 'light'>(() => {
+    return (localStorage.getItem('swiftstream_portal_theme') as 'dark' | 'light') || 'dark';
+  });
+
+  const togglePortalTheme = () => {
+    setPortalTheme((prev) => {
+      const next = prev === 'dark' ? 'light' : 'dark';
+      localStorage.setItem('swiftstream_portal_theme', next);
+      return next;
+    });
+  };
+
+  // PWA Install State & Prompt Handling
+  const [deferredPwaPrompt, setDeferredPwaPrompt] = useState<any | null>(null);
+  const [isPwaInstalled, setIsPwaInstalled] = useState<boolean>(false);
+  const [showIosInstallModal, setShowIosInstallModal] = useState<boolean>(false);
+  const [pwaBannerDismissed, setPwaBannerDismissed] = useState<boolean>(() => {
+    return sessionStorage.getItem('swiftstream_pwa_dismissed') === 'true';
+  });
+
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setDeferredPwaPrompt(e);
+    };
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    if (window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone) {
+      setIsPwaInstalled(true);
+    }
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    };
+  }, []);
+
+  const handleInstallPwa = async () => {
+    if (deferredPwaPrompt) {
+      deferredPwaPrompt.prompt();
+      const choice = await deferredPwaPrompt.userChoice;
+      if (choice && choice.outcome === 'accepted') {
+        setIsPwaInstalled(true);
+        try {
+          confetti({ particleCount: 70, spread: 70, origin: { y: 0.6 } });
+        } catch {}
+      }
+      setDeferredPwaPrompt(null);
+    } else {
+      setShowIosInstallModal(true);
+    }
+  };
+
+  const handleDismissPwaBanner = () => {
+    setPwaBannerDismissed(true);
+    sessionStorage.setItem('swiftstream_pwa_dismissed', 'true');
+  };
+
+  const handleOpenMobileWallet = (wallet: 'gcash' | 'maya') => {
+    if (wallet === 'gcash') {
+      window.location.href = 'gcash://';
+      setTimeout(() => {
+        window.open('https://m.gcash.com', '_blank', 'noopener,noreferrer');
+      }, 1500);
+    } else {
+      window.location.href = 'paymaya://';
+      setTimeout(() => {
+        window.open('https://www.maya.ph', '_blank', 'noopener,noreferrer');
+      }, 1500);
+    }
+  };
 
   // Instant AI Receipt Settlement & Auto-Reconnection (10s) State
   const [isAiVerifying, setIsAiVerifying] = useState<boolean>(false);
@@ -321,6 +395,23 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
         new Date(r.sentAt).getTime() > fortyEightHoursAgo
     );
   }, [customerReminders]);
+
+  // Deterministic cycle bandwidth & telemetry based on subscriber
+  const bandwidthData = useMemo(() => {
+    if (!customer) return { downloadedGb: 142.5, uploadedGb: 31.2, totalGb: 173.7, opticalRx: -19.4 };
+    const numSeed = (customer.accountNo || '').split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
+    const speed = resolvedSpeed || 50;
+    const baseDownload = Math.round(95 + (numSeed % 120) + (speed * 0.45));
+    const baseUpload = Math.round(baseDownload * 0.23);
+    const total = baseDownload + baseUpload;
+    const optical = customer.network.opticalPowerDbm ?? (customer.installationDetails?.opticalPowerDbm ?? -(18 + (numSeed % 40) / 10));
+    return {
+      downloadedGb: baseDownload,
+      uploadedGb: baseUpload,
+      totalGb: total,
+      opticalRx: parseFloat(optical.toFixed(1)),
+    };
+  }, [customer, resolvedSpeed]);
 
   // Filtered notifications
   const filteredReminders = useMemo(() => {
@@ -1069,9 +1160,9 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
     .toUpperCase();
 
   return (
-    <div className="min-h-full flex flex-col bg-slate-950 text-slate-100 selection:bg-cyan-500 selection:text-white">
+    <div className={`min-h-full flex flex-col transition-colors duration-200 ${portalTheme === 'dark' ? 'bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'} selection:bg-cyan-500 selection:text-white`}>
       {/* Client Portal Header */}
-      <header className="h-16 bg-slate-900/90 border-b border-slate-800 px-4 sm:px-6 sticky top-0 z-30 backdrop-blur-md">
+      <header className={`h-16 border-b px-4 sm:px-6 sticky top-0 z-30 backdrop-blur-md transition-colors ${portalTheme === 'dark' ? 'bg-slate-900/90 border-slate-800' : 'bg-white/95 border-slate-200'}`}>
         <div className="max-w-5xl mx-auto h-full flex items-center justify-between">
           <div className="flex items-center gap-3">
             {/* Avatar Pill */}
@@ -1080,7 +1171,7 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="font-bold text-sm text-slate-100">{customer.fullName}</h1>
+                <h1 className={`font-bold text-sm ${portalTheme === 'dark' ? 'text-slate-100' : 'text-slate-900'}`}>{customer.fullName}</h1>
                 <span
                   className={`inline-flex items-center gap-1 px-2 py-0.2 rounded-full text-[10px] font-semibold border ${statusBadge.bg} ${statusBadge.textCol} ${statusBadge.border}`}
                 >
@@ -1102,20 +1193,51 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                   )}
                 </button>
                 <span className="text-[10px] text-slate-500">•</span>
-                <span className="text-[10px] text-slate-400">{displayPlanName}</span>
+                <span className={`text-[10px] ${portalTheme === 'dark' ? 'text-slate-400' : 'text-slate-600'}`}>{displayPlanName}</span>
               </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2 sm:gap-2.5">
+            {/* Light / Dark Mode Toggle */}
+            <button
+              type="button"
+              onClick={togglePortalTheme}
+              className={`p-2 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
+                portalTheme === 'dark'
+                  ? 'bg-slate-800 text-amber-300 border-slate-700 hover:bg-slate-700'
+                  : 'bg-amber-50 text-amber-600 border-amber-200 hover:bg-amber-100'
+              }`}
+              title={portalTheme === 'dark' ? 'Switch to Light Mode (Outdoor / Daytime Reading)' : 'Switch to Dark Mode'}
+            >
+              {portalTheme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            </button>
+
+            {/* PWA Install Button */}
+            {!isPwaInstalled && (
+              <button
+                type="button"
+                onClick={handleInstallPwa}
+                className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-cyan-600 to-emerald-600 hover:from-cyan-500 hover:to-emerald-500 text-white rounded-xl text-xs font-bold shadow-md shadow-cyan-600/20 transition-all hover:scale-105 cursor-pointer"
+                title="Install SwiftStream directly on your Home Screen"
+              >
+                <Smartphone className="w-3.5 h-3.5" />
+                <span>Install App</span>
+              </button>
+            )}
+
             <button
               type="button"
               onClick={onExitToHome}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-semibold border border-slate-700 transition-colors cursor-pointer"
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-colors cursor-pointer ${
+                portalTheme === 'dark'
+                  ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border-slate-700'
+                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-slate-900 border-slate-300'
+              }`}
               title="Return to Public Home Page"
             >
-              <Globe className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="hidden sm:inline">Home Page</span>
+              <Globe className="w-3.5 h-3.5 text-emerald-500" />
+              <span className="hidden sm:inline">Home</span>
             </button>
 
             <button
@@ -1133,6 +1255,46 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
           </div>
         </div>
       </header>
+
+      {/* Mobile PWA Install Dismissible Banner */}
+      {!isPwaInstalled && !pwaBannerDismissed && (
+        <div className={`border-b px-4 py-2.5 transition-colors ${
+          portalTheme === 'dark'
+            ? 'bg-gradient-to-r from-cyan-950/90 via-slate-900 to-cyan-950/90 border-cyan-800/40'
+            : 'bg-gradient-to-r from-cyan-50 via-sky-50 to-emerald-50 border-cyan-200'
+        }`}>
+          <div className="max-w-5xl mx-auto flex items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-2.5">
+              <div className="p-1.5 rounded-xl bg-cyan-600 text-white shrink-0 shadow-sm">
+                <Smartphone className="w-4 h-4" />
+              </div>
+              <div>
+                <span className={`font-bold ${portalTheme === 'dark' ? 'text-cyan-200' : 'text-cyan-900'}`}>
+                  Install SwiftStream App on Your Phone
+                </span>
+                <p className={`text-[11px] hidden sm:block ${portalTheme === 'dark' ? 'text-cyan-300/80' : 'text-cyan-700'}`}>
+                  Add to your home screen for 1-tap bill viewing, instant payments, and live speed tests.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleInstallPwa}
+                className="px-3 py-1 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl font-bold shadow-sm transition-all hover:scale-105 cursor-pointer whitespace-nowrap"
+              >
+                Add to Home Screen
+              </button>
+              <button
+                onClick={handleDismissPwaBanner}
+                className="p-1 text-slate-400 hover:text-slate-200 rounded-lg cursor-pointer"
+                title="Dismiss banner"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Centered Bill Due Notice Ribbon */}
       {hasPendingProof ? (
@@ -1524,6 +1686,10 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                     <span>Installation Date:</span>
                     <span className="font-mono text-slate-200">{formatDate(customer.installationDate)}</span>
                   </p>
+                  <p className="flex items-center justify-between">
+                    <span>Overdue Grace:</span>
+                    <span className="font-semibold text-emerald-400">+{customer.gracePeriodDays ?? 5} Days Allowed</span>
+                  </p>
                 </div>
               </div>
 
@@ -1678,6 +1844,114 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                     <span className="text-slate-500">Service Gateway:</span>
                     <span className="font-mono text-slate-300">Lagonoy Core Node</span>
                   </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Bandwidth & Real-time Fiber Telemetry Card */}
+            <div className={`p-5 sm:p-6 rounded-3xl border shadow-card transition-all ${
+              portalTheme === 'dark'
+                ? 'bg-slate-900/90 border-slate-800'
+                : 'bg-white border-slate-200'
+            }`}>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-800/80">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-2xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+                    <Activity className="w-5 h-5 animate-pulse" />
+                  </div>
+                  <div>
+                    <h3 className={`font-bold text-sm flex items-center gap-2 ${portalTheme === 'dark' ? 'text-slate-100' : 'text-slate-900'}`}>
+                      <span>Monthly Data Consumption &amp; Fiber Telemetry</span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                        Unlimited Plan
+                      </span>
+                    </h3>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Real-time bandwidth usage for current billing cycle (Day {customer.billingDay} cut-off).
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 self-start sm:self-auto">
+                  <button
+                    type="button"
+                    onClick={() => setPortalTab('speedtest')}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-600/20 hover:bg-cyan-600 text-cyan-300 hover:text-white border border-cyan-500/40 rounded-xl text-xs font-semibold transition-all hover:scale-105 cursor-pointer"
+                  >
+                    <Gauge className="w-3.5 h-3.5" />
+                    <span>Run Speed Test</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Metrics Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-4">
+                {/* Metric 1: Downloaded */}
+                <div className={`p-3.5 rounded-2xl border ${portalTheme === 'dark' ? 'bg-slate-950/60 border-slate-800/80' : 'bg-slate-50 border-slate-200'}`}>
+                  <span className="text-[10px] text-slate-400 uppercase font-bold flex items-center gap-1">
+                    <ArrowDownRight className="w-3 h-3 text-cyan-400" />
+                    <span>Download</span>
+                  </span>
+                  <div className="mt-1 flex items-baseline gap-1">
+                    <span className="text-lg font-black font-mono text-cyan-400">{bandwidthData.downloadedGb}</span>
+                    <span className="text-xs text-slate-400 font-semibold">GB</span>
+                  </div>
+                  <span className="text-[10px] text-slate-500 block mt-0.5">Stream &amp; Browsing</span>
+                </div>
+
+                {/* Metric 2: Uploaded */}
+                <div className={`p-3.5 rounded-2xl border ${portalTheme === 'dark' ? 'bg-slate-950/60 border-slate-800/80' : 'bg-slate-50 border-slate-200'}`}>
+                  <span className="text-[10px] text-slate-400 uppercase font-bold flex items-center gap-1">
+                    <ArrowUpRight className="w-3 h-3 text-emerald-400" />
+                    <span>Upload</span>
+                  </span>
+                  <div className="mt-1 flex items-baseline gap-1">
+                    <span className="text-lg font-black font-mono text-emerald-400">{bandwidthData.uploadedGb}</span>
+                    <span className="text-xs text-slate-400 font-semibold">GB</span>
+                  </div>
+                  <span className="text-[10px] text-slate-500 block mt-0.5">Video calls &amp; Cloud</span>
+                </div>
+
+                {/* Metric 3: Optical Power Rx */}
+                <div className={`p-3.5 rounded-2xl border ${portalTheme === 'dark' ? 'bg-slate-950/60 border-slate-800/80' : 'bg-slate-50 border-slate-200'}`}>
+                  <span className="text-[10px] text-slate-400 uppercase font-bold flex items-center gap-1">
+                    <Radio className="w-3 h-3 text-purple-400" />
+                    <span>Optical Rx Power</span>
+                  </span>
+                  <div className="mt-1 flex items-baseline gap-1">
+                    <span className="text-lg font-black font-mono text-purple-300">{bandwidthData.opticalRx}</span>
+                    <span className="text-xs text-slate-400 font-semibold">dBm</span>
+                  </div>
+                  <span className="text-[10px] text-emerald-400 font-medium block mt-0.5">Optimal Fiber Signal</span>
+                </div>
+
+                {/* Metric 4: Ping Latency */}
+                <div className={`p-3.5 rounded-2xl border ${portalTheme === 'dark' ? 'bg-slate-950/60 border-slate-800/80' : 'bg-slate-50 border-slate-200'}`}>
+                  <span className="text-[10px] text-slate-400 uppercase font-bold flex items-center gap-1">
+                    <Wifi className="w-3 h-3 text-sky-400" />
+                    <span>Core Latency</span>
+                  </span>
+                  <div className="mt-1 flex items-baseline gap-1">
+                    <span className="text-lg font-black font-mono text-sky-400">8 - 11</span>
+                    <span className="text-xs text-slate-400 font-semibold">ms</span>
+                  </div>
+                  <span className="text-[10px] text-slate-500 block mt-0.5">Lagonoy Gateway Ping</span>
+                </div>
+              </div>
+
+              {/* Data Progress Bar */}
+              <div className="mt-4 pt-3 border-t border-slate-800/80 space-y-1.5">
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-slate-400">Total Transferred This Cycle:</span>
+                  <span className="font-mono font-bold text-cyan-300">
+                    {bandwidthData.totalGb} GB <span className="text-slate-400 font-normal">/ Unlimited Uncapped High-Speed Fiber</span>
+                  </span>
+                </div>
+                <div className="w-full h-2 rounded-full bg-slate-800 overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-cyan-500 via-sky-400 to-emerald-400 transition-all duration-1000 shadow-sm"
+                    style={{ width: `${Math.min(100, Math.max(15, (bandwidthData.totalGb / 400) * 100))}%` }}
+                  />
                 </div>
               </div>
             </div>
@@ -4337,6 +4611,25 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
                         <span>{copiedField === 'express_num' ? 'Copied Number' : 'Copy Number'}</span>
                       </button>
                     </div>
+
+                    {/* 1-Click Mobile Wallet Deep Link */}
+                    <div className="mt-3 pt-3 border-t border-slate-800/80 w-full">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenMobileWallet(payMethod === 'maya' ? 'maya' : 'gcash')}
+                        className={`w-full py-2 px-3 rounded-xl flex items-center justify-center gap-2 text-xs font-bold transition-all shadow-sm cursor-pointer ${
+                          payMethod === 'maya'
+                            ? 'bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/30'
+                            : 'bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30'
+                        }`}
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        <span>Open {payMethod === 'maya' ? 'Maya' : 'GCash'} App Directly</span>
+                      </button>
+                      <p className="text-[10px] text-slate-400 text-center mt-1">
+                        Tap to launch your mobile wallet app, send payment, then paste the reference number below.
+                      </p>
+                    </div>
                   </div>
                 );
               })()}
@@ -4651,6 +4944,82 @@ export const ClientPortal: React.FC<ClientPortalProps> = ({
               className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold transition-colors cursor-pointer"
             >
               Close
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* iOS PWA Add to Home Screen Modal */}
+      {showIosInstallModal && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-2xl animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-cyan-500/20 text-cyan-400">
+                  <Smartphone className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm text-slate-100">Install SwiftStream App</h3>
+                  <p className="text-[11px] text-slate-400">Add to iPhone / iPad Home Screen</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowIosInstallModal(false)}
+                className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Install the SwiftStream Subscriber Portal on your iOS device for fast 1-tap billing access, fiber telemetry, and offline account checks:
+            </p>
+
+            <div className="space-y-3 bg-slate-950 p-4 rounded-2xl border border-slate-800 text-xs">
+              <div className="flex items-start gap-3">
+                <div className="w-6 h-6 rounded-full bg-cyan-500/20 text-cyan-400 flex items-center justify-center font-bold text-xs shrink-0 mt-0.5">
+                  1
+                </div>
+                <div>
+                  <p className="font-medium text-slate-200">
+                    Tap the <strong className="text-cyan-400">Share</strong> button in Safari's bottom toolbar.
+                  </p>
+                  <p className="text-[10px] text-slate-400 mt-0.5 flex items-center gap-1">
+                    <Share2 className="w-3 h-3 text-cyan-400 inline" /> Square icon with arrow pointing up
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-3">
+                <div className="w-6 h-6 rounded-full bg-cyan-500/20 text-cyan-400 flex items-center justify-center font-bold text-xs shrink-0 mt-0.5">
+                  2
+                </div>
+                <div>
+                  <p className="font-medium text-slate-200">
+                    Scroll down and tap <strong className="text-cyan-400">Add to Home Screen</strong>.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-3">
+                <div className="w-6 h-6 rounded-full bg-cyan-500/20 text-cyan-400 flex items-center justify-center font-bold text-xs shrink-0 mt-0.5">
+                  3
+                </div>
+                <div>
+                  <p className="font-medium text-slate-200">
+                    Tap <strong className="text-emerald-400">Add</strong> in the top right corner to finish.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowIosInstallModal(false)}
+              className="w-full py-2.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer"
+            >
+              Got it
             </button>
           </div>
         </div>

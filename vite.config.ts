@@ -37,6 +37,11 @@ const resolveHostIp = async (hostname: string): Promise<string> => {
   });
 };
 
+const sanitizeRouterHost = (rawHost?: string): string => {
+  if (!rawHost || rawHost === 'remote.oxapsph.com') return '';
+  return rawHost.replace(/^https?:\/\//, '').replace(/\/.*$/, '').trim();
+};
+
 function mikrotikProxyPlugin(): Plugin {
   return {
     name: 'mikrotik-cors-proxy',
@@ -148,7 +153,13 @@ function mikrotikProxyPlugin(): Plugin {
               body = bodyData ? JSON.parse(bodyData) : {};
             } catch (_) {}
 
-            const host = (body.host || 'remote.oxapsph.com').replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+            const host = sanitizeRouterHost(body.host);
+            if (!host) {
+              res.statusCode = 200;
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify({ success: false, message: 'No router host configured', router: null, interfaces: [] }));
+              return;
+            }
             const port = Number(body.port || 10988);
             const username = body.username || 'admin';
             const password = body.password || '';
@@ -272,7 +283,13 @@ function mikrotikProxyPlugin(): Plugin {
               body = bodyData ? JSON.parse(bodyData) : {};
             } catch (_) {}
 
-            const host = (body.host || 'remote.oxapsph.com').replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+            const host = sanitizeRouterHost(body.host);
+            if (!host) {
+              res.statusCode = 200;
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify({ success: false, error: 'No router host configured', timestamp: new Date().toISOString() }));
+              return;
+            }
             const targetHostIp = await resolveHostIp(host);
             const port = Number(body.port || 10988);
             const username = body.username || 'admin';
@@ -393,7 +410,13 @@ function mikrotikProxyPlugin(): Plugin {
         req.on('end', async () => {
           try {
             const body = bodyData ? JSON.parse(bodyData) : {};
-            const host = (body.host || 'remote.oxapsph.com').replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+            const host = sanitizeRouterHost(body.host);
+            if (!host) {
+              res.statusCode = 200;
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify({ success: false, error: 'No router host configured' }));
+              return;
+            }
             const port = Number(body.port || 10890);
             const username = body.username || 'admin';
             const password = body.password || '';
@@ -459,7 +482,13 @@ function mikrotikProxyPlugin(): Plugin {
               body = bodyData ? JSON.parse(bodyData) : {};
             } catch (_) {}
 
-            const host = (body.host || 'remote.oxapsph.com').replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+            const host = sanitizeRouterHost(body.host);
+            if (!host) {
+              res.statusCode = 200;
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify({ success: false, count: 0, interfaces: [] }));
+              return;
+            }
             const port = Number(body.port || 10988);
             const username = body.username || 'admin';
             const password = body.password || '';
@@ -576,7 +605,13 @@ function mikrotikProxyPlugin(): Plugin {
 
             const urlObj = new URL(req.url || '', 'http://localhost');
             const iface = urlObj.searchParams.get('interface') || body.interface || 'ether1';
-            const host = (body.host || 'remote.oxapsph.com').replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+            const host = sanitizeRouterHost(body.host);
+            if (!host) {
+              res.statusCode = 200;
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify({ success: false, error: 'No router host configured', interface: iface }));
+              return;
+            }
             const port = Number(body.port || 10988);
             const username = body.username || 'admin';
             const password = body.password || '';
@@ -663,7 +698,7 @@ function mikrotikProxyPlugin(): Plugin {
           } catch (_) {}
 
           const target = body.target || '8.8.8.8';
-          const host = (body.host || 'remote.oxapsph.com').replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+          const host = sanitizeRouterHost(body.host);
           const port = Number(body.port || 10988);
           const username = body.username || 'admin';
           const password = body.password || '';
@@ -708,6 +743,11 @@ function mikrotikProxyPlugin(): Plugin {
               });
             });
           };
+
+          if (!host) {
+            fallbackDirectSocket();
+            return;
+          }
 
           try {
             const authHeader = `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`;
@@ -792,7 +832,13 @@ function mikrotikProxyPlugin(): Plugin {
               body = bodyData ? JSON.parse(bodyData) : {};
             } catch (_) {}
 
-            const host = (body.host || 'remote.oxapsph.com').replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+            const host = sanitizeRouterHost(body.host);
+            if (!host) {
+              res.statusCode = 200;
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify({ success: false, error: 'No router host configured', diagnostics: null }));
+              return;
+            }
             const port = Number(body.port || 10988);
             const username = body.username || 'admin';
             const password = body.password || '';
@@ -930,7 +976,13 @@ function mikrotikProxyPlugin(): Plugin {
               body = bodyData ? JSON.parse(bodyData) : {};
             } catch (_) {}
 
-            const host = (body.host || 'remote.oxapsph.com').replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+            const host = sanitizeRouterHost(body.host);
+            if (!host) {
+              res.statusCode = 200;
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify({ success: false, error: 'No router host configured', queues: [] }));
+              return;
+            }
             const port = Number(body.port || 10988);
             const username = body.username || 'admin';
             const password = body.password || '';
@@ -1010,7 +1062,13 @@ function mikrotikProxyPlugin(): Plugin {
             body = bodyData ? JSON.parse(bodyData) : {};
           } catch (_) {}
 
-          const host = (body.host || 'remote.oxapsph.com').replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+          const host = sanitizeRouterHost(body.host);
+          if (!host) {
+            res.statusCode = 200;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ success: false, error: 'No router host configured' }));
+            return;
+          }
           const port = Number(body.port || 10988);
           const username = body.username || 'admin';
           const password = body.password || '';
@@ -1228,7 +1286,13 @@ function mikrotikProxyPlugin(): Plugin {
             body = bodyData ? JSON.parse(bodyData) : {};
           } catch (_) {}
 
-          const host = (body.host || 'remote.oxapsph.com').replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+          const host = sanitizeRouterHost(body.host);
+          if (!host) {
+            res.statusCode = 200;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ success: false, error: 'No router host configured', syncedCount: 0 }));
+            return;
+          }
           const port = Number(body.port || 10988);
           const username = body.username || 'admin';
           const password = body.password || '';
@@ -1477,7 +1541,13 @@ function mikrotikProxyPlugin(): Plugin {
             body = bodyData ? JSON.parse(bodyData) : {};
           } catch (_) {}
 
-          const host = (body.host || 'remote.oxapsph.com').replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+          const host = sanitizeRouterHost(body.host);
+          if (!host) {
+            res.statusCode = 200;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ success: false, output: 'Router host not configured or offline', command: (body.command || '').trim() }));
+            return;
+          }
           const port = Number(body.port || 10988);
           const username = body.username || 'admin';
           const password = body.password || '';

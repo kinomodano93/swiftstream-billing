@@ -34,6 +34,28 @@ const resolveRouterCredentials = async (reqBody) => {
     }
   }
 
+  // Auto-resolve primary/active router if not explicitly specified
+  if (!host && !routerId) {
+    try {
+      const defaultRouterSnap = await db.collection("mikrotik_devices").get();
+      if (!defaultRouterSnap.empty) {
+        const primary =
+          defaultRouterSnap.docs.find((d) => d.data().isDefault) ||
+          defaultRouterSnap.docs.find((d) => d.data().status === "connected" || d.data().status === "active") ||
+          defaultRouterSnap.docs[0];
+        if (primary) {
+          const data = primary.data() || {};
+          host = data.remoteAddress || data.ipAddress;
+          port = port || data.port || data.webfigPort || data.apiPort || 10988;
+          username = username || data.username;
+          password = password !== undefined ? password : data.password;
+        }
+      }
+    } catch (err) {
+      console.warn("[RouterResolver] Could not auto-resolve default MikroTik device:", err.message);
+    }
+  }
+
   const cleanHost = (host || "").replace(/^https?:\/\//, "").replace(/\/.*$/, "");
   const targetPort = port || 10988;
 
@@ -498,21 +520,20 @@ exports.getMikrotikInterfaces = onRequest(
 
     try {
       const src = req.method === "GET" ? req.query : (req.body || {});
-      let host = src.host || process.env.MT_HOST || "remote.oxapsph.com";
-      let port = src.port || process.env.MT_PORT || 10988;
-      let username = src.username || process.env.MIKROTIK_USERNAME || process.env.MT_USER || process.env.MIKROTIK_USER || "admin";
-      let password = src.password !== undefined ? src.password : (process.env.MIKROTIK_PASSWORD || process.env.MT_PASSWORD || "");
+      const creds = await resolveRouterCredentials(src);
+      const cleanHost = creds.host;
+      const cleanPort = Number(creds.port || 10988);
+      const username = creds.username;
+      const password = creds.password;
 
-      if (src.routerId || (!src.host && !process.env.MT_HOST)) {
-        const resolved = await resolveRouterCredentials(src);
-        host = src.host || resolved.host || host;
-        port = src.port || resolved.port || port;
-        username = src.username || resolved.username || username;
-        password = src.password !== undefined ? src.password : (resolved.password || password);
+      if (!cleanHost) {
+        return res.status(200).json({
+          success: false,
+          message: "No MikroTik hardware node configured or reachable.",
+          interfaces: [],
+        });
       }
 
-      const cleanHost = (host || "remote.oxapsph.com").replace(/^https?:\/\//, "").replace(/\/.*$/, "");
-      const cleanPort = Number(port || 10988);
       const isHttps = cleanPort === 443;
       const protocol = isHttps ? "https" : "http";
       const baseUrl = `${protocol}://${cleanHost}:${cleanPort}/rest`;
@@ -614,22 +635,20 @@ exports.getInterfaceTraffic = onRequest(
     try {
       const src = req.method === "GET" ? req.query : (req.body || {});
       const interfaceName = src.interface || src.portName || "ether1";
+      const creds = await resolveRouterCredentials(src);
+      const cleanHost = creds.host;
+      const cleanPort = Number(creds.port || 10988);
+      const username = creds.username;
+      const password = creds.password;
 
-      let host = src.host || process.env.MT_HOST || "remote.oxapsph.com";
-      let port = src.port || process.env.MT_PORT || 10988;
-      let username = src.username || process.env.MIKROTIK_USERNAME || process.env.MT_USER || "admin";
-      let password = src.password !== undefined ? src.password : (process.env.MIKROTIK_PASSWORD || process.env.MT_PASSWORD || "");
-
-      if (src.routerId || (!src.host && !process.env.MT_HOST)) {
-        const resolved = await resolveRouterCredentials(src);
-        host = src.host || resolved.host || host;
-        port = src.port || resolved.port || port;
-        username = src.username || resolved.username || username;
-        password = src.password !== undefined ? src.password : (resolved.password || password);
+      if (!cleanHost) {
+        return res.status(200).json({
+          success: false,
+          message: "No MikroTik router specified or configured in system.",
+          traffic: [],
+        });
       }
 
-      const cleanHost = (host || "remote.oxapsph.com").replace(/^https?:\/\//, "").replace(/\/.*$/, "");
-      const cleanPort = Number(port || 10988);
       const isHttps = cleanPort === 443;
       const protocol = isHttps ? "https" : "http";
       const url = `${protocol}://${cleanHost}:${cleanPort}/rest/interface/monitor-traffic`;
@@ -899,247 +918,6 @@ exports.getQueueList = onRequest(
   }
 );
 
-exports.getPppoeSecrets = onRequest(
-  {
-    region: "asia-southeast1",
-    cors: true,
-  },
-  async (req, res) => {
-    res.set("Access-Control-Allow-Origin", "*");
-    res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-    res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
-
-    if (req.method === "OPTIONS") {
-      return res.status(204).send("");
-    }
-
-    try {
-      const { host, port, username, password, routerId } = req.body || {};
-
-      let cleanHost = host;
-      let cleanPort = port;
-      let cleanUser = username;
-      let cleanPass = password;
-
-      if (routerId || (!cleanHost && req.body)) {
-        const resolved = await resolveRouterCredentials(req.body);
-        cleanHost = cleanHost || resolved.host;
-        cleanPort = cleanPort || resolved.port;
-        cleanUser = cleanUser || resolved.username;
-        cleanPass = cleanPass !== undefined ? cleanPass : resolved.password;
-      }
-
-      if (!cleanHost || !cleanPort || !cleanUser) {
-        return res.status(400).json({
-          success: false,
-          message: "Missing MikroTik connection information",
-        });
-      }
-
-      const cleanHostFormatted = cleanHost.replace(/^https?:\/\//, "").replace(/\/.*$/, "");
-      const url = `http://${cleanHostFormatted}:${cleanPort}/rest/ppp/secret`;
-
-      const response = await axios.get(url, {
-        auth: { username: cleanUser, password: cleanPass },
-        timeout: 10000,
-      });
-
-      const items = Array.isArray(response.data) ? response.data : (response.data ? [response.data] : []);
-      const secrets = items.map((item) => ({
-        id: item['.id'] || item.name || '',
-        name: item.name || '',
-        password: item.password || '',
-        service: item.service || 'pppoe',
-        profile: item.profile || 'default',
-        remoteAddress: item['remote-address'] || '',
-        localAddress: item['local-address'] || '',
-        callerId: item['caller-id'] || '',
-        comment: item.comment || '',
-        disabled: item.disabled === 'true' || item.disabled === true,
-        lastLoggedOut: item['last-logged-out'] || '',
-      }));
-
-      return res.status(200).json({
-        success: true,
-        count: secrets.length,
-        secrets,
-        data: secrets,
-      });
-    } catch (error) {
-      console.error("PPPoE secrets query error:", error.response?.data || error.message);
-      const statusCode = error.response ? error.response.status : 500;
-      return res.status(statusCode).json({
-        success: false,
-        statusCode,
-        message: statusCode === 401 ? "RouterOS authentication failed (HTTP 401 Unauthorized)" : "Failed to retrieve PPPoE secrets from MikroTik",
-        error: error.response?.data || error.message,
-      });
-    }
-  }
-);
-
-exports.mikrotikSecrets = exports.getPppoeSecrets;
-
-exports.getPppoeActive = onRequest(
-  {
-    region: "asia-southeast1",
-    cors: true,
-  },
-  async (req, res) => {
-    res.set("Access-Control-Allow-Origin", "*");
-    res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-    res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
-
-    if (req.method === "OPTIONS") {
-      return res.status(204).send("");
-    }
-
-    try {
-      const { host, port, username, password, routerId } = req.body || {};
-
-      let cleanHost = host;
-      let cleanPort = port;
-      let cleanUser = username;
-      let cleanPass = password;
-
-      if (routerId || (!cleanHost && req.body)) {
-        const resolved = await resolveRouterCredentials(req.body);
-        cleanHost = cleanHost || resolved.host;
-        cleanPort = cleanPort || resolved.port;
-        cleanUser = cleanUser || resolved.username;
-        cleanPass = cleanPass !== undefined ? cleanPass : resolved.password;
-      }
-
-      if (!cleanHost || !cleanPort || !cleanUser) {
-        return res.status(400).json({
-          success: false,
-          message: "Missing MikroTik connection information",
-        });
-      }
-
-      const cleanHostFormatted = cleanHost.replace(/^https?:\/\//, "").replace(/\/.*$/, "");
-      const url = `http://${cleanHostFormatted}:${cleanPort}/rest/ppp/active`;
-
-      const response = await axios.get(url, {
-        auth: { username: cleanUser, password: cleanPass },
-        timeout: 10000,
-      });
-
-      const items = Array.isArray(response.data) ? response.data : (response.data ? [response.data] : []);
-      const activeSessions = items.map((item) => ({
-        id: item['.id'] || item.name || item['session-id'] || '',
-        username: item.name || '',
-        service: item.service || 'pppoe',
-        callerIdMac: item['caller-id'] || '',
-        assignedIp: item.address || item['remote-address'] || '',
-        uptime: item.uptime || '',
-        encoding: item.encoding || 'MPPE 128-bit',
-        sessionId: item['session-id'] || '',
-        limitBytesIn: item['limit-bytes-in'] || 0,
-        limitBytesOut: item['limit-bytes-out'] || 0,
-        radius: item.radius === 'true' || item.radius === true,
-      }));
-
-      return res.status(200).json({
-        success: true,
-        count: activeSessions.length,
-        data: activeSessions,
-        sessions: activeSessions,
-      });
-    } catch (error) {
-      console.error("PPPoE active sessions query error:", error.response?.data || error.message);
-      const statusCode = error.response ? error.response.status : 500;
-      return res.status(statusCode).json({
-        success: false,
-        statusCode,
-        message: statusCode === 401 ? "RouterOS authentication failed (HTTP 401 Unauthorized)" : "Failed to retrieve active PPPoE sessions from MikroTik",
-        error: error.response?.data || error.message,
-      });
-    }
-  }
-);
-
-exports.mikrotikActiveSessions = exports.getPppoeActive;
-
-exports.getPppoeProfiles = onRequest(
-  {
-    region: "asia-southeast1",
-    cors: true,
-  },
-  async (req, res) => {
-    res.set("Access-Control-Allow-Origin", "*");
-    res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-    res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
-
-    if (req.method === "OPTIONS") {
-      return res.status(204).send("");
-    }
-
-    try {
-      const { host, port, username, password, routerId } = req.body || {};
-
-      let cleanHost = host;
-      let cleanPort = port;
-      let cleanUser = username;
-      let cleanPass = password;
-
-      if (routerId || (!cleanHost && req.body)) {
-        const resolved = await resolveRouterCredentials(req.body);
-        cleanHost = cleanHost || resolved.host;
-        cleanPort = cleanPort || resolved.port;
-        cleanUser = cleanUser || resolved.username;
-        cleanPass = cleanPass !== undefined ? cleanPass : resolved.password;
-      }
-
-      if (!cleanHost || !cleanPort || !cleanUser) {
-        return res.status(400).json({
-          success: false,
-          message: "Missing MikroTik connection information",
-        });
-      }
-
-      const cleanHostFormatted = cleanHost.replace(/^https?:\/\//, "").replace(/\/.*$/, "");
-      const url = `http://${cleanHostFormatted}:${cleanPort}/rest/ppp/profile`;
-
-      const response = await axios.get(url, {
-        auth: { username: cleanUser, password: cleanPass },
-        timeout: 10000,
-      });
-
-      const items = Array.isArray(response.data) ? response.data : (response.data ? [response.data] : []);
-      const profiles = items.map((item) => ({
-        id: item['.id'] || item.name || '',
-        name: item.name || '',
-        rateLimitRx: (item['rate-limit'] || '').split('/')[0] || '',
-        rateLimitTx: (item['rate-limit'] || '').split('/')[1] || '',
-        rateLimit: item['rate-limit'] || '',
-        localAddress: item['local-address'] || '',
-        remoteAddressPool: item['remote-address'] || '',
-        dnsServers: item['dns-server'] || '',
-        onlyOne: item['only-one'] || 'default',
-        useEncryption: item['use-encryption'] || 'default',
-        comment: item.comment || '',
-      }));
-
-      return res.status(200).json({
-        success: true,
-        count: profiles.length,
-        data: profiles,
-        profiles,
-      });
-    } catch (error) {
-      console.error("PPPoE profiles query error:", error.response?.data || error.message);
-      const statusCode = error.response ? error.response.status : 500;
-      return res.status(statusCode).json({
-        success: false,
-        statusCode,
-        message: statusCode === 401 ? "RouterOS authentication failed (HTTP 401 Unauthorized)" : "Failed to retrieve PPPoE profiles from MikroTik",
-        error: error.response?.data || error.message,
-      });
-    }
-  }
-);
-
 exports.getIpPools = onRequest(
   {
     region: "asia-southeast1",
@@ -1268,12 +1046,18 @@ exports.mikrotikCli = onRequest(
       }
 
       const resolved = await resolveRouterCredentials(req.body);
-      const cleanHost = (host || resolved.host || "remote.oxapsph.com").replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+      const cleanHost = (host || resolved.host || "").replace(/^https?:\/\//, "").replace(/\/.*$/, "");
       const cleanPort = port || resolved.port || 10988;
       const cleanUser = username || resolved.username || "admin";
       const cleanPass = password !== undefined ? password : resolved.password;
       const dev = req.body.device || {};
       const customers = Array.isArray(req.body.customers) ? req.body.customers : [];
+
+      if (!cleanHost) {
+        return reply(
+          `[SwiftStream Terminal]: No active MikroTik hardware node configured or reachable.\nPlease select or configure a router in Network > MikroTik Fleet Manager.`
+        );
+      }
 
       const axiosConfig = {
         auth: { username: cleanUser, password: cleanPass },
@@ -1903,6 +1687,9 @@ exports.getPppoeActive = makeMikrotikProxyHandler("/ppp/active", (items) =>
   }))
 );
 
+exports.mikrotikSecrets = exports.getPppoeSecrets;
+exports.mikrotikActiveSessions = exports.getPppoeActive;
+
 /**
  * Generic Reverse Proxy for MikroTik RouterOS REST API
  * Bypasses browser Mixed Content security rules when app is hosted on HTTPS (swiftstream-portal.web.app)
@@ -2391,7 +2178,7 @@ const executeGraceAuditServerSide = async (triggeredBy = "Cloud Scheduler") => {
 
   // 2. Resolve Active MikroTik Router Credentials
   let routerCreds = {
-    host: "remote.oxapsph.com",
+    host: "",
     port: 10988,
     username: "admin",
     password: "",
@@ -2408,7 +2195,7 @@ const executeGraceAuditServerSide = async (triggeredBy = "Cloud Scheduler") => {
       if (primaryDevice) {
         const devData = primaryDevice.data();
         routerCreds = {
-          host: (devData.remoteAddress || devData.ipAddress || routerCreds.host).replace(/^https?:\/\//, "").replace(/\/.*$/, ""),
+          host: (devData.remoteAddress || devData.ipAddress || "").replace(/^https?:\/\//, "").replace(/\/.*$/, ""),
           port: devData.port || devData.webfigPort || devData.apiPort || 10988,
           username: devData.username || routerCreds.username,
           password: devData.password !== undefined ? devData.password : routerCreds.password,
@@ -2426,9 +2213,14 @@ const executeGraceAuditServerSide = async (triggeredBy = "Cloud Scheduler") => {
     console.warn("[GraceAudit] Router lookup warning:", err.message);
   }
 
+  const hasRouter = Boolean(routerCreds.host);
+  if (!hasRouter) {
+    console.log("[GraceAudit] No active MikroTik hardware node registered; executing Firestore billing & grace audits without RouterOS API sync.");
+  }
+
   const isHttps = Number(routerCreds.port) === 443;
   const routerProtocol = isHttps ? "https" : "http";
-  const routerBaseUrl = `${routerProtocol}://${routerCreds.host}:${routerCreds.port}/rest`;
+  const routerBaseUrl = hasRouter ? `${routerProtocol}://${routerCreds.host}:${routerCreds.port}/rest` : "";
   const routerAuth = { username: routerCreds.username, password: routerCreds.password };
   const routerHeaders = { Accept: "application/json", "Content-Type": "application/json" };
 
@@ -2499,7 +2291,7 @@ const executeGraceAuditServerSide = async (triggeredBy = "Cloud Scheduler") => {
       }
 
       // RouterOS: Remove from NON_PAYMENT_ISOLATION
-      if (custIp) {
+      if (custIp && hasRouter) {
         try {
           const listRes = await axios.get(
             `${routerBaseUrl}/ip/firewall/address-list?list=NON_PAYMENT_ISOLATION&address=${encodeURIComponent(custIp)}`,
@@ -2522,7 +2314,7 @@ const executeGraceAuditServerSide = async (triggeredBy = "Cloud Scheduler") => {
       }
 
       // RouterOS: Restore PPPoE profile and drop session
-      if (pppUser) {
+      if (pppUser && hasRouter) {
         try {
           const secretRes = await axios.get(
             `${routerBaseUrl}/ppp/secret?name=${encodeURIComponent(pppUser)}`,
@@ -2575,7 +2367,14 @@ const executeGraceAuditServerSide = async (triggeredBy = "Cloud Scheduler") => {
             ? new Date(parts[0], parts[1] - 1, parts[2], cutoffH, cutoffM, 59)
             : new Date(inv.dueDate);
 
-        const graceExpiryTime = new Date(dueDateObj.getTime() + graceDays * 24 * 60 * 60 * 1000);
+        const effectiveGraceDays =
+          cust.gracePeriodDays !== undefined && cust.gracePeriodDays !== null && !isNaN(Number(cust.gracePeriodDays))
+            ? Number(cust.gracePeriodDays)
+            : inv.gracePeriodDays !== undefined && inv.gracePeriodDays !== null && !isNaN(Number(inv.gracePeriodDays))
+            ? Number(inv.gracePeriodDays)
+            : graceDays;
+
+        const graceExpiryTime = new Date(dueDateObj.getTime() + effectiveGraceDays * 24 * 60 * 60 * 1000);
         const daysPast = Math.floor((now.getTime() - dueDateObj.getTime()) / (1000 * 60 * 60 * 24));
 
         if (now.getTime() > graceExpiryTime.getTime()) {
@@ -2607,7 +2406,7 @@ const executeGraceAuditServerSide = async (triggeredBy = "Cloud Scheduler") => {
         }
 
         // RouterOS: Add to NON_PAYMENT_ISOLATION
-        if (custIp) {
+        if (custIp && hasRouter) {
           try {
             await axios.put(
               `${routerBaseUrl}/ip/firewall/address-list`,
@@ -2624,7 +2423,7 @@ const executeGraceAuditServerSide = async (triggeredBy = "Cloud Scheduler") => {
         }
 
         // RouterOS: Switch PPPoE secret profile to 'isolated' and kick session
-        if (pppUser) {
+        if (pppUser && hasRouter) {
           try {
             const secretRes = await axios.get(
               `${routerBaseUrl}/ppp/secret?name=${encodeURIComponent(pppUser)}`,
@@ -2814,6 +2613,358 @@ exports.triggerGraceAudit = onRequest(
     }
   }
 );
+
+/**
+ * Autonomous Server-Side Monthly Recurring Invoicing Engine
+ * Scans all active/overdue subscribers and automatically generates statements of account
+ * aligned to their specific installation / cut-off day (e.g. 10th for installed on Oct 10).
+ */
+const executeMonthlyBillingServerSide = async (triggeredBy = "Cloud Scheduler (01:00 PHT)", targetCycleDay = null) => {
+  console.log(`[AutoBilling] Starting server-side monthly recurring billing (Trigger: ${triggeredBy})...`);
+  const now = new Date();
+  const timestamp = now.toISOString();
+
+  // 1. Fetch Company Profile & Plan Catalog
+  let profile = {};
+  try {
+    const profileDoc = await db.collection("business_profile").doc("company_profile").get();
+    if (profileDoc.exists) {
+      profile = profileDoc.data() || {};
+    }
+  } catch (err) {
+    console.warn("[AutoBilling] Could not load company profile:", err.message);
+  }
+
+  const defaultGraceDays = Number(profile.invoiceGracePeriodDays) || 5;
+  const smsGateway = profile.smsGateway || {};
+
+  let plans = [];
+  try {
+    const planSnap = await db.collection("plans").get();
+    plans = planSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  } catch (_) {}
+
+  // 2. Fetch Customers and Invoices
+  const custSnap = await db.collection("customers").get();
+  const customers = custSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+  const invSnap = await db.collection("invoices").get();
+  const existingInvoices = invSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+  // Date calculations in Asia/Manila context
+  const manilaDateStr = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Manila",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
+
+  const [currentYearStr, currentMonthStr, currentDayStr] = manilaDateStr.split("-");
+  const currentYear = parseInt(currentYearStr, 10);
+  const currentMonth = parseInt(currentMonthStr, 10);
+  const currentDay = parseInt(currentDayStr, 10);
+  const daysInCurrentMonth = new Date(currentYear, currentMonth, 0).getDate();
+  const billingPeriodMonthStr = `${currentYearStr}-${currentMonthStr}`;
+
+  // Target cycle day: if supplied use it, otherwise today's day of month
+  const todayCycleDay = targetCycleDay !== null && targetCycleDay !== undefined ? Number(targetCycleDay) : currentDay;
+
+  let generatedCount = 0;
+  let totalAmountGenerated = 0;
+  let smsQueuedCount = 0;
+  const generatedInvoiceIds = [];
+
+  for (const cust of customers) {
+    // Only bill active or overdue accounts
+    if (cust.status !== "active" && cust.status !== "overdue") continue;
+
+    // Resolve customer cut-off billing day (1-31)
+    let custBillingDay = Number(cust.billingDay);
+    if (!custBillingDay || isNaN(custBillingDay)) {
+      if (cust.installationDate) {
+        const parts = cust.installationDate.split("-");
+        custBillingDay = parseInt(parts[2], 10) || 10;
+      } else {
+        custBillingDay = 10;
+      }
+    }
+
+    // Determine if customer is eligible to be billed today:
+    // Either exact match, or today is the end of the month and their billing day exceeds days in this month
+    const isDueToday =
+      custBillingDay === todayCycleDay ||
+      (todayCycleDay === daysInCurrentMonth && custBillingDay > daysInCurrentMonth);
+
+    if (!isDueToday && targetCycleDay === null) continue;
+
+    // Guard: Has this customer already been invoiced for this month/cycle?
+    const alreadyInvoiced = existingInvoices.some((inv) => {
+      const matchCustomer =
+        inv.customerId === cust.id ||
+        inv.accountNo === cust.accountNo ||
+        (cust.accountNo && inv.accountNo === cust.accountNo);
+      if (!matchCustomer) return false;
+
+      if (inv.billingPeriodMonth === billingPeriodMonthStr) return true;
+      if (inv.billingPeriodStart && inv.billingPeriodStart.startsWith(billingPeriodMonthStr)) return true;
+      if (inv.issueDate && inv.issueDate.startsWith(billingPeriodMonthStr)) return true;
+      return false;
+    });
+
+    if (alreadyInvoiced) continue;
+
+    // Plan fee resolution
+    const plan =
+      plans.find((p) => p.id === cust.planId) ||
+      plans.find((p) => p.name?.trim().toLowerCase() === cust.planName?.trim().toLowerCase()) ||
+      plans.find((p) => p.monthlyFee === cust.monthlyFee) ||
+      null;
+
+    const standardMonthlyFee = plan ? Number(plan.monthlyFee) : (Number(cust.monthlyFee) || 0);
+    const speedMbps = plan ? plan.speedMbps : (cust.planSpeedMbps || 50);
+    const planName = plan ? plan.name : (cust.planName || "Fiber Subscription");
+
+    // Previous unpaid balance (Arrears)
+    const openInvoices = existingInvoices.filter(
+      (inv) =>
+        (inv.customerId === cust.id || inv.accountNo === cust.accountNo) &&
+        inv.status !== "paid" &&
+        (Number(inv.balanceDue) || 0) > 0
+    );
+    const previousBal = openInvoices.length > 0 && cust.balance > 0 ? Number(cust.balance) : 0;
+
+    // Proration (if newly installed this month after day 1)
+    let planFee = standardMonthlyFee;
+    let isProrated = false;
+    let proratedDays = daysInCurrentMonth;
+
+    if (cust.installationDate && cust.installationDate.startsWith(billingPeriodMonthStr)) {
+      const installDay = parseInt(cust.installationDate.split("-")[2], 10) || 1;
+      if (installDay > 1) {
+        proratedDays = daysInCurrentMonth - installDay + 1;
+        planFee = Math.round((proratedDays / daysInCurrentMonth) * standardMonthlyFee);
+        isProrated = true;
+      }
+    }
+
+    const subtotal = planFee;
+    let totalAmount = subtotal + previousBal;
+
+    // Advance Wallet Credit application
+    let appliedCredit = 0;
+    let currentWalletBal = Number(cust.walletBalance || 0);
+    if (currentWalletBal > 0) {
+      appliedCredit = Math.min(currentWalletBal, totalAmount);
+      currentWalletBal -= appliedCredit;
+    }
+
+    const balanceDue = Math.max(0, totalAmount - appliedCredit);
+    const invoiceStatus = balanceDue === 0 ? "paid" : "unpaid";
+
+    // Due Date & Grace Period alignment
+    const effectiveCutoffDay = Math.min(custBillingDay, daysInCurrentMonth);
+    const dueDateStr = `${currentYearStr}-${currentMonthStr}-${String(effectiveCutoffDay).padStart(2, "0")}`;
+    const effectiveGraceDays =
+      cust.gracePeriodDays !== undefined && cust.gracePeriodDays !== null && !isNaN(Number(cust.gracePeriodDays))
+        ? Number(cust.gracePeriodDays)
+        : defaultGraceDays;
+
+    const startDate = `${currentYearStr}-${currentMonthStr}-01`;
+    const endDate = `${currentYearStr}-${currentMonthStr}-${String(daysInCurrentMonth).padStart(2, "0")}`;
+    const invoiceNumStr = `INV-${currentYearStr.slice(2)}${currentMonthStr}-${String(existingInvoices.length + generatedCount + 1).padStart(4, "0")}`;
+
+    const items = [
+      {
+        id: `ITEM-${Date.now()}-${generatedCount + 1}`,
+        description: isProrated
+          ? `Internet Plan: ${planName} (${speedMbps} Mbps) — Prorated (${proratedDays}/${daysInCurrentMonth} Days)`
+          : `Internet Plan: ${planName} (${speedMbps} Mbps) — Monthly Subscription`,
+        quantity: 1,
+        unitPrice: isProrated ? planFee : standardMonthlyFee,
+        amount: planFee,
+        type: "plan",
+      },
+    ];
+
+    if (previousBal > 0) {
+      items.push({
+        id: `ITEM-${Date.now()}-arr`,
+        description: "Previous Unpaid Balance (Arrears)",
+        quantity: 1,
+        unitPrice: previousBal,
+        amount: previousBal,
+        type: "late_fee",
+      });
+    }
+
+    if (appliedCredit > 0) {
+      items.push({
+        id: `ITEM-${Date.now()}-disc`,
+        description: "Advance Credit Wallet Deduction",
+        quantity: 1,
+        unitPrice: -appliedCredit,
+        amount: -appliedCredit,
+        type: "discount",
+      });
+    }
+
+    const addressStr = cust.address
+      ? `${cust.address.street || ""}, ${cust.address.barangay || ""}, ${cust.address.city || ""}, ${cust.address.province || ""}`.replace(/^,\s*|,\s*$/g, "")
+      : "";
+
+    const newInvoice = {
+      invoiceNumber: invoiceNumStr,
+      customerId: cust.id,
+      customerName: cust.fullName || "Subscriber",
+      accountNo: cust.accountNo || "",
+      customerAddress: addressStr,
+      customerMobile: cust.mobile || "",
+      customerEmail: cust.email || "",
+      planId: plan ? plan.id : (cust.planId || ""),
+      planName,
+      planSpeedMbps: speedMbps,
+      monthlyFee: standardMonthlyFee,
+      billingDay: custBillingDay,
+      billingPeriodMonth: billingPeriodMonthStr,
+      billingPeriodStart: startDate,
+      billingPeriodEnd: endDate,
+      issueDate: manilaDateStr,
+      dueDate: dueDateStr,
+      gracePeriodDays: effectiveGraceDays,
+      items,
+      subtotal,
+      discount: 0,
+      appliedCredit,
+      isProrated,
+      proratedDays: isProrated ? proratedDays : null,
+      previousBalance: previousBal,
+      totalAmount,
+      amountPaid: appliedCredit,
+      balanceDue,
+      status: invoiceStatus,
+      sentViaSms: Boolean(cust.mobile),
+      sentViaEmail: false,
+      paidAt: invoiceStatus === "paid" ? timestamp : null,
+      createdAt: timestamp,
+    };
+
+    const docRef = await db.collection("invoices").add(newInvoice);
+    generatedInvoiceIds.push(docRef.id);
+    generatedCount++;
+    totalAmountGenerated += totalAmount;
+
+    // Update customer balance & wallet
+    const updatedCustomerData = {
+      balance: (Number(cust.balance) || 0) + balanceDue,
+      updatedAt: timestamp,
+    };
+    if (appliedCredit > 0) {
+      updatedCustomerData.walletBalance = currentWalletBal;
+    }
+    await db.collection("customers").doc(cust.id).update(updatedCustomerData);
+
+    // Enqueue SMS Notice
+    if (cust.mobile) {
+      const gcashNumber = profile.paymentGateways?.gcashNumber || "09638927819";
+      const dueFormatted = Number(balanceDue).toLocaleString();
+      const smsText = `SWIFTSTREAM STATEMENT: Hi ${cust.fullName}, your monthly bill of ₱${dueFormatted} (Acct: ${cust.accountNo}) for ${billingPeriodMonthStr} is ready. Due Date: ${dueDateStr}. Settle via GCash ${gcashNumber} or through your subscriber portal. Thank you!`;
+
+      sendServerSms(cust.mobile, smsText, smsGateway).catch((e) => console.warn("[AutoBilling] SMS error:", e.message));
+      smsQueuedCount++;
+
+      db.collection("reminders").add({
+        customerId: cust.id,
+        customerName: cust.fullName,
+        accountNo: cust.accountNo,
+        mobile: cust.mobile,
+        type: "upcoming_due",
+        message: smsText,
+        channel: "sms",
+        status: "sent",
+        invoiceId: docRef.id,
+        createdAt: timestamp,
+      }).catch(() => {});
+    }
+  }
+
+  // Record Audit Trail
+  if (generatedCount > 0) {
+    try {
+      await db.collection("audit_logs").add({
+        action: "AUTONOMOUS_MONTHLY_BILLING",
+        userName: triggeredBy,
+        timestamp,
+        details: `Automated recurring billing generated ${generatedCount} statements totaling ₱${totalAmountGenerated.toLocaleString()} for cycle day ${todayCycleDay} (${manilaDateStr}).`,
+        metadata: {
+          count: generatedCount,
+          totalAmount: totalAmountGenerated,
+          cycleDay: todayCycleDay,
+          period: billingPeriodMonthStr,
+        },
+      });
+    } catch (_) {}
+  }
+
+  console.log(`[AutoBilling] Finished: Generated ${generatedCount} invoices totaling ₱${totalAmountGenerated.toLocaleString()}.`);
+
+  return {
+    success: true,
+    message: `Autonomous monthly billing completed by ${triggeredBy}.`,
+    cycleDay: todayCycleDay,
+    count: generatedCount,
+    totalAmount: totalAmountGenerated,
+    smsQueuedCount,
+    invoicesGenerated: generatedInvoiceIds,
+  };
+};
+
+/**
+ * Cloud Scheduler Daily Recurring Billing Cron: Runs daily at 01:00 (Asia/Manila)
+ */
+exports.dailyAutomatedMonthlyBilling = onSchedule(
+  {
+    schedule: "0 1 * * *",
+    timeZone: "Asia/Manila",
+    region: "asia-southeast1",
+    memory: "512MiB",
+    timeoutSeconds: 300,
+  },
+  async (event) => {
+    try {
+      const result = await executeMonthlyBillingServerSide("Cloud Scheduler (01:00 PHT)");
+      console.log("[dailyAutomatedMonthlyBilling] Result:", result);
+      return result;
+    } catch (err) {
+      console.error("[dailyAutomatedMonthlyBilling] Error:", err.message);
+      throw err;
+    }
+  }
+);
+
+/**
+ * On-Demand HTTP Trigger for Server-Side Monthly Recurring Invoicing
+ */
+exports.triggerMonthlyBilling = onRequest(
+  { region: "asia-southeast1", cors: true },
+  async (req, res) => {
+    res.set("Access-Control-Allow-Origin", "*");
+    res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+    if (req.method === "OPTIONS") return res.status(204).send("");
+
+    try {
+      const triggeredBy = (req.body && req.body.triggeredBy) || (req.query && req.query.triggeredBy) || "Admin Web Console";
+      const targetCycleDay = req.body?.cycleDay !== undefined ? req.body.cycleDay : (req.query?.cycleDay !== undefined ? req.query.cycleDay : null);
+      const result = await executeMonthlyBillingServerSide(triggeredBy, targetCycleDay);
+      return res.status(200).json(result);
+    } catch (err) {
+      console.error("[triggerMonthlyBilling] Error:", err.message);
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  }
+);
+
 
 
 

@@ -183,6 +183,10 @@ export const BatchBillingModal: React.FC<BatchBillingModalProps> = ({ onClose })
                 <p className="text-xs text-slate-400 font-normal">
                   Select customer category to generate invoices.
                 </p>
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-cyan-950/60 border border-cyan-800/40 text-[10px] text-cyan-300 font-mono">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  Cloud Scheduler Active • Daily 01:00 AM PHT auto-billing
+                </div>
               </div>
 
               {/* 1. Select Billing Type Fieldset */}
@@ -253,7 +257,7 @@ export const BatchBillingModal: React.FC<BatchBillingModalProps> = ({ onClose })
                   className="w-full bg-transparent text-slate-100 text-xs py-1 focus:outline-none cursor-pointer"
                 >
                   <option value="auto" className="bg-slate-900 text-slate-100">
-                    Automatic (Due date this month)
+                    Automatic (Aligned to Client Installation / Cut-off Day)
                   </option>
                   <option value="grace" className="bg-slate-900 text-slate-100">
                     Standard Grace Period (5 Days after issue)
@@ -265,6 +269,11 @@ export const BatchBillingModal: React.FC<BatchBillingModalProps> = ({ onClose })
                     Custom Date...
                   </option>
                 </select>
+                {dueDateMode === 'auto' && (
+                  <p className="text-[10px] text-cyan-400/90 mt-1 pl-0.5 leading-snug">
+                    Each subscriber's invoice due date automatically matches their specific installation / cut-off day (e.g. 10th for installed on the 10th).
+                  </p>
+                )}
               </fieldset>
 
               {/* Custom Date Input (shown if custom mode selected) */}

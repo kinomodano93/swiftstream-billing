@@ -49,7 +49,7 @@ import {
 } from '../data/storage';
 import { initialPlans, initialBusinessProfile, initialCoverageAreas, initialStaffUsers, initialAddonCatalog } from '../data/initialData';
 import { generateId, formatCurrency, isRouterProfileName } from '../utils/formatters';
-import { findCustomerInvoiceForMonth, hasCustomerInvoiceForMonth } from '../utils/billingRules';
+import { findCustomerInvoiceForMonth, hasCustomerInvoiceForMonth, calculateAlignedBillingDates } from '../utils/billingRules';
 import { generateReminderMessage, sendMockNotification, dispatchSmsGateway } from '../utils/smsSender';
 import {
   fetchFullRouterTelemetry,
@@ -207,6 +207,13 @@ interface AppContextType {
     graceCount: number;
     reactivatedCount: number;
     smsSentCount: number;
+    message?: string;
+  }>;
+  triggerServerMonthlyBilling: (cycleDay?: number) => Promise<{
+    success: boolean;
+    count: number;
+    totalAmount: number;
+    smsQueuedCount: number;
     message?: string;
   }>;
 
@@ -1738,8 +1745,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
 
     if (options.createInitialInvoice) {
-      const dueDate = new Date();
-      dueDate.setDate(dueDate.getDate() + (businessProfile.invoiceGracePeriodDays || 7));
+      const dates = calculateAlignedBillingDates(
+        customer.installationDate || todayStr,
+        customer.billingDay,
+        customer.gracePeriodDays ?? (businessProfile.invoiceGracePeriodDays || 5),
+        new Date()
+      );
       const invoiceNumber = `INV-${todayStr.slice(2, 4)}${todayStr.slice(5, 7)}-${String(invoices.length + 1).padStart(4, '0')}`;
       const plan =
         plans.find((p) => p.id === customer.planId) ||
@@ -1764,11 +1775,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         planName,
         planSpeedMbps: speedMbps,
         monthlyFee,
-        billingDay: customer.billingDay || 1,
-        billingPeriodStart: todayStr,
-        billingPeriodEnd: new Date(new Date().setMonth(new Date().getMonth() + 1)).toISOString().slice(0, 10),
-        issueDate: todayStr,
-        dueDate: dueDate.toISOString().slice(0, 10),
+        billingDay: dates.billingDay,
+        billingPeriodStart: dates.periodStart,
+        billingPeriodEnd: dates.periodEnd,
+        issueDate: customer.installationDate || todayStr,
+        dueDate: dates.dueDate,
+        gracePeriodDays: dates.graceDays,
         items: [
           {
             id: generateId('ITEM'),
@@ -2164,11 +2176,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         planName,
         planSpeedMbps: speedMbps,
         monthlyFee: standardMonthlyFee,
-        billingDay: customer.billingDay || 15,
+        billingDay: customer.billingDay || 10,
         billingPeriodStart: startDate,
         billingPeriodEnd: endDate,
         issueDate: new Date().toISOString().slice(0, 10),
-        dueDate: options.dueDate,
+        dueDate: options.dueDate && !options.dueDate.endsWith('-10')
+          ? options.dueDate
+          : `${year}-${month}-${String(Math.min(customer.billingDay || 10, lastDayOfMonth)).padStart(2, '0')}`,
+        gracePeriodDays: customer.gracePeriodDays ?? (Number(businessProfile.invoiceGracePeriodDays) || 5),
         items,
         subtotal,
         discount: 0,
@@ -2376,7 +2391,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             ? new Date(parts[0], parts[1] - 1, parts[2], cutoffH, cutoffM, 59)
             : new Date(inv.dueDate);
 
-        const graceExpiryTime = new Date(dueDateObj.getTime() + graceDays * 24 * 60 * 60 * 1000);
+        const effectiveGraceDays =
+          c.gracePeriodDays !== undefined && c.gracePeriodDays !== null && !isNaN(c.gracePeriodDays)
+            ? c.gracePeriodDays
+            : inv.gracePeriodDays !== undefined && inv.gracePeriodDays !== null && !isNaN(inv.gracePeriodDays)
+            ? inv.gracePeriodDays
+            : graceDays;
+
+        const graceExpiryTime = new Date(dueDateObj.getTime() + effectiveGraceDays * 24 * 60 * 60 * 1000);
 
         if (today.getTime() > graceExpiryTime.getTime()) {
           isPastGrace = true;
@@ -2491,6 +2513,59 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         reactivatedCount: local.reactivatedCount,
         smsSentCount: 0,
         message: 'Executed via local bridge (Server endpoint fallback).',
+      };
+    }
+  };
+
+  const triggerServerMonthlyBilling = async (cycleDay?: number): Promise<{
+    success: boolean;
+    count: number;
+    totalAmount: number;
+    smsQueuedCount: number;
+    message?: string;
+  }> => {
+    if (!hasPermission('canBulkGenerateInvoices')) {
+      showToast('error', 'Access Restricted', 'Only administrators have permission to trigger server-side recurring billing.');
+      return { success: false, count: 0, totalAmount: 0, smsQueuedCount: 0, message: 'Unauthorized' };
+    }
+
+    try {
+      showToast('info', 'Autonomous Billing', 'Triggering Cloud Functions recurring billing engine...');
+      const response = await fetch('/api/triggerMonthlyBilling', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          triggeredBy: `${currentAuthUser?.displayName || 'Admin'} (Web Console Trigger)`,
+          cycleDay,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        showToast(
+          'success',
+          'Autonomous Billing Executed',
+          `Generated ${data.count} statements totaling ${formatCurrency(data.totalAmount)} for cycle day ${data.cycleDay}.`
+        );
+        return {
+          success: true,
+          count: data.count || 0,
+          totalAmount: data.totalAmount || 0,
+          smsQueuedCount: data.smsQueuedCount || 0,
+          message: data.message,
+        };
+      } else {
+        throw new Error(`Server returned HTTP ${response.status}`);
+      }
+    } catch (err: any) {
+      console.warn('[Server Monthly Billing Error]', err);
+      showToast('error', 'Server Billing Error', err.message || 'Failed to trigger cloud billing.');
+      return {
+        success: false,
+        count: 0,
+        totalAmount: 0,
+        smsQueuedCount: 0,
+        message: err.message,
       };
     }
   };
@@ -4454,6 +4529,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         applyInvoiceDiscount,
         runDailyGraceAudit,
         triggerServerGraceAudit,
+        triggerServerMonthlyBilling,
         addDailyRemittance,
         closeDailyRemittance,
         recordPayment,

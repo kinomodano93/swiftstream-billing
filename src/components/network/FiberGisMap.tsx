@@ -2,8 +2,6 @@ import React, { useState, useRef, useMemo, useEffect } from 'react';
 import {
   MapPin,
   Layers,
-  ZoomIn,
-  ZoomOut,
   Maximize2,
   Minimize2,
   RotateCcw,
@@ -66,25 +64,6 @@ interface FiberGisMapProps {
   onRegisterOltAtLocation?: (coords: { lat: number; lng: number }) => void;
 }
 
-// Bounding box for Lagonoy, Camarines Sur
-const GEO_BOUNDS = {
-  minLat: 13.6780,
-  maxLat: 13.6960,
-  minLng: 123.5140,
-  maxLng: 123.5290,
-};
-
-const SVG_WIDTH = 1200;
-const SVG_HEIGHT = 800;
-
-// Coordinate transformation
-const projectGeoToSvg = (lat: number, lng: number): { x: number; y: number } => {
-  const x = ((lng - GEO_BOUNDS.minLng) / (GEO_BOUNDS.maxLng - GEO_BOUNDS.minLng)) * SVG_WIDTH;
-  // Invert Y because latitude goes South -> North but SVG goes Top -> Bottom
-  const y = SVG_HEIGHT - ((lat - GEO_BOUNDS.minLat) / (GEO_BOUNDS.maxLat - GEO_BOUNDS.minLat)) * SVG_HEIGHT;
-  return { x, y };
-};
-
 // Standard TIA-598-A 12-Core Fiber Color Code
 const FIBER_COLOR_CODES = [
   { num: 1, name: 'Blue', hex: '#0284c7', text: '#ffffff' },
@@ -145,12 +124,8 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
     );
   }, [napBoxes, selectedOltFilter, effectiveOltNodes]);
 
-  // Map viewport transform state
-  const [zoom, setZoom] = useState<number>(1);
-  const [pan, setPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
-  const [isDragging, setIsDragging] = useState<boolean>(false);
-  const [dragStart, setDragStart] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
-  const [mapStyle, setMapStyle] = useState<RealMapTileStyle | 'schematic'>(
+  // Base map tile style
+  const [mapStyle, setMapStyle] = useState<RealMapTileStyle>(
     isGoogleAvailable ? 'google_hybrid' : 'satellite'
   );
 
@@ -211,7 +186,7 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
   const [otdrTargetType, setOtdrTargetType] = useState<'feeder' | 'ptp_link'>('feeder');
   const [otdrTargetPtpId, setOtdrTargetPtpId] = useState<string>('');
   const [activeOtdrBreak, setActiveOtdrBreak] = useState<{
-    point: { x: number; y: number; lat: number; lng: number };
+    point: { lat: number; lng: number };
     cable?: FiberCable;
     ptpLink?: PointToPointLink;
     distance: number;
@@ -296,41 +271,6 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
   const [showAddAssetModal, setShowAddAssetModal] = useState<boolean>(false);
   const [assetTypeToAdd, setAssetTypeToAdd] = useState<'nap' | 'cable' | 'closure'>('nap');
 
-  // Pan & Zoom mouse handlers
-  const handleMouseDown = (e: React.MouseEvent) => {
-    // Only drag on left click
-    if (e.button === 0) {
-      setIsDragging(true);
-      setDragStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
-    }
-  };
-
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (isDragging) {
-      setPan({
-        x: e.clientX - dragStart.x,
-        y: e.clientY - dragStart.y,
-      });
-    }
-  };
-
-  const handleMouseUp = () => {
-    setIsDragging(false);
-  };
-
-  const handleWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    const zoomFactor = 1.15;
-    const newZoom = e.deltaY < 0 ? Math.min(zoom * zoomFactor, 5) : Math.max(zoom / zoomFactor, 0.5);
-    setZoom(newZoom);
-  };
-
-  const handleResetView = () => {
-    setZoom(1);
-    setPan({ x: 0, y: 0 });
-    setActiveOtdrBreak(null);
-  };
-
   // Run OTDR Fault Locator (Supports both GPON Feeder & Point-to-Point 10G Trunks)
   const handleCalculateOtdrBreak = () => {
     // 1. P2P Trunk Break Detection
@@ -350,7 +290,6 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
       const interpolated = interpolatePointAlongPath(pathCoords, otdrDistanceMeters);
       const interpLat = interpolated.lat;
       const interpLng = interpolated.lng;
-      const svgPt = projectGeoToSvg(interpLat, interpLng);
 
       // Find closest utility pole en-route
       let nearestPoleName: string | undefined = undefined;
@@ -366,7 +305,7 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
       }
 
       setActiveOtdrBreak({
-        point: { ...svgPt, lat: interpLat, lng: interpLng },
+        point: { lat: interpLat, lng: interpLng },
         ptpLink: targetPtp,
         distance: otdrDistanceMeters,
         affectedNaps: [],
@@ -386,7 +325,6 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
     const interpolated = interpolatePointAlongPath(coords, otdrDistanceMeters);
     const interpLat = interpolated.lat;
     const interpLng = interpolated.lng;
-    const svgPt = projectGeoToSvg(interpLat, interpLng);
 
     // Dynamic cascade downstream affected NAPs and Customers:
     // 1. Direct children of the cable
@@ -429,7 +367,7 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
     );
 
     setActiveOtdrBreak({
-      point: { ...svgPt, lat: interpLat, lng: interpLng },
+      point: { lat: interpLat, lng: interpLng },
       cable: targetCable,
       distance: otdrDistanceMeters,
       affectedNaps,
@@ -656,7 +594,7 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
               }`}
               title="CartoDB Dark Matter: High-contrast cyber NOC map for optical telemetry"
             >
-              🌃 NOC Dark Map
+              📐 Topology Grid (NOC Dark)
             </button>
             {isGoogleAvailable && (
               <button
@@ -672,39 +610,13 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
             )}
             <button
               type="button"
-              onClick={() => setMapStyle('schematic')}
+              onClick={() => setMapStyle('streets')}
               className={`px-3 py-1 rounded-lg font-medium transition-all ${
-                mapStyle === 'schematic' ? 'bg-cyan-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
+                mapStyle === 'streets' ? 'bg-cyan-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
               }`}
-              title="Topology Grid: Circuit schematic diagrams"
+              title="CartoDB Voyager: Clean street navigation vector map"
             >
-              📐 Topology Grid
-            </button>
-          </div>
-
-          {/* Zoom Buttons */}
-          <div className="flex items-center bg-slate-950 rounded-xl border border-slate-800 p-0.5">
-            <button
-              onClick={() => setZoom(Math.min(zoom * 1.25, 5))}
-              className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-300 transition-colors"
-              title="Zoom In"
-            >
-              <ZoomIn className="w-4 h-4" />
-            </button>
-            <span className="px-2 font-mono text-[11px] text-slate-400 font-bold">{Math.round(zoom * 100)}%</span>
-            <button
-              onClick={() => setZoom(Math.max(zoom / 1.25, 0.5))}
-              className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-300 transition-colors"
-              title="Zoom Out"
-            >
-              <ZoomOut className="w-4 h-4" />
-            </button>
-            <button
-              onClick={handleResetView}
-              className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-300 transition-colors border-l border-slate-800"
-              title="Reset View"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
+              🗺️ Streets
             </button>
           </div>
         </div>
@@ -964,9 +876,8 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
             </button>
           </div>
         )}
-        {mapStyle !== 'schematic' ? (
-          <div className="flex-1 h-full relative">
-            <RealLeafletMap
+        <div className="flex-1 h-full relative">
+          <RealLeafletMap
               oltNode={primaryOlt}
               oltNodes={effectiveOltNodes}
               napBoxes={filteredNapBoxes}
@@ -1004,532 +915,6 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
               showSpanDistances={showSpanDistances}
             />
           </div>
-        ) : (
-          /* SVG GIS Canvas (Topology Schematic Mode) */
-          <div
-            className="flex-1 h-full cursor-grab active:cursor-grabbing overflow-hidden relative select-none"
-          onMouseDown={handleMouseDown}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseUp}
-          onWheel={handleWheel}
-        >
-          <svg
-            width="100%"
-            height="100%"
-            viewBox={`0 0 ${SVG_WIDTH} ${SVG_HEIGHT}`}
-            className="w-full h-full"
-          >
-            <g
-              transform={`translate(${pan.x}, ${pan.y}) scale(${zoom})`}
-              style={{ transformOrigin: 'center center' }}
-            >
-              {/* Background Theme & Grid */}
-              <rect width={SVG_WIDTH} height={SVG_HEIGHT} fill="#030712" />
-
-              {/* Grid Lines */}
-              <defs>
-                <pattern id="gis-grid" width="60" height="60" patternUnits="userSpaceOnUse">
-                  <path d="M 60 0 L 0 0 0 60" fill="none" stroke="#1e293b" strokeWidth="0.5" strokeOpacity="0.4" />
-                </pattern>
-                {/* Glow Filter for Active Fiber Cables */}
-                <filter id="fiber-glow" x="-20%" y="-20%" width="140%" height="140%">
-                  <feGaussianBlur stdDeviation="3" result="blur" />
-                  <feComposite in="SourceGraphic" in2="blur" operator="over" />
-                </filter>
-              </defs>
-              <rect width={SVG_WIDTH} height={SVG_HEIGHT} fill="url(#gis-grid)" />
-
-              {/* Geographical Landmarks & Barangay Roads of Lagonoy */}
-              <g id="roads-landmarks" opacity="0.3">
-                {/* National Highway (Maharlika / Provincial Rd) */}
-                <path
-                  d="M 50 450 Q 300 440 500 380 T 900 220 L 1150 150"
-                  fill="none"
-                  stroke="#334155"
-                  strokeWidth="14"
-                  strokeLinecap="round"
-                />
-                <path
-                  d="M 50 450 Q 300 440 500 380 T 900 220 L 1150 150"
-                  fill="none"
-                  stroke="#e2e8f0"
-                  strokeWidth="1"
-                  strokeDasharray="8 8"
-                />
-
-                {/* Secondary Municipal Branch Roads */}
-                <path d="M 500 380 L 520 680" fill="none" stroke="#1e293b" strokeWidth="8" strokeLinecap="round" />
-                <path d="M 720 280 L 1050 480" fill="none" stroke="#1e293b" strokeWidth="8" strokeLinecap="round" />
-                <path d="M 300 440 L 250 200" fill="none" stroke="#1e293b" strokeWidth="6" />
-
-                {/* Lagonoy River */}
-                <path
-                  d="M 100 750 Q 400 700 700 720 T 1150 680"
-                  fill="none"
-                  stroke="#0284c7"
-                  strokeWidth="22"
-                  strokeOpacity="0.15"
-                />
-
-                {/* Barangay Labels */}
-                <text x="220" y="420" fill="#64748b" fontSize="14" fontWeight="bold" letterSpacing="1">
-                  BRGY. BINAUAHAN
-                </text>
-                <text x="540" y="350" fill="#64748b" fontSize="14" fontWeight="bold" letterSpacing="1">
-                  BRGY. SAN JOSE
-                </text>
-                <text x="820" y="200" fill="#64748b" fontSize="14" fontWeight="bold" letterSpacing="1">
-                  BRGY. POBLACION (DOWNTOWN)
-                </text>
-                <text x="960" y="110" fill="#64748b" fontSize="14" fontWeight="bold" letterSpacing="1">
-                  BRGY. SAN ISIDRO
-                </text>
-                <text x="820" y="580" fill="#64748b" fontSize="14" fontWeight="bold" letterSpacing="1">
-                  BRGY. SANTA MARIA
-                </text>
-              </g>
-
-              {/* Coverage Radii (500m Zones around NAP Boxes) */}
-              {showCoverageRings &&
-                napBoxes.map((nap) => {
-                  const pt = projectGeoToSvg(nap.latitude, nap.longitude);
-                  return (
-                    <g key={`cov-${nap.id}`}>
-                      <circle
-                        cx={pt.x}
-                        cy={pt.y}
-                        r="95"
-                        fill="#06b6d4"
-                        fillOpacity="0.04"
-                        stroke="#06b6d4"
-                        strokeWidth="1"
-                        strokeDasharray="4 4"
-                        strokeOpacity="0.3"
-                      />
-                    </g>
-                  );
-                })}
-
-              {/* Subscriber Drop Cables */}
-              {showDropLines &&
-                customers.map((cust) => {
-                  if (!cust.address.coordinates || !cust.network.napBoxId) return null;
-                  const nap = napBoxes.find((b) => b.id === cust.network.napBoxId);
-                  if (!nap) return null;
-
-                  const custPt = projectGeoToSvg(cust.address.coordinates.lat, cust.address.coordinates.lng);
-                  const napPt = projectGeoToSvg(nap.latitude, nap.longitude);
-
-                  const napPort = nap.ports.find((p) => p.customerId === cust.id);
-                  const signal = napPort?.signalDbm ?? -18.5;
-                  const strokeColor = signal < -26 ? '#f43f5e' : signal < -22 ? '#f59e0b' : '#10b981';
-
-                  return (
-                    <g
-                      key={`drop-${cust.id}`}
-                      className="cursor-pointer group"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedAsset({ type: 'customer', data: { ...cust, signalDbm: signal, napCode: nap.code } });
-                      }}
-                    >
-                      <line
-                        x1={napPt.x}
-                        y1={napPt.y}
-                        x2={custPt.x}
-                        y2={custPt.y}
-                        stroke={strokeColor}
-                        strokeWidth="1.5"
-                        strokeDasharray="3 3"
-                        strokeOpacity="0.75"
-                        className="group-hover:stroke-white transition-all"
-                      />
-                      {/* Customer Home Endpoint */}
-                      <circle
-                        cx={custPt.x}
-                        cy={custPt.y}
-                        r="4"
-                        fill={strokeColor}
-                        stroke="#0f172a"
-                        strokeWidth="1.5"
-                        className="group-hover:scale-125 transition-transform"
-                      />
-                    </g>
-                  );
-                })}
-
-              {/* Cascaded Daisy-Chain Spans & Distance Pills (SVG Schematic Mode) */}
-              {showSpanDistances !== 'none' &&
-                effectiveOltNodes.map((olt) => {
-                  const linkedNaps = napBoxes.filter(
-                    (b) => b.oltId === olt.id || (!b.oltId && olt.id === effectiveOltNodes[0]?.id)
-                  );
-                  const ponGroups = new Map<number, NapBox[]>();
-                  linkedNaps.forEach((nap) => {
-                    const port = nap.ponPortNumber || 1;
-                    if (!ponGroups.has(port)) ponGroups.set(port, []);
-                    ponGroups.get(port)!.push(nap);
-                  });
-
-                  const ponColors = ['#06b6d4', '#10b981', '#a855f7', '#f59e0b', '#ec4899', '#3b82f6'];
-
-                  return Array.from(ponGroups.entries()).map(([ponPort, napsOnPon]) => {
-                    const chain = buildPonCascadeChain(napsOnPon, olt);
-                    const telemetryList = calculateCascadeTelemetry(chain, olt);
-                    const baseColor = ponColors[(ponPort - 1) % ponColors.length];
-
-                    return telemetryList.map((hop) => {
-                      const { nap, hopSpan, isFeeder } = hop;
-                      const shouldRender =
-                        showSpanDistances === 'all' ||
-                        (isFeeder && showSpanDistances === 'olt') ||
-                        (!isFeeder && showSpanDistances === 'inter_nap');
-
-                      if (!shouldRender) return null;
-
-                      const fromPt = projectGeoToSvg(hop.upstreamCoords.lat, hop.upstreamCoords.lng);
-                      const toPt = projectGeoToSvg(nap.latitude, nap.longitude);
-                      const midX = (fromPt.x + toPt.x) / 2;
-                      const midY = (fromPt.y + toPt.y) / 2;
-
-                      const isNapSelected = selectedAsset?.type === 'nap' && selectedAsset.data.id === nap.id;
-                      const isUpstreamSelected =
-                        selectedAsset?.type === 'nap' && selectedAsset.data.id === hop.upstreamId;
-                      const isOltSelected = selectedAsset?.type === 'olt' && selectedAsset.data.id === olt.id;
-                      const isHighlighted = isNapSelected || isUpstreamSelected || isOltSelected;
-
-                      const strokeColor = isHighlighted ? '#fbbf24' : baseColor;
-
-                      return (
-                        <g
-                          key={`svg-cascade-${olt.id}-p${ponPort}-${nap.id}`}
-                          className="cursor-pointer"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSelectedAsset({ type: 'nap', data: nap });
-                          }}
-                        >
-                          <line
-                            x1={fromPt.x}
-                            y1={fromPt.y}
-                            x2={toPt.x}
-                            y2={toPt.y}
-                            stroke={strokeColor}
-                            strokeWidth={isHighlighted ? '3' : isFeeder ? '2' : '1.5'}
-                            strokeDasharray={isHighlighted ? undefined : isFeeder ? undefined : '5 4'}
-                            strokeOpacity={isHighlighted ? 1 : 0.75}
-                          />
-                          {/* Midpoint Pill */}
-                          <g transform={`translate(${midX}, ${midY})`}>
-                            <rect
-                              x="-28"
-                              y="-9"
-                              width="56"
-                              height="18"
-                              rx="9"
-                              fill="#090d16"
-                              stroke={strokeColor}
-                              strokeWidth="1.2"
-                            />
-                            <text
-                              textAnchor="middle"
-                              dy="3.5"
-                              fill={isHighlighted ? '#fbbf24' : '#f8fafc'}
-                              fontSize="8.5"
-                              fontFamily="monospace"
-                              fontWeight="bold"
-                            >
-                              {isFeeder ? '📏' : '⚡'}{hopSpan.directMeters >= 1000 ? `${hopSpan.directKm}k` : `${hopSpan.directMeters}m`}
-                            </text>
-                          </g>
-                        </g>
-                      );
-                    });
-                  });
-                })}
-
-              {/* Fiber Cables Polyline Paths */}
-              {fiberCables.map((cable) => {
-                if (!showFeeder && cable.type === 'feeder') return null;
-                if (!showDistribution && cable.type === 'distribution') return null;
-
-                const points = cable.pathCoordinates.map((pt) => projectGeoToSvg(pt.lat, pt.lng));
-                const d = points.reduce((acc, p, idx) => (idx === 0 ? `M ${p.x} ${p.y}` : `${acc} L ${p.x} ${p.y}`), '');
-
-                const isSelected = selectedAsset?.type === 'cable' && selectedAsset.data.id === cable.id;
-
-                return (
-                  <g
-                    key={`cbl-${cable.id}`}
-                    className="cursor-pointer group"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSelectedAsset({ type: 'cable', data: cable });
-                    }}
-                  >
-                    {/* Glowing Cable Halo */}
-                    <path
-                      d={d}
-                      fill="none"
-                      stroke={cable.color}
-                      strokeWidth={cable.type === 'feeder' ? '8' : '6'}
-                      strokeOpacity={isSelected ? 0.6 : 0.25}
-                      strokeLinecap="round"
-                      filter="url(#fiber-glow)"
-                    />
-                    {/* Core Line */}
-                    <path
-                      d={d}
-                      fill="none"
-                      stroke={cable.color}
-                      strokeWidth={cable.type === 'feeder' ? '3.5' : '2.5'}
-                      strokeLinecap="round"
-                      className="group-hover:brightness-125 transition-all"
-                    />
-                    {/* Animated Optical Signal Light Pulses */}
-                    <path
-                      d={d}
-                      fill="none"
-                      stroke="#ffffff"
-                      strokeWidth="2"
-                      strokeDasharray="6 30"
-                      strokeLinecap="round"
-                      strokeOpacity="0.8"
-                    />
-                  </g>
-                );
-              })}
-
-              {/* Point-to-Point 10G SFP+ Links (DIA Optical Trunks) */}
-              {showPtpLinks &&
-                ptpLinks.map((link) => {
-                  const pFrom = projectGeoToSvg(link.routerLatitude, link.routerLongitude);
-                  const pTo = projectGeoToSvg(link.remoteLatitude, link.remoteLongitude);
-                  const waypointsSvg = (link.customPathCoordinates && link.customPathCoordinates.length > 0)
-                    ? link.customPathCoordinates.map((pt) => projectGeoToSvg(pt.lat, pt.lng))
-                    : (link.intermediatePoles && link.intermediatePoles.length > 0)
-                    ? link.intermediatePoles.map((pt) => projectGeoToSvg(pt.latitude, pt.longitude))
-                    : [];
-                  const allPts = [pFrom, ...waypointsSvg, pTo];
-                  const d = allPts.reduce((acc, p, idx) => (idx === 0 ? `M ${p.x} ${p.y}` : `${acc} L ${p.x} ${p.y}`), '');
-                  const isSelected = selectedAsset?.type === 'ptp_link' && selectedAsset.data.id === link.id;
-
-                  const midX = (pFrom.x + pTo.x) / 2;
-                  const midY = (pFrom.y + pTo.y) / 2;
-
-                  return (
-                    <g
-                      key={`ptp-${link.id}`}
-                      className="cursor-pointer group"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedAsset({ type: 'ptp_link', data: link });
-                      }}
-                    >
-                      {/* Glow line */}
-                      <path
-                        d={d}
-                        fill="none"
-                        stroke="#6366f1"
-                        strokeWidth="8"
-                        strokeOpacity={isSelected ? 0.8 : 0.35}
-                        strokeLinecap="round"
-                        filter="url(#fiber-glow)"
-                      />
-                      {/* Core dashed line */}
-                      <path
-                        d={d}
-                        fill="none"
-                        stroke="#818cf8"
-                        strokeWidth="3"
-                        strokeDasharray="6 4"
-                        strokeLinecap="round"
-                      />
-                      {/* Midpoint Telemetry Pill */}
-                      <g transform={`translate(${midX}, ${midY})`}>
-                        <rect
-                          x="-45"
-                          y="-10"
-                          width="90"
-                          height="20"
-                          rx="10"
-                          fill="#0f172a"
-                          stroke={isSelected ? '#38bdf8' : '#6366f1'}
-                          strokeWidth="1.5"
-                        />
-                        <text
-                          textAnchor="middle"
-                          dy="3.5"
-                          fill="#a5b4fc"
-                          fontSize="9"
-                          fontFamily="monospace"
-                          fontWeight="bold"
-                        >
-                          ⚡ 10G P2P
-                        </text>
-                      </g>
-                    </g>
-                  );
-                })}
-
-              {/* Splice Closures (FJC Dome Markers) */}
-              {showClosures &&
-                fiberClosures.map((closure) => {
-                  const pt = projectGeoToSvg(closure.latitude, closure.longitude);
-                  const isSelected = selectedAsset?.type === 'closure' && selectedAsset.data.id === closure.id;
-
-                  return (
-                    <g
-                      key={`fjc-${closure.id}`}
-                      transform={`translate(${pt.x}, ${pt.y})`}
-                      className="cursor-pointer group"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedAsset({ type: 'closure', data: closure });
-                      }}
-                    >
-                      <circle
-                        r={isSelected ? '14' : '10'}
-                        fill="#f59e0b"
-                        fillOpacity="0.25"
-                        stroke="#f59e0b"
-                        strokeWidth="2"
-                        className="animate-pulse"
-                      />
-                      <rect x="-6" y="-6" width="12" height="12" rx="3" fill="#f59e0b" stroke="#0f172a" strokeWidth="1.5" />
-                      <text x="0" y="3" textAnchor="middle" fill="#0f172a" fontSize="7" fontWeight="bold">
-                        FJC
-                      </text>
-                      <text x="0" y="20" textAnchor="middle" fill="#cbd5e1" fontSize="9" fontWeight="bold">
-                        {closure.code}
-                      </text>
-                    </g>
-                  );
-                })}
-
-              {/* NAP Boxes (Distribution Splitters) */}
-              {showNaps &&
-                napBoxes.map((nap) => {
-                  const pt = projectGeoToSvg(nap.latitude, nap.longitude);
-                  const isSelected = selectedAsset?.type === 'nap' && selectedAsset.data.id === nap.id;
-
-                  const occupiedPorts = nap.ports.filter((p) => p.status === 'occupied').length;
-                  const damagedPorts = nap.ports.filter((p) => p.status === 'damaged').length;
-                  const isFull = occupiedPorts >= nap.totalPorts;
-
-                  return (
-                    <g
-                      key={`nap-${nap.id}`}
-                      transform={`translate(${pt.x}, ${pt.y})`}
-                      className="cursor-pointer group"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedAsset({ type: 'nap', data: nap });
-                      }}
-                    >
-                      {/* Pulse Halo */}
-                      <circle
-                        r={isSelected ? '16' : '12'}
-                        fill={damagedPorts > 0 ? '#f43f5e' : isFull ? '#8b5cf6' : '#06b6d4'}
-                        fillOpacity="0.2"
-                        stroke={damagedPorts > 0 ? '#f43f5e' : isFull ? '#8b5cf6' : '#06b6d4'}
-                        strokeWidth="2"
-                      />
-                      {/* Box Icon */}
-                      <rect
-                        x="-8"
-                        y="-8"
-                        width="16"
-                        height="16"
-                        rx="4"
-                        fill={damagedPorts > 0 ? '#e11d48' : '#0284c7'}
-                        stroke="#ffffff"
-                        strokeWidth="1.5"
-                      />
-                      {/* Capacity Badge */}
-                      <text x="0" y="3.5" textAnchor="middle" fill="#ffffff" fontSize="7.5" fontWeight="bold" fontFamily="monospace">
-                        {occupiedPorts}
-                      </text>
-                      {/* Code Label */}
-                      <text x="0" y="20" textAnchor="middle" fill="#38bdf8" fontSize="10" fontWeight="bold">
-                        {nap.code.replace('-BINAUAHAN', '').replace('-COCKPIT', '').replace('-POBLACION', '')}
-                      </text>
-                    </g>
-                  );
-                })}
-
-              {/* Central Office / OLT Headend Nodes */}
-              {showOlt &&
-                effectiveOltNodes.map((node) => {
-                  const svgPt = projectGeoToSvg(node.latitude, node.longitude);
-                  const isSel = selectedAsset?.type === 'olt' && selectedAsset?.data?.id === node.id;
-                  return (
-                    <g
-                      key={node.id}
-                      transform={`translate(${svgPt.x}, ${svgPt.y})`}
-                      className="cursor-pointer group"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedAsset({ type: 'olt', data: node });
-                      }}
-                    >
-                      <circle
-                        r="22"
-                        fill={isSel ? '#ec4899' : '#06b6d4'}
-                        fillOpacity="0.2"
-                        stroke={isSel ? '#ec4899' : '#06b6d4'}
-                        strokeWidth="2"
-                        className="animate-ping"
-                      />
-                      <circle
-                        r="16"
-                        fill={isSel ? '#db2777' : '#0284c7'}
-                        stroke="#ffffff"
-                        strokeWidth="2"
-                      />
-                      <text x="0" y="4" textAnchor="middle" fill="#ffffff" fontSize="10" fontWeight="bold">
-                        {node.code || 'OLT'}
-                      </text>
-                      <text x="0" y="28" textAnchor="middle" fill="#38bdf8" fontSize="10" fontWeight="bold">
-                        {node.name.split(' ')[0]}
-                      </text>
-                    </g>
-                  );
-                })}
-
-              {/* Active OTDR Fiber Break Alert Beacon */}
-              {activeOtdrBreak && (
-                <g transform={`translate(${activeOtdrBreak.point.x}, ${activeOtdrBreak.point.y})`}>
-                  <circle r="30" fill="#f43f5e" fillOpacity="0.4" stroke="#f43f5e" strokeWidth="3" className="animate-ping" />
-                  <circle r="14" fill="#e11d48" stroke="#ffffff" strokeWidth="2" />
-                  <text x="0" y="4" textAnchor="middle" fill="#ffffff" fontSize="11" fontWeight="bold">
-                    ⚠️
-                  </text>
-                  <g transform="translate(0, -32)">
-                    <rect x="-70" y="-12" width="140" height="24" rx="6" fill="#1e1b4b" stroke="#f43f5e" strokeWidth="1.5" />
-                    <text x="0" y="4" textAnchor="middle" fill="#fca5a5" fontSize="10" fontWeight="bold" fontFamily="monospace">
-                      BREAK @ {activeOtdrBreak.distance}m (OTDR)
-                    </text>
-                  </g>
-                </g>
-              )}
-            </g>
-          </svg>
-
-          {/* Map Compass & Scale overlay */}
-          <div className="absolute bottom-4 left-4 bg-slate-900/90 border border-slate-800/80 backdrop-blur-md px-3 py-2 rounded-xl text-[10px] text-slate-400 flex items-center gap-3">
-            <div className="flex items-center gap-1 font-mono font-bold text-cyan-400">
-              <Compass className="w-3.5 h-3.5" />
-              <span>N 13°41'03" E 123°31'20"</span>
-            </div>
-            <div className="border-l border-slate-700 pl-3 flex items-center gap-1.5">
-              <div className="w-8 h-1 bg-cyan-400 rounded-full" />
-              <span>500 Meters (Topology Grid)</span>
-            </div>
-          </div>
-        </div>
-      )}
 
         {/* Slide-out Side Asset Inspector Drawer */}
         {selectedAsset && (
@@ -2121,6 +1506,22 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
                       <span className="font-bold text-slate-200">{selectedAsset.data.planName}</span>
                     </div>
                   </div>
+
+                  {selectedAsset.data.dropMeters && (
+                    <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between text-[11px]">
+                      <span className="text-slate-400">Drop Cable Run:</span>
+                      <span className={`font-mono font-bold ${selectedAsset.data.dropMeters > 150 ? 'text-rose-400' : 'text-cyan-300'}`}>
+                        {selectedAsset.data.dropMeters}m {selectedAsset.data.dropMeters > 150 ? '⚠️ (>150m Limit)' : '✓'}
+                      </span>
+                    </div>
+                  )}
+
+                  {selectedAsset.data.dropMeters && selectedAsset.data.dropMeters > 150 && (
+                    <div className="p-2.5 rounded-xl bg-rose-950/40 border border-rose-800/60 text-rose-300 text-[11px] flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                      <span><strong>Drop Span Warning:</strong> Span exceeds 150m standard limit. High risk of bending loss or mechanical sag.</span>
+                    </div>
+                  )}
 
                   <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
                     <span className="text-slate-500 block text-[10px] uppercase font-bold">Network Routing</span>

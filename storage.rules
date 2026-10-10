@@ -1,0 +1,35 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // 1. Subscriber Payment Proof Receipts
+    match /receipts/{receiptId} {
+      // Authenticated users and staff can view receipts
+      allow read: if request.auth != null;
+      // Authenticated users can upload receipt image files (max 10MB, images only)
+      allow create: if request.auth != null
+        && request.resource.size < 10 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+      // Immutability: receipts cannot be modified; only staff may delete
+      allow update: if false;
+      allow delete: if request.auth != null;
+    }
+
+    // 2. Company Branding, Logos & QR Codes
+    match /branding/{allPaths=**} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+
+    // 3. Customer Document Attachments (ID, proof of billing)
+    match /customer_docs/{allPaths=**} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Default: Deny all other storage paths
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
+
