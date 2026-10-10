@@ -190,3 +190,90 @@ export const findNearestNaps = (
     .slice(0, limit);
 };
 
+export interface InterpolatedPointResult {
+  lat: number;
+  lng: number;
+  segmentIndex: number;
+  progressInSegment: number;
+  totalPathMeters: number;
+}
+
+/**
+ * Accurately calculates the exact geographic point at a specified distance (meters)
+ * along a multi-vertex polyline by walking cumulative Haversine distances.
+ * Eliminates proportional index skew on uneven cable segments.
+ */
+export const interpolatePointAlongPath = (
+  path: Array<{ lat: number; lng: number }>,
+  targetDistanceMeters: number
+): InterpolatedPointResult => {
+  if (!path || path.length === 0) {
+    return { lat: 0, lng: 0, segmentIndex: 0, progressInSegment: 0, totalPathMeters: 0 };
+  }
+  if (path.length === 1) {
+    return {
+      lat: path[0].lat,
+      lng: path[0].lng,
+      segmentIndex: 0,
+      progressInSegment: 0,
+      totalPathMeters: 0,
+    };
+  }
+
+  // 1. Calculate each segment's length and total path length
+  const segmentLengths: number[] = [];
+  let totalLength = 0;
+  for (let i = 0; i < path.length - 1; i++) {
+    const d = calculateHaversineDistance(
+      path[i].lat,
+      path[i].lng,
+      path[i + 1].lat,
+      path[i + 1].lng
+    );
+    segmentLengths.push(d);
+    totalLength += d;
+  }
+
+  if (totalLength === 0) {
+    return {
+      lat: path[0].lat,
+      lng: path[0].lng,
+      segmentIndex: 0,
+      progressInSegment: 0,
+      totalPathMeters: 0,
+    };
+  }
+
+  // 2. Clamp target distance within [0, totalLength]
+  const clampedDistance = Math.min(Math.max(targetDistanceMeters, 0), totalLength);
+
+  // 3. Walk cumulative distance to find target segment
+  let accumulated = 0;
+  for (let i = 0; i < path.length - 1; i++) {
+    const segLen = segmentLengths[i];
+    if (accumulated + segLen >= clampedDistance || i === path.length - 2) {
+      const remaining = Math.max(0, clampedDistance - accumulated);
+      const t = segLen > 0 ? Math.min(1, Math.max(0, remaining / segLen)) : 0;
+      const p1 = path[i];
+      const p2 = path[i + 1];
+      return {
+        lat: p1.lat + (p2.lat - p1.lat) * t,
+        lng: p1.lng + (p2.lng - p1.lng) * t,
+        segmentIndex: i,
+        progressInSegment: t,
+        totalPathMeters: totalLength,
+      };
+    }
+    accumulated += segLen;
+  }
+
+  const last = path[path.length - 1];
+  return {
+    lat: last.lat,
+    lng: last.lng,
+    segmentIndex: path.length - 2,
+    progressInSegment: 1,
+    totalPathMeters: totalLength,
+  };
+};
+

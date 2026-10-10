@@ -162,6 +162,12 @@ service cloud.firestore {
       allow delete: if false; // Business profile must not be deleted
     }
 
+    // System Secrets & API Credentials (Restricted to Administrators)
+    match /system_secrets/{secretId} {
+      allow read, write: if isAdmin();
+      allow delete: if false;
+    }
+
     // 10. Audit Logs (Immutable Security Audit Trail)
     match /audit_logs/{logId} {
       allow read: if isAdmin();
@@ -242,6 +248,10 @@ service cloud.firestore {
     }
 
     match /olt_nodes/{nodeId} {
+      allow read, write: if isStaff();
+    }
+
+    match /ptp_links/{linkId} {
       allow read, write: if isStaff();
     }
 

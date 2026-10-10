@@ -67,6 +67,8 @@ import {
   saveFirestoreDoc,
   deleteFirestoreDoc,
   purgeFirestoreCollections,
+  mergeSecretsIntoProfile,
+  saveBusinessProfileWithSecrets,
 } from '../services/firestoreService';
 import { doc, setDoc, getDoc, query, where, getDocs, collection } from 'firebase/firestore';
 import { db } from '../config/firebase';
@@ -1207,6 +1209,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       }
     );
+    const unsubSecrets = subscribeToDocument<Record<string, any>>(
+      COLLECTIONS.SYSTEM_SECRETS,
+      'company_secrets',
+      (data) => {
+        if (data) {
+          setBusinessProfile((prev) => mergeSecretsIntoProfile(prev, data));
+        }
+      }
+    );
 
     return () => {
       unsubCustomers();
@@ -1230,6 +1241,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       unsubOltNodes();
       unsubSystemUsers();
       unsubProfile();
+      unsubSecrets();
     };
   }, []);
 
@@ -4279,9 +4291,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const updateBusinessProfile = (updates: Partial<BusinessProfile>) => {
     const updated = { ...businessProfile, ...updates };
     setBusinessProfile(updated);
-    saveFirestoreDoc(COLLECTIONS.BUSINESS_PROFILE, { id: 'company_profile', ...updated });
+    saveBusinessProfileWithSecrets(updated).catch((err) => {
+      console.warn('Failed to sync business profile/secrets to Firestore:', err);
+    });
     logAuditEvent({
-      userName: 'Admin Leonardo Flojo',
+      userName: currentAuthUser?.displayName || 'Admin Leonardo Flojo',
       action: 'SETTINGS_MODIFIED',
       category: 'settings',
       severity: 'info',

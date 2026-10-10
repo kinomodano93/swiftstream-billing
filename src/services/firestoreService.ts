@@ -54,6 +54,7 @@ export const COLLECTIONS = {
   DAILY_REMITTANCES: 'daily_remittances',
   ADDON_CATALOG: 'addon_catalog',
   BUSINESS_PROFILE: 'business_profile',
+  SYSTEM_SECRETS: 'system_secrets',
   COVERAGE_AREAS: 'coverage_areas',
   REMINDERS: 'reminders',
   SYSTEM_USERS: 'system_users',
@@ -184,7 +185,148 @@ export const sanitizeDocForFirestore = <T extends { id: string }>(
       };
     }
   }
+  if (collectionName === COLLECTIONS.BUSINESS_PROFILE) {
+    const { publicProfile } = splitBusinessProfile(data as unknown as BusinessProfile);
+    processed = {
+      ...publicProfile,
+      id: (data as any).id || 'company_profile',
+    };
+  }
   return cleanUndefinedFields(processed);
+};
+
+/**
+ * Splits a BusinessProfile into public metadata (safe for unauthenticated client portal)
+ * and sensitive administrative secrets (restricted to administrators).
+ */
+export const splitBusinessProfile = (profile: BusinessProfile) => {
+  if (!profile) {
+    return { publicProfile: {} as Partial<BusinessProfile>, secrets: {} as Record<string, any> };
+  }
+
+  const {
+    apiKeys,
+    smsGateway,
+    staffWebhooks,
+    smtp,
+    paymentGateways,
+    ...restPublic
+  } = profile;
+
+  // Extract sensitive payment credentials
+  const {
+    xenditSecretKey,
+    xenditWebhookToken,
+    xenditConfig,
+    ...safePaymentGateways
+  } = paymentGateways || ({} as any);
+
+  const safeXenditConfig = xenditConfig
+    ? {
+        ...xenditConfig,
+        secretKey: '',
+        webhookToken: '',
+      }
+    : undefined;
+
+  // Extract sensitive apiKeys
+  const {
+    resend,
+    sendgrid,
+    smsApiKey,
+    mikrotikPassword,
+    geminiApiKey,
+    googleDriveConfig,
+    ...safeApiKeys
+  } = apiKeys || ({} as any);
+
+  const publicProfile: Partial<BusinessProfile> = {
+    ...restPublic,
+    paymentGateways: {
+      ...safePaymentGateways,
+      ...(safeXenditConfig ? { xenditConfig: safeXenditConfig } : {}),
+    },
+    apiKeys: safeApiKeys as any,
+  };
+
+  const secrets: Record<string, any> = {
+    paymentGateways: {
+      xenditSecretKey: xenditSecretKey || '',
+      xenditWebhookToken: xenditWebhookToken || '',
+      ...(xenditConfig
+        ? {
+            xenditConfig: {
+              secretKey: xenditConfig.secretKey || '',
+              webhookToken: xenditConfig.webhookToken || '',
+            },
+          }
+        : {}),
+    },
+    apiKeys: {
+      resend: resend || '',
+      sendgrid: sendgrid || '',
+      smsApiKey: smsApiKey || '',
+      mikrotikPassword: mikrotikPassword || '',
+      geminiApiKey: geminiApiKey || '',
+      ...(googleDriveConfig ? { googleDriveConfig } : {}),
+    },
+    ...(smsGateway ? { smsGateway } : {}),
+    ...(staffWebhooks ? { staffWebhooks } : {}),
+    ...(smtp ? { smtp } : {}),
+  };
+
+  return { publicProfile, secrets };
+};
+
+/**
+ * Merges system secrets into a public business profile for authenticated admin/staff sessions.
+ */
+export const mergeSecretsIntoProfile = (
+  profile: BusinessProfile,
+  secrets: Record<string, any>
+): BusinessProfile => {
+  if (!secrets) return profile;
+
+  return {
+    ...profile,
+    paymentGateways: {
+      ...profile.paymentGateways,
+      ...(secrets.paymentGateways || {}),
+      xenditConfig: {
+        ...(profile.paymentGateways?.xenditConfig || {}),
+        ...(secrets.paymentGateways?.xenditConfig || {}),
+      },
+    },
+    apiKeys: {
+      ...profile.apiKeys,
+      ...(secrets.apiKeys || {}),
+    },
+    smsGateway: secrets.smsGateway || profile.smsGateway,
+    staffWebhooks: secrets.staffWebhooks || profile.staffWebhooks,
+    smtp: secrets.smtp || profile.smtp,
+  };
+};
+
+/**
+ * Atomically or independently writes public profile to business_profile/company_profile
+ * and sensitive secrets to system_secrets/company_secrets.
+ */
+export const saveBusinessProfileWithSecrets = async (
+  profile: BusinessProfile
+): Promise<void> => {
+  const { publicProfile, secrets } = splitBusinessProfile(profile);
+
+  // 1. Save public profile to business_profile/company_profile
+  await saveFirestoreDoc(COLLECTIONS.BUSINESS_PROFILE, {
+    id: 'company_profile',
+    ...publicProfile,
+  });
+
+  // 2. Save sensitive secrets to system_secrets/company_secrets
+  await saveFirestoreDoc(COLLECTIONS.SYSTEM_SECRETS, {
+    id: 'company_secrets',
+    ...secrets,
+  });
 };
 
 /**
@@ -253,6 +395,7 @@ export const seedFirestoreFromLocalData = async (
     napBoxes: NapBox[];
     fiberCables: FiberCable[];
     fiberClosures: FiberClosure[];
+    ptpLinks?: PointToPointLink[];
     oltNode: OltPopNode;
     oltNodes?: OltPopNode[];
     mikrotikDevices: MikrotikDevice[];
@@ -322,6 +465,11 @@ export const seedFirestoreFromLocalData = async (
     // 9. Fiber Splice Closures
     await uploadBatch(COLLECTIONS.FIBER_CLOSURES, data.fiberClosures, 'Splice Closures');
 
+    // 9b. Point-to-Point 10G SFP+ Links
+    if (data.ptpLinks && data.ptpLinks.length > 0) {
+      await uploadBatch(COLLECTIONS.PTP_LINKS, data.ptpLinks, 'Point-to-Point Links');
+    }
+
     // 10. MikroTik Routers
     await uploadBatch(COLLECTIONS.MIKROTIK_DEVICES, data.mikrotikDevices, 'MikroTik Routers');
 
@@ -383,7 +531,19 @@ export const seedFirestoreFromLocalData = async (
         totalUploaded++;
       }
     });
-    singletonsBatch.set(doc(db, COLLECTIONS.BUSINESS_PROFILE, 'company_profile'), cleanUndefinedFields(data.businessProfile), { merge: true });
+    const { publicProfile, secrets } = splitBusinessProfile(data.businessProfile);
+    singletonsBatch.set(
+      doc(db, COLLECTIONS.BUSINESS_PROFILE, 'company_profile'),
+      cleanUndefinedFields(publicProfile),
+      { merge: true }
+    );
+    totalUploaded++;
+
+    singletonsBatch.set(
+      doc(db, COLLECTIONS.SYSTEM_SECRETS, 'company_secrets'),
+      cleanUndefinedFields(secrets),
+      { merge: true }
+    );
     totalUploaded++;
     await singletonsBatch.commit();
 
@@ -410,8 +570,10 @@ export const purgeFirestoreCollections = async (
     COLLECTIONS.NAP_BOXES,
     COLLECTIONS.FIBER_CABLES,
     COLLECTIONS.FIBER_CLOSURES,
+    COLLECTIONS.PTP_LINKS,
     COLLECTIONS.MIKROTIK_DEVICES,
     COLLECTIONS.EXPENSES,
+    COLLECTIONS.OPERATIONAL_BILLS,
     COLLECTIONS.DAILY_REMITTANCES,
     COLLECTIONS.AUDIT_LOGS,
     COLLECTIONS.ADDON_CATALOG,
@@ -419,6 +581,7 @@ export const purgeFirestoreCollections = async (
     COLLECTIONS.REMINDERS,
     COLLECTIONS.APPLICATIONS,
     COLLECTIONS.OUTAGE_BROADCASTS,
+    COLLECTIONS.SYSTEM_SECRETS,
   ],
   onProgress?: (msg: string) => void
 ): Promise<{ success: boolean; deletedCount: number; error?: string }> => {

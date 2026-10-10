@@ -1,41 +1,55 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
 import { Sidebar } from './components/layout/Sidebar';
 import { Header } from './components/layout/Header';
 import { NotificationToast } from './components/layout/NotificationToast';
 import { Dashboard } from './components/dashboard/Dashboard';
 import { CustomerList } from './components/customers/CustomerList';
-import { CustomerDetailModal } from './components/customers/CustomerDetailModal';
-import { CustomerFormModal } from './components/customers/CustomerFormModal';
 import { InvoiceList } from './components/billing/InvoiceList';
 import { InvoiceDetailModal } from './components/billing/InvoiceDetailModal';
-import { BatchBillingModal } from './components/billing/BatchBillingModal';
-import { CreateManualInvoiceModal } from './components/billing/CreateManualInvoiceModal';
 import { PaymentList } from './components/payments/PaymentList';
-import { PaymentTerminalModal } from './components/payments/PaymentTerminalModal';
 import { PaymentVerificationQueue } from './components/payments/PaymentVerificationQueue';
-import { OfficialReceiptModal } from './components/payments/OfficialReceiptModal';
 import { PlanManager } from './components/plans/PlanManager';
 import { CoverageAreaManager } from './components/network/CoverageAreaManager';
-import { NapBoxManager } from './components/network/NapBoxManager';
 import { MikrotikDeviceManager } from './components/network/MikrotikDeviceManager';
-import { MikrotikTerminalModal } from './components/network/MikrotikTerminalModal';
 import { RepairOrderList } from './components/repairs/RepairOrderList';
-import { RepairOrderModal } from './components/repairs/RepairOrderModal';
 import { ReminderCenter } from './components/reminders/ReminderCenter';
-import { FinancialReports } from './components/reports/FinancialReports';
-import { OperationalBillCalendar } from './components/calendar/OperationalBillCalendar';
-import { SettingsModal } from './components/settings/SettingsModal';
-import { ClientPortal } from './components/portal/ClientPortal';
-import { HomePage } from './components/home/HomePage';
-import { FieldTechHub } from './components/field/FieldTechHub';
-import { GeminiAiAssistant } from './components/ai/GeminiAiAssistant';
 import { AuthModal } from './components/auth/AuthModal';
-import { ClientApplicationManager } from './components/portal/ClientApplicationManager';
-import { IpoeDhcpManager } from './components/network/IpoeDhcpManager';
-import { StaffUserManager } from './components/users/StaffUserManager';
-import { SystemLogsViewer } from './components/logs/SystemLogsViewer';
-import { FinancialTransactionLogs } from './components/logs/FinancialTransactionLogs';
+
+// Heavy modules & secondary tabs (code-split via React.lazy)
+const NapBoxManager = lazy(() => import('./components/network/NapBoxManager').then((m) => ({ default: m.NapBoxManager })));
+const FinancialReports = lazy(() => import('./components/reports/FinancialReports').then((m) => ({ default: m.FinancialReports })));
+const OperationalBillCalendar = lazy(() => import('./components/calendar/OperationalBillCalendar').then((m) => ({ default: m.OperationalBillCalendar })));
+const GeminiAiAssistant = lazy(() => import('./components/ai/GeminiAiAssistant').then((m) => ({ default: m.GeminiAiAssistant })));
+const FieldTechHub = lazy(() => import('./components/field/FieldTechHub').then((m) => ({ default: m.FieldTechHub })));
+const IpoeDhcpManager = lazy(() => import('./components/network/IpoeDhcpManager').then((m) => ({ default: m.IpoeDhcpManager })));
+const StaffUserManager = lazy(() => import('./components/users/StaffUserManager').then((m) => ({ default: m.StaffUserManager })));
+const SystemLogsViewer = lazy(() => import('./components/logs/SystemLogsViewer').then((m) => ({ default: m.SystemLogsViewer })));
+const FinancialTransactionLogs = lazy(() => import('./components/logs/FinancialTransactionLogs').then((m) => ({ default: m.FinancialTransactionLogs })));
+const ClientPortal = lazy(() => import('./components/portal/ClientPortal').then((m) => ({ default: m.ClientPortal })));
+const HomePage = lazy(() => import('./components/home/HomePage').then((m) => ({ default: m.HomePage })));
+const ClientApplicationManager = lazy(() => import('./components/portal/ClientApplicationManager').then((m) => ({ default: m.ClientApplicationManager })));
+
+// Heavy Modals (code-split via React.lazy)
+const BatchBillingModal = lazy(() => import('./components/billing/BatchBillingModal').then((m) => ({ default: m.BatchBillingModal })));
+const CreateManualInvoiceModal = lazy(() => import('./components/billing/CreateManualInvoiceModal').then((m) => ({ default: m.CreateManualInvoiceModal })));
+const PaymentTerminalModal = lazy(() => import('./components/payments/PaymentTerminalModal').then((m) => ({ default: m.PaymentTerminalModal })));
+const OfficialReceiptModal = lazy(() => import('./components/payments/OfficialReceiptModal').then((m) => ({ default: m.OfficialReceiptModal })));
+const CustomerDetailModal = lazy(() => import('./components/customers/CustomerDetailModal').then((m) => ({ default: m.CustomerDetailModal })));
+const CustomerFormModal = lazy(() => import('./components/customers/CustomerFormModal').then((m) => ({ default: m.CustomerFormModal })));
+const RepairOrderModal = lazy(() => import('./components/repairs/RepairOrderModal').then((m) => ({ default: m.RepairOrderModal })));
+const MikrotikTerminalModal = lazy(() => import('./components/network/MikrotikTerminalModal').then((m) => ({ default: m.MikrotikTerminalModal })));
+const SettingsModal = lazy(() => import('./components/settings/SettingsModal').then((m) => ({ default: m.SettingsModal })));
+
+const TabLoadingSkeleton: React.FC = () => (
+  <div className="flex flex-col items-center justify-center min-h-[60vh] p-8 text-center animate-pulse">
+    <div className="w-12 h-12 rounded-2xl bg-slate-800/80 border border-slate-700/50 flex items-center justify-center mb-4">
+      <div className="w-5 h-5 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
+    </div>
+    <span className="text-xs font-mono text-slate-400">Loading module...</span>
+  </div>
+);
+
 import { Customer, RepairOrder, SYSTEM_ROLES_CONFIG, SystemRole, ADMIN_ONLY_TABS, isAdminTab } from './types';
 import { isStaffUser, isAdminUser } from './services/authService';
 import { updateBrowserBrandIdentity } from './utils/brandLogo';
@@ -126,27 +140,29 @@ const MainLayout: React.FC = () => {
   if (activeTab === 'home') {
     return (
       <div id="home-root" className="h-screen w-screen overflow-y-auto scroll-smooth bg-slate-950 text-slate-100 selection:bg-cyan-500 selection:text-white">
-        <HomePage
-          onOpenClientPortal={(cid) => {
-            if (cid) setPortalCustomerId(cid);
-            setActiveTab('portal');
-          }}
-          onOpenAdminDashboard={() => {
-            if (!currentAuthUser) {
-              openAuthModal('signin');
-            } else if (currentAuthUser.role === 'admin') {
-              setActiveTab('dashboard');
-            } else if (currentAuthUser.role === 'cashier') {
-              setActiveTab('billing');
-            } else if (currentAuthUser.role === 'technician' || currentAuthUser.role === 'tech') {
-              setActiveTab('field_ops');
-            } else {
-              showToast('error', 'Administrator Access Restricted', 'Subscriber accounts cannot access the administrative operations console.');
+        <Suspense fallback={<TabLoadingSkeleton />}>
+          <HomePage
+            onOpenClientPortal={(cid) => {
+              if (cid) setPortalCustomerId(cid);
               setActiveTab('portal');
-            }
-          }}
-          onOpenSignIn={(email) => openAuthModal('signin', email)}
-        />
+            }}
+            onOpenAdminDashboard={() => {
+              if (!currentAuthUser) {
+                openAuthModal('signin');
+              } else if (currentAuthUser.role === 'admin') {
+                setActiveTab('dashboard');
+              } else if (currentAuthUser.role === 'cashier') {
+                setActiveTab('billing');
+              } else if (currentAuthUser.role === 'technician' || currentAuthUser.role === 'tech') {
+                setActiveTab('field_ops');
+              } else {
+                showToast('error', 'Administrator Access Restricted', 'Subscriber accounts cannot access the administrative operations console.');
+                setActiveTab('portal');
+              }
+            }}
+            onOpenSignIn={(email) => openAuthModal('signin', email)}
+          />
+        </Suspense>
         <AuthModal
           isOpen={isAuthModalOpen}
           onClose={closeAuthModal}
@@ -165,27 +181,29 @@ const MainLayout: React.FC = () => {
   if (activeTab === 'portal') {
     return (
       <div className="h-screen w-screen overflow-y-auto bg-slate-950 text-slate-100 selection:bg-cyan-500 selection:text-white">
-        <ClientPortal
-          initialCustomerId={portalCustomerId}
-          onExitToAdmin={() => {
-            if (currentAuthUser && currentAuthUser.role === 'admin') {
-              setActiveTab('dashboard');
+        <Suspense fallback={<TabLoadingSkeleton />}>
+          <ClientPortal
+            initialCustomerId={portalCustomerId}
+            onExitToAdmin={() => {
+              if (currentAuthUser && currentAuthUser.role === 'admin') {
+                setActiveTab('dashboard');
+                setPortalCustomerId(null);
+              } else if (currentAuthUser && currentAuthUser.role === 'cashier') {
+                setActiveTab('billing');
+                setPortalCustomerId(null);
+              } else if (currentAuthUser && (currentAuthUser.role === 'technician' || currentAuthUser.role === 'tech')) {
+                setActiveTab('field_ops');
+                setPortalCustomerId(null);
+              } else {
+                openAuthModal('signin');
+              }
+            }}
+            onExitToHome={() => {
+              setActiveTab('home');
               setPortalCustomerId(null);
-            } else if (currentAuthUser && currentAuthUser.role === 'cashier') {
-              setActiveTab('billing');
-              setPortalCustomerId(null);
-            } else if (currentAuthUser && (currentAuthUser.role === 'technician' || currentAuthUser.role === 'tech')) {
-              setActiveTab('field_ops');
-              setPortalCustomerId(null);
-            } else {
-              openAuthModal('signin');
-            }
-          }}
-          onExitToHome={() => {
-            setActiveTab('home');
-            setPortalCustomerId(null);
-          }}
-        />
+            }}
+          />
+        </Suspense>
         <AuthModal
           isOpen={isAuthModalOpen}
           onClose={closeAuthModal}
@@ -432,7 +450,7 @@ const MainLayout: React.FC = () => {
               </div>
             </div>
           ) : (
-            <>
+            <Suspense fallback={<TabLoadingSkeleton />}>
               {activeTab === 'dashboard' && (
                 <Dashboard
                   onOpenPaymentModal={handleOpenPayment}
@@ -523,100 +541,102 @@ const MainLayout: React.FC = () => {
               {activeTab === 'system_logs' && <SystemLogsViewer />}
 
               {activeTab === 'settings' && <SettingsModal />}
-            </>
+            </Suspense>
           )}
         </main>
       </div>
 
       {/* Global Modals */}
-      {showPaymentModal && (
-        <PaymentTerminalModal
-          initialCustomerId={paymentCustomerId}
-          initialInvoiceId={paymentInvoiceId}
-          onClose={() => setShowPaymentModal(false)}
-          onPaymentSuccess={(payId) => setSelectedReceiptId(payId)}
-        />
-      )}
+      <Suspense fallback={null}>
+        {showPaymentModal && (
+          <PaymentTerminalModal
+            initialCustomerId={paymentCustomerId}
+            initialInvoiceId={paymentInvoiceId}
+            onClose={() => setShowPaymentModal(false)}
+            onPaymentSuccess={(payId) => setSelectedReceiptId(payId)}
+          />
+        )}
 
-      {showCustomerModal && (
-        <CustomerFormModal
-          customerToEdit={customerToEdit}
-          onClose={() => {
-            setShowCustomerModal(false);
-            setCustomerToEdit(null);
-          }}
-        />
-      )}
+        {showCustomerModal && (
+          <CustomerFormModal
+            customerToEdit={customerToEdit}
+            onClose={() => {
+              setShowCustomerModal(false);
+              setCustomerToEdit(null);
+            }}
+          />
+        )}
 
-      {selectedCustomerId && (
-        <CustomerDetailModal
-          customerId={selectedCustomerId}
-          onClose={() => setSelectedCustomerId(null)}
-          onOpenPaymentModal={(cid, iid) => handleOpenPayment(cid, iid)}
-          onOpenEditModal={() => {
-            const cust = customers.find((c) => c.id === selectedCustomerId);
-            setSelectedCustomerId(null);
-            handleOpenCustomerModal(cust);
-          }}
-          onSelectInvoice={(iid) => {
-            setSelectedInvoiceId(iid);
-          }}
-        />
-      )}
+        {selectedCustomerId && (
+          <CustomerDetailModal
+            customerId={selectedCustomerId}
+            onClose={() => setSelectedCustomerId(null)}
+            onOpenPaymentModal={(cid, iid) => handleOpenPayment(cid, iid)}
+            onOpenEditModal={() => {
+              const cust = customers.find((c) => c.id === selectedCustomerId);
+              setSelectedCustomerId(null);
+              handleOpenCustomerModal(cust);
+            }}
+            onSelectInvoice={(iid) => {
+              setSelectedInvoiceId(iid);
+            }}
+          />
+        )}
 
-      {selectedInvoiceId && (
-        <InvoiceDetailModal
-          invoiceId={selectedInvoiceId}
-          onClose={() => setSelectedInvoiceId(null)}
-          onOpenPaymentModal={(cid, iid) => handleOpenPayment(cid, iid)}
-        />
-      )}
+        {selectedInvoiceId && (
+          <InvoiceDetailModal
+            invoiceId={selectedInvoiceId}
+            onClose={() => setSelectedInvoiceId(null)}
+            onOpenPaymentModal={(cid, iid) => handleOpenPayment(cid, iid)}
+          />
+        )}
 
-      {selectedReceiptId && (
-        <OfficialReceiptModal
-          paymentId={selectedReceiptId}
-          onClose={() => setSelectedReceiptId(null)}
-        />
-      )}
+        {selectedReceiptId && (
+          <OfficialReceiptModal
+            paymentId={selectedReceiptId}
+            onClose={() => setSelectedReceiptId(null)}
+          />
+        )}
 
-      {showBatchBillingModal && (
-        <BatchBillingModal onClose={() => setShowBatchBillingModal(false)} />
-      )}
+        {showBatchBillingModal && (
+          <BatchBillingModal onClose={() => setShowBatchBillingModal(false)} />
+        )}
 
-      {showManualInvoiceModal && (
-        <CreateManualInvoiceModal
-          preselectedCustomerId={manualInvoiceCustomerId}
-          onClose={() => {
-            setShowManualInvoiceModal(false);
-            setManualInvoiceCustomerId(undefined);
-          }}
-        />
-      )}
+        {showManualInvoiceModal && (
+          <CreateManualInvoiceModal
+            preselectedCustomerId={manualInvoiceCustomerId}
+            onClose={() => {
+              setShowManualInvoiceModal(false);
+              setManualInvoiceCustomerId(undefined);
+            }}
+          />
+        )}
 
-      {showRepairModal && (
-        <RepairOrderModal
-          orderToEdit={repairToEdit}
-          onClose={() => {
-            setShowRepairModal(false);
-            setRepairToEdit(null);
-          }}
-        />
-      )}
+        {showRepairModal && (
+          <RepairOrderModal
+            orderToEdit={repairToEdit}
+            onClose={() => {
+              setShowRepairModal(false);
+              setRepairToEdit(null);
+            }}
+          />
+        )}
 
-      {showTerminalModal && (
-        <MikrotikTerminalModal
-          initialDeviceId={terminalDeviceId}
-          onClose={() => {
-            setShowTerminalModal(false);
-            setTerminalDeviceId(undefined);
-          }}
-        />
-      )}
+        {showTerminalModal && (
+          <MikrotikTerminalModal
+            initialDeviceId={terminalDeviceId}
+            onClose={() => {
+              setShowTerminalModal(false);
+              setTerminalDeviceId(undefined);
+            }}
+          />
+        )}
 
-      {/* Admin Operations Gemini AI Copilot */}
-      {activeTab !== 'home' && activeTab !== 'portal' && (
-        <GeminiAiAssistant mode="admin" />
-      )}
+        {/* Admin Operations Gemini AI Copilot */}
+        {activeTab !== 'home' && activeTab !== 'portal' && (
+          <GeminiAiAssistant mode="admin" />
+        )}
+      </Suspense>
 
       {/* Firebase Auth Modal */}
       <AuthModal

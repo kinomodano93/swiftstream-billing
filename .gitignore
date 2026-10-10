@@ -1,1 +1,24 @@
-node_modules
+# Dependencies
+node_modules/
+
+# Production build artifacts
+dist/
+dist-test/
+
+# Firebase cache & debug logs
+.firebase/
+firebase-debug.log*
+firestore-debug.log*
+ui-debug.log*
+
+# Local environment & secret files
+.env
+.env.local
+.env.*.local
+*.local
+
+# Editor & OS files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo

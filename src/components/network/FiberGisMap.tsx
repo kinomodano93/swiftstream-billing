@@ -49,6 +49,8 @@ import {
   getOltToNapDistance,
   getNapToNapDistance,
   calculateSpanMetrics,
+  calculateHaversineDistance,
+  interpolatePointAlongPath,
 } from '../../utils/geoDistance';
 import {
   buildPonCascadeChain,
@@ -345,15 +347,9 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
               { lat: targetPtp.remoteLatitude, lng: targetPtp.remoteLongitude },
             ];
 
-      const totalLen = targetPtp.cableLengthMeters || 1000;
-      const ratio = Math.min(Math.max(otdrDistanceMeters / totalLen, 0.05), 0.98);
-
-      const segmentIndex = Math.min(Math.floor(ratio * (pathCoords.length - 1)), pathCoords.length - 2);
-      const p1 = pathCoords[segmentIndex];
-      const p2 = pathCoords[segmentIndex + 1];
-
-      const interpLat = p1.lat + (p2.lat - p1.lat) * (ratio % 1);
-      const interpLng = p1.lng + (p2.lng - p1.lng) * (ratio % 1);
+      const interpolated = interpolatePointAlongPath(pathCoords, otdrDistanceMeters);
+      const interpLat = interpolated.lat;
+      const interpLng = interpolated.lng;
       const svgPt = projectGeoToSvg(interpLat, interpLng);
 
       // Find closest utility pole en-route
@@ -361,7 +357,7 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
       if (targetPtp.intermediatePoles && targetPtp.intermediatePoles.length > 0) {
         let minDist = Infinity;
         for (const pole of targetPtp.intermediatePoles) {
-          const d = Math.hypot(pole.latitude - interpLat, pole.longitude - interpLng);
+          const d = calculateHaversineDistance(pole.latitude, pole.longitude, interpLat, interpLng);
           if (d < minDist) {
             minDist = d;
             nearestPoleName = pole.poleNumber;
@@ -385,23 +381,52 @@ export const FiberGisMap: React.FC<FiberGisMapProps> = ({
     // 2. GPON Feeder Cable Break Detection
     if (fiberCables.length === 0) return;
     const targetCable = fiberCables.find((c) => c.type === 'feeder') || fiberCables[0];
-    const totalLen = targetCable.lengthMeters;
-    const ratio = Math.min(Math.max(otdrDistanceMeters / totalLen, 0.05), 0.98);
-
-    // Approximate point along cable path
     const coords = targetCable.pathCoordinates;
-    const segmentIndex = Math.min(Math.floor(ratio * (coords.length - 1)), coords.length - 2);
-    const p1 = coords[segmentIndex];
-    const p2 = coords[segmentIndex + 1];
 
-    const interpLat = p1.lat + (p2.lat - p1.lat) * (ratio % 1);
-    const interpLng = p1.lng + (p2.lng - p1.lng) * (ratio % 1);
+    const interpolated = interpolatePointAlongPath(coords, otdrDistanceMeters);
+    const interpLat = interpolated.lat;
+    const interpLng = interpolated.lng;
     const svgPt = projectGeoToSvg(interpLat, interpLng);
 
-    // Downstream affected NAPs and Customers
-    const affectedNaps = napBoxes.filter((n) => n.parentCableId === targetCable.id || n.barangay === 'Binauahan' || n.barangay === 'Poblacion');
+    // Dynamic cascade downstream affected NAPs and Customers:
+    // 1. Direct children of the cable
+    const directNapIds = new Set(
+      napBoxes.filter((n) => n.parentCableId === targetCable.id).map((n) => n.id)
+    );
+
+    // 2. Connected closures and child distribution/branch cables
+    const connectedClosures = new Set(
+      fiberClosures
+        .filter((c) => Array.isArray(c.cablesConnected) && c.cablesConnected.includes(targetCable.id))
+        .map((c) => c.id)
+    );
+
+    const downstreamCableIds = new Set<string>([targetCable.id]);
+    fiberCables.forEach((c) => {
+      if (
+        (c.fromNode && connectedClosures.has(c.fromNode)) ||
+        (c.toNode && connectedClosures.has(c.toNode)) ||
+        (c.fromNode && downstreamCableIds.has(c.fromNode))
+      ) {
+        downstreamCableIds.add(c.id);
+      }
+    });
+
+    let affectedNaps = napBoxes.filter(
+      (n) => directNapIds.has(n.id) || (n.parentCableId && downstreamCableIds.has(n.parentCableId))
+    );
+
+    // 3. Fallback: If network topology metadata isn't explicitly linked, match NAPs within 1500m
+    if (affectedNaps.length === 0) {
+      affectedNaps = napBoxes.filter(
+        (n) => calculateHaversineDistance(interpLat, interpLng, n.latitude, n.longitude) < 1500
+      );
+    }
+
     const affectedNapIds = new Set(affectedNaps.map((n) => n.id));
-    const affectedCustomers = customers.filter((c) => c.network.napBoxId && affectedNapIds.has(c.network.napBoxId));
+    const affectedCustomers = customers.filter(
+      (c) => c.network.napBoxId && affectedNapIds.has(c.network.napBoxId)
+    );
 
     setActiveOtdrBreak({
       point: { ...svgPt, lat: interpLat, lng: interpLng },

@@ -1752,7 +1752,7 @@ export const RealLeafletMap: React.FC<RealLeafletMapProps> = ({
 
       const metrics = calculateSpanMetrics(pA.lat, pA.lng, pB.lat, pB.lng);
       const midLat = (pA.lat + pB.lat) / 2;
-      const midLng = (pA.lat + pB.lng) / 2;
+      const midLng = (pA.lng + pB.lng) / 2;
 
       const badgeIcon = L.divIcon({
         className: 'custom-ruler-badge',

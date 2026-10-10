@@ -13,12 +13,12 @@ import { getAuth, Auth } from 'firebase/auth';
 import { getStorage, FirebaseStorage } from 'firebase/storage';
 
 export const firebaseConfig = {
-  apiKey: "AIzaSyA098ugdgGoFJuWipYPJ368dBITZHWD4zI",
-  authDomain: "swiftstream-portal.firebaseapp.com",
-  projectId: "swiftstream-portal",
-  storageBucket: "swiftstream-portal.firebasestorage.app",
-  messagingSenderId: "104878342051",
-  appId: "1:104878342051:web:b1c499cb7408ee13dc2416"
+  apiKey: (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_FIREBASE_API_KEY) || "AIzaSyA098ugdgGoFJuWipYPJ368dBITZHWD4zI",
+  authDomain: (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_FIREBASE_AUTH_DOMAIN) || "swiftstream-portal.firebaseapp.com",
+  projectId: (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_FIREBASE_PROJECT_ID) || "swiftstream-portal",
+  storageBucket: (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_FIREBASE_STORAGE_BUCKET) || "swiftstream-portal.firebasestorage.app",
+  messagingSenderId: (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_FIREBASE_MESSAGING_SENDER_ID) || "104878342051",
+  appId: (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_FIREBASE_APP_ID) || "1:104878342051:web:b1c499cb7408ee13dc2416"
 };
 
 let app: FirebaseApp;
